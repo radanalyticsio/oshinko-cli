@@ -1,0 +1,250 @@
+---
+swagger: "2.0"
+info:
+  title: Oshinko REST Server
+  version: "0.0.0"
+consumes:
+  - application/json
+produces:
+  - application/json
+definitions:
+  ClusterModel:
+    allOf:
+      - $ref: "#/definitions/NewCluster"
+      - properties:
+          status:
+            description: |-
+              Current status for the cluster
+            type: string
+        # INFO(elmiko) should we add a nodes member or something here?
+        # i envision this would give links to each pod, or container in the
+        # cluster. maybe helpful for introspecting the nodes.
+        required:
+          - status
+  ErrorModel:
+    properties:
+      status:
+        description: |-
+          HTTP status code
+        type: integer
+        format: int32
+      title:
+        description: |-
+          A brief summary of the error, this should remain consistent
+          between errors of the same class
+        type: string
+      details:
+        description: |-
+          An explanation of the specific error that has occurred
+        type: string
+    required:
+      - status
+      - title
+      - details
+  ErrorResponse:
+    properties:
+      errors:
+        description: |-
+          List of errors returned
+        type: array
+        minItems: 1
+        items:
+          $ref: "#definitions/ErrorModel"
+    required:
+      - errors
+  NewCluster:
+    properties:
+      # INFO(elmiko) my thoughts on the name property is that we can use
+      # the naming guidelines defined by kubernetes[1] for labels to help
+      # inform our process here. i am thinking that we could use the name
+      # as a label on all cluster objects, this will make finding all the
+      # pods/controllers/etc easier.
+      # [1]: http://kubernetes.io/docs/user-guide/labels/
+      name:
+        description: |-
+          Unique name for the cluster
+        type: string
+      master-count:
+        description: |-
+          The count of master nodes requested in the cluster
+        type: integer
+        format: int32
+      worker-count:
+        description: |-
+          The count of worker nodes requested in the cluster
+        type: integer
+        format: int32
+    required:
+      - name
+      - master-count
+      - worker-count
+paths:
+  /:
+    get:
+      description: |-
+        Returns information about the server version
+      operationId: getServerInfo
+      responses:
+        "200":
+          description: |-
+            server info response
+          schema:
+            properties:
+              application:
+                properties:
+                  name:
+                    description: |-
+                      application name
+                    type: string
+                  version:
+                    description: |-
+                      application version
+                    type: string
+                required:
+                  - name
+                  - version
+              # INFO(elmiko) should we also add a versions object?
+              # i am operating under the idea that we will use a more modern
+              # approach to versioning out api and not encode the "vX" into
+              # our URLs. if this is the case we probably don't need a
+              # versions object, it still might be nice to have just to
+              # inform what is going on.
+              # otoh, if we decide to encode versions into our URLs, then we
+              # should definitely have a versions object.
+            required:
+              - application
+        default:
+          description: |-
+            Unexpected error
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+  /clusters:
+    get:
+      description: |-
+        Returns all clusters that the user is able to access
+      operationId: findClusters
+      responses:
+        "200":
+          description: |-
+            Clusters response
+          schema:
+            properties:
+              clusters:
+                type: array
+                items:
+                  properties:
+                    name:
+                      description: |-
+                        name of the cluster
+                      type: string
+                    href:
+                      description: |-
+                        URL of the cluster, this is oshinko specific
+                      type: string
+                  required:
+                    - name
+                    - href
+        default:
+          description: |-
+            Unexpected error
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+    post:
+      description: |-
+        Create a new cluster
+      operationId: createCluster
+      parameters:
+        - name: cluster
+          in: body
+          description: Cluster to create
+          required: true
+          schema:
+            $ref: "#/definitions/NewCluster"
+      responses:
+        "201":
+          description: |-
+            Cluster create response
+          headers:
+            Location:
+              description: |-
+                URL of the cluster, this is oshinko specific
+              type: string
+          schema:
+            $ref: "#/definitions/ClusterModel"
+        default:
+          description: |-
+            Unexpected error
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+  /clusters/{name}:
+    get:
+      description: |-
+        Return detailed information about a single cluster
+      operationId: findSingleCluster
+      parameters:
+        - name: name
+          in: path
+          description: |-
+            Name of the cluster to retrieve
+          required: true
+          type: string
+      responses:
+        "200":
+          description: |-
+            Cluster detail response
+          schema:
+            $ref: "#/definitions/ClusterModel"
+        default:
+          description: |-
+            Unexpected error
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+    delete:
+      description: |-
+        Delete the specified cluster
+      operationId: deleteSingleCluster
+      parameters:
+        - name: name
+          in: path
+          description: |-
+            Name of the cluster to delete
+          required: true
+          type: string
+      responses:
+        "204":
+          description: |-
+            Cluster deletion response
+        default:
+          description: |-
+            Unexpected error
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+    put:
+      description: |-
+        Update the specified cluster
+      operationId: updateSingleCluster
+      parameters:
+        - name: name
+          in: path
+          description: |-
+            Name of the cluster to delete
+          required: true
+          type: string
+        - name: cluster
+          in: body
+          description: |-
+            Requested cluster update
+          required: true
+          schema:
+            $ref: "#/definitions/NewCluster"
+      responses:
+        "202":
+          description: |-
+            Cluster update response
+          schema:
+            $ref: "#/definitions/ClusterModel"
+        default:
+          description: |-
+            Unexpected error
+          schema:
+            $ref: "#/definitions/ErrorResponse"
