@@ -2,6 +2,8 @@
 swagger: "2.0"
 info:
   title: Oshinko REST Server
+  description: |-
+    The REST API server for the Oshinko suite of applications
   version: "0.0.0"
 consumes:
   - application/json
@@ -78,12 +80,19 @@ definitions:
       - name
       - master-count
       - worker-count
+  SingleCluster:
+    properties:
+      cluster:
+        allOf:
+          - $ref: "#/definitions/ClusterModel"
 paths:
   /:
     get:
       description: |-
         Returns information about the server version
       operationId: getServerInfo
+      tags:
+        - server
       responses:
         "200":
           description: |-
@@ -120,6 +129,8 @@ paths:
       description: |-
         Returns all clusters that the user is able to access
       operationId: findClusters
+      tags:
+        - clusters
       responses:
         "200":
           description: |-
@@ -150,6 +161,8 @@ paths:
       description: |-
         Create a new cluster
       operationId: createCluster
+      tags:
+        - clusters
       parameters:
         - name: cluster
           in: body
@@ -167,7 +180,7 @@ paths:
                 URL of the cluster, this is oshinko specific
               type: string
           schema:
-            $ref: "#/definitions/ClusterModel"
+            $ref: "#/definitions/SingleCluster"
         default:
           description: |-
             Unexpected error
@@ -178,6 +191,8 @@ paths:
       description: |-
         Return detailed information about a single cluster
       operationId: findSingleCluster
+      tags:
+        - clusters
       parameters:
         - name: name
           in: path
@@ -190,7 +205,7 @@ paths:
           description: |-
             Cluster detail response
           schema:
-            $ref: "#/definitions/ClusterModel"
+            $ref: "#/definitions/SingleCluster"
         default:
           description: |-
             Unexpected error
@@ -200,6 +215,8 @@ paths:
       description: |-
         Delete the specified cluster
       operationId: deleteSingleCluster
+      tags:
+        - clusters
       parameters:
         - name: name
           in: path
@@ -220,6 +237,8 @@ paths:
       description: |-
         Update the specified cluster
       operationId: updateSingleCluster
+      tags:
+        - clusters
       parameters:
         - name: name
           in: path
@@ -239,7 +258,7 @@ paths:
           description: |-
             Cluster update response
           schema:
-            $ref: "#/definitions/ClusterModel"
+            $ref: "#/definitions/SingleCluster"
         default:
           description: |-
             Unexpected error
