@@ -17,7 +17,7 @@ definitions:
               Current status for the cluster
             type: string
         # INFO(elmiko) should we add a nodes member or something here?
-        # i envision this would give links to each pod, or container in the
+        # i envision this might give links to each pod, or container in the
         # cluster. maybe helpful for introspecting the nodes.
         required:
           - status
@@ -87,30 +87,27 @@ paths:
       responses:
         "200":
           description: |-
-            server info response
+            Server info response
           schema:
             properties:
               application:
                 properties:
                   name:
                     description: |-
-                      application name
+                      Application name
                     type: string
                   version:
                     description: |-
-                      application version
+                      Application version
                     type: string
                 required:
                   - name
                   - version
               # INFO(elmiko) should we also add a versions object?
-              # i am operating under the idea that we will use a more modern
-              # approach to versioning out api and not encode the "vX" into
-              # our URLs. if this is the case we probably don't need a
-              # versions object, it still might be nice to have just to
-              # inform what is going on.
-              # otoh, if we decide to encode versions into our URLs, then we
-              # should definitely have a versions object.
+              # will we want to use a hard version in our URLs, for example
+              # /v1/clusters
+              # if so, we should add a versions object here to display the
+              # relative URLs and information about the versions.
             required:
               - application
         default:
@@ -135,7 +132,7 @@ paths:
                   properties:
                     name:
                       description: |-
-                        name of the cluster
+                        Name of the cluster
                       type: string
                     href:
                       description: |-
