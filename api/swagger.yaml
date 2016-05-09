@@ -21,6 +21,11 @@ definitions:
         # INFO(elmiko) should we add a nodes member or something here?
         # i envision this might give links to each pod, or container in the
         # cluster. maybe helpful for introspecting the nodes.
+        # INFO(elmiko) i think at the least we will need to somehow easily
+        # acquire the hostname/ip/whatever for the master spark nodes. the
+        # outstanding question is, should this be a list of "services" within
+        # the cluster, or should it be a list of "pods", or perhaps another
+        # abstraction here.
         required:
           - status
   ErrorModel:
