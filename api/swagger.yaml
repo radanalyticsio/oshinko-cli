@@ -192,19 +192,19 @@ paths:
           schema:
             $ref: "#/definitions/ErrorResponse"
   /clusters/{name}:
+    parameters:
+      - name: name
+        in: path
+        description: |-
+          Name of the cluster
+        required: true
+        type: string
     get:
       description: |-
         Return detailed information about a single cluster
       operationId: findSingleCluster
       tags:
         - clusters
-      parameters:
-        - name: name
-          in: path
-          description: |-
-            Name of the cluster to retrieve
-          required: true
-          type: string
       responses:
         "200":
           description: |-
@@ -222,13 +222,6 @@ paths:
       operationId: deleteSingleCluster
       tags:
         - clusters
-      parameters:
-        - name: name
-          in: path
-          description: |-
-            Name of the cluster to delete
-          required: true
-          type: string
       responses:
         "204":
           description: |-
@@ -245,12 +238,6 @@ paths:
       tags:
         - clusters
       parameters:
-        - name: name
-          in: path
-          description: |-
-            Name of the cluster to delete
-          required: true
-          type: string
         - name: cluster
           in: body
           description: |-
