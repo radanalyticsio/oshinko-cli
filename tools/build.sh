@@ -6,4 +6,12 @@ if [ -z $TAG ]; then
     TAG='0.0.0'
 fi
 
-godep go build -ldflags "-X handlers.gitTag=$TAG" -o _output/oshinko-rest-server ./cmd/oshinko-rest-server
+APP=oshinko-rest-server
+
+if [ $1 = build ]; then
+    OUTPUT_FLAG="-o _output/oshinko-rest-server"
+fi
+
+godep go $1 -ldflags \
+    "-X github.com/redhatanalytics/oshinko-rest/handlers.gitTag=$TAG -X github.com/redhatanalytics/oshinko-rest/handlers.appName=$APP" \
+    $OUTPUT_FLAG ./cmd/oshinko-rest-server

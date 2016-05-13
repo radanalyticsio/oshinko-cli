@@ -40,9 +40,7 @@ func configureAPI(api *operations.OshinkoRestAPI) http.Handler {
 	api.ClustersFindSingleClusterHandler = clusters.FindSingleClusterHandlerFunc(func(params clusters.FindSingleClusterParams) middleware.Responder {
 		return middleware.NotImplemented("operation clusters.FindSingleCluster has not yet been implemented")
 	})
-	api.ServerGetServerInfoHandler = server.GetServerInfoHandlerFunc(func() middleware.Responder {
-		return middleware.NotImplemented("operation server.GetServerInfo has not yet been implemented")
-	})
+	api.ServerGetServerInfoHandler = server.GetServerInfoHandlerFunc(handlers.ServerResponse)
 	api.ClustersUpdateSingleClusterHandler = clusters.UpdateSingleClusterHandlerFunc(func(params clusters.UpdateSingleClusterParams) middleware.Responder {
 		return middleware.NotImplemented("operation clusters.UpdateSingleCluster has not yet been implemented")
 	})
