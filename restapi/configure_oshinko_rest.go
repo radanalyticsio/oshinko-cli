@@ -8,6 +8,7 @@ import (
 	runtime "github.com/go-openapi/runtime"
 	middleware "github.com/go-openapi/runtime/middleware"
 
+	"github.com/redhatanalytics/oshinko-rest/handlers"
 	"github.com/redhatanalytics/oshinko-rest/restapi/operations"
 	"github.com/redhatanalytics/oshinko-rest/restapi/operations/clusters"
 	"github.com/redhatanalytics/oshinko-rest/restapi/operations/server"
