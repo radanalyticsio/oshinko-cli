@@ -6,7 +6,6 @@ import (
 
 	errors "github.com/go-openapi/errors"
 	runtime "github.com/go-openapi/runtime"
-	middleware "github.com/go-openapi/runtime/middleware"
 
 	"github.com/redhatanalytics/oshinko-rest/handlers"
 	"github.com/redhatanalytics/oshinko-rest/restapi/operations"
@@ -28,22 +27,12 @@ func configureAPI(api *operations.OshinkoRestAPI) http.Handler {
 
 	api.JSONProducer = runtime.JSONProducer()
 
-	api.ClustersCreateClusterHandler = clusters.CreateClusterHandlerFunc(func(params clusters.CreateClusterParams) middleware.Responder {
-		return middleware.NotImplemented("operation clusters.CreateCluster has not yet been implemented")
-	})
-	api.ClustersDeleteSingleClusterHandler = clusters.DeleteSingleClusterHandlerFunc(func(params clusters.DeleteSingleClusterParams) middleware.Responder {
-		return middleware.NotImplemented("operation clusters.DeleteSingleCluster has not yet been implemented")
-	})
-	api.ClustersFindClustersHandler = clusters.FindClustersHandlerFunc(func() middleware.Responder {
-		return middleware.NotImplemented("operation clusters.FindClusters has not yet been implemented")
-	})
-	api.ClustersFindSingleClusterHandler = clusters.FindSingleClusterHandlerFunc(func(params clusters.FindSingleClusterParams) middleware.Responder {
-		return middleware.NotImplemented("operation clusters.FindSingleCluster has not yet been implemented")
-	})
+	api.ClustersCreateClusterHandler = clusters.CreateClusterHandlerFunc(handlers.CreateClusterResponse)
+	api.ClustersDeleteSingleClusterHandler = clusters.DeleteSingleClusterHandlerFunc(handlers.DeleteClusterResponse)
+	api.ClustersFindClustersHandler = clusters.FindClustersHandlerFunc(handlers.FindClustersResponse)
+	api.ClustersFindSingleClusterHandler = clusters.FindSingleClusterHandlerFunc(handlers.FindSingleClusterResponse)
 	api.ServerGetServerInfoHandler = server.GetServerInfoHandlerFunc(handlers.ServerResponse)
-	api.ClustersUpdateSingleClusterHandler = clusters.UpdateSingleClusterHandlerFunc(func(params clusters.UpdateSingleClusterParams) middleware.Responder {
-		return middleware.NotImplemented("operation clusters.UpdateSingleCluster has not yet been implemented")
-	})
+	api.ClustersUpdateSingleClusterHandler = clusters.UpdateSingleClusterHandlerFunc(handlers.UpdateSingleClusterResponse)
 
 	api.ServerShutdown = func() {}
 
