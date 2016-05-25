@@ -17,5 +17,5 @@ fi
 export GO15VENDOREXPERIMENT=1
 
 godep go $1 -ldflags \
-    "-X github.com/redhatanalytics/oshinko-rest/handlers.gitTag=$TAG -X github.com/redhatanalytics/oshinko-rest/handlers.appName=$APP" \
+    "-X github.com/redhatanalytics/oshinko-rest/version.gitTag=$TAG -X github.com/redhatanalytics/oshinko-rest/version.appName=$APP" \
     $OUTPUT_FLAG ./cmd/oshinko-rest-server
