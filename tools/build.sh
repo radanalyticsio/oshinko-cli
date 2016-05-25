@@ -12,10 +12,16 @@ if [ $1 = build ]; then
     OUTPUT_FLAG="-o _output/oshinko-rest-server"
 fi
 
+if [ $1 = test ]; then
+    TARGET=./tests
+else
+    TARGET=./cmd/oshinko-rest-server
+fi
+
 # this export is needed for the vendor experiment for as long as go version
 # 1.5 is still in use.
 export GO15VENDOREXPERIMENT=1
 
 godep go $1 -ldflags \
     "-X github.com/redhatanalytics/oshinko-rest/version.gitTag=$TAG -X github.com/redhatanalytics/oshinko-rest/version.appName=$APP" \
-    $OUTPUT_FLAG ./cmd/oshinko-rest-server
+    $OUTPUT_FLAG $TARGET
