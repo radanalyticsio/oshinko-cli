@@ -1,16 +1,16 @@
 package handlers
 
 import (
-        "fmt"
+	"fmt"
 	middleware "github.com/go-openapi/runtime/middleware"
 
-	"github.com/redhatanalytics/oshinko-rest/restapi/operations/clusters"
+	_ "github.com/openshift/origin/pkg/api/install"
 	serverapi "github.com/openshift/origin/pkg/cmd/server/api"
-	odc "github.com/redhatanalytics/oshinko-rest/helpers/deploymentconfigs"
 	ocon "github.com/redhatanalytics/oshinko-rest/helpers/containers"
+	odc "github.com/redhatanalytics/oshinko-rest/helpers/deploymentconfigs"
 	opt "github.com/redhatanalytics/oshinko-rest/helpers/podtemplates"
 	osv "github.com/redhatanalytics/oshinko-rest/helpers/services"
-	_ "github.com/openshift/origin/pkg/api/install"
+	"github.com/redhatanalytics/oshinko-rest/restapi/operations/clusters"
 
 	"strconv"
 )
@@ -20,8 +20,8 @@ func sparkMasterURL(name string, port *osv.OServicePort) string {
 }
 
 func sparkWorker(namespace string,
-                 image string,
-                 replicas int, masterurl string) *odc.ODeploymentConfig {
+	image string,
+	replicas int, masterurl string) *odc.ODeploymentConfig {
 
 	// Create the basic deployment config
 	dc := odc.DeploymentConfig(
@@ -113,7 +113,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 		masterdc.FindPort("spark-master"),
 		masterdc.GetPodSelectors(), masterdc.GetPodSelectors())
 
-	websv, _ := Service(masterdc.Name + "webui",
+	websv, _ := Service(masterdc.Name+"webui",
 		masterdc.FindPort("spark-webui"),
 		masterdc.GetPodSelectors(),
 		masterdc.GetPodSelectors())
@@ -127,13 +127,12 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 
 	// Launch all of the objects
 	_, err = dcc.Create(&masterdc.DeploymentConfig)
-        if err != nil {
-            fmt.Println(err)
-        }
+	if err != nil {
+		fmt.Println(err)
+	}
 	dcc.Create(&workerdc.DeploymentConfig)
 	client.Services("spark").Create(&mastersv.Service)
 	client.Services("spark").Create(&websv.Service)
-
 
 	payload := makeSingleErrorResponse(501, "Not Implemented",
 		"operation clusters.CreateCluster has not yet been implemented")
