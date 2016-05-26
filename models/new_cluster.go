@@ -20,7 +20,7 @@ type NewCluster struct {
 
 	Required: true
 	*/
-	MasterCount *int32 `json:"master-count"`
+	MasterCount *int64 `json:"master-count"`
 
 	/* Unique name for the cluster
 
@@ -32,7 +32,7 @@ type NewCluster struct {
 
 	Required: true
 	*/
-	WorkerCount *int32 `json:"worker-count"`
+	WorkerCount *int64 `json:"worker-count"`
 }
 
 // Validate validates this new cluster

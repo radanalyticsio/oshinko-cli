@@ -91,12 +91,12 @@ definitions:
         description: |-
           The count of master nodes requested in the cluster
         type: integer
-        format: int32
+        format: int
       worker-count:
         description: |-
           The count of worker nodes requested in the cluster
         type: integer
-        format: int32
+        format: int
     required:
       - name
       - master-count
