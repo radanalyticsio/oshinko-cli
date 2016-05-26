@@ -105,6 +105,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	dcc := osclient.DeploymentConfigs("spark")
 
 	// Make master deployment config
+	// Ignoring master-count for now, leave it defaulted at 1
 	masterdc := sparkMaster("spark", "172.30.122.181:5000/spark/openshift-spark")
 
 	// Make master services
@@ -119,7 +120,10 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 
 	// Make worker deployment config
 	masterurl := sparkMasterURL(mastersv.Name, masterp)
-	workerdc := sparkWorker("spark","172.30.122.181:5000/spark/openshift-spark", 3, masterurl)
+	workerdc := sparkWorker(
+		"spark",
+		"172.30.122.181:5000/spark/openshift-spark",
+		*params.Cluster.WorkerCount, masterurl)
 
 	// Launch all of the objects
 	_, err = dcc.Create(&masterdc.DeploymentConfig)
