@@ -123,7 +123,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	workerdc := sparkWorker(
 		"spark",
 		"172.30.122.181:5000/spark/openshift-spark",
-		*params.Cluster.WorkerCount, masterurl)
+		int(*params.Cluster.WorkerCount), masterurl)
 
 	// Launch all of the objects
 	_, err = dcc.Create(&masterdc.DeploymentConfig)
