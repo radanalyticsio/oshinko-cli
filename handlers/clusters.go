@@ -2,6 +2,9 @@ package handlers
 
 import (
 	"fmt"
+	"os"
+	"strconv"
+
 	middleware "github.com/go-openapi/runtime/middleware"
 
 	_ "github.com/openshift/origin/pkg/api/install"
@@ -12,6 +15,7 @@ import (
 	osv "github.com/redhatanalytics/oshinko-rest/helpers/services"
 	"github.com/redhatanalytics/oshinko-rest/restapi/operations/clusters"
 
+	"github.com/redhatanalytics/oshinko-rest/models"
 	"strconv"
 )
 
@@ -89,24 +93,33 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	// in addition to labels for general identification, we should then use
 	// annotations on objects to help further refine what we are dealing with.
 
+	namespace := os.Getenv("OSHIKO_CLUSTER_NAMESPACE")
+	configfile := os.Getenv("OSHINKO_KUBE_CONFIG")
+	image := os.Getenv("OSHINKO_CLUSTER_IMAGE")
+	if namespace == "" || configfile == "" || image == "" {
+		payload := makeSingleErrorResponse(501, "Missing Env",
+			"OSHIKO_CLUSTER_NAMESPACE, OSHINKO_KUBE_CONFIG, and OSHINKO_CLUSTER_IMAGE env vars must be set")
+		return clusters.NewCreateClusterDefault(501).WithPayload(payload)
+	}
+
 	// kube rest client
-	client, _, err := serverapi.GetKubeClient("/home/tmckay/.kube/config")
+	client, _, err := serverapi.GetKubeClient(configfile)
 	if err != nil {
 		// handle error
 	}
 
 	// openshift rest client
-	osclient, _, err := serverapi.GetOpenShiftClient("/home/tmckay/.kube/config")
+	osclient, _, err := serverapi.GetOpenShiftClient(configfile)
 	if err != nil {
 		//handle error
 	}
 
 	// deployment config client
-	dcc := osclient.DeploymentConfigs("spark")
+	dcc := osclient.DeploymentConfigs(namespace)
 
 	// Make master deployment config
 	// Ignoring master-count for now, leave it defaulted at 1
-	masterdc := sparkMaster("spark", "172.30.122.181:5000/spark/openshift-spark")
+	masterdc := sparkMaster(namespace, image)
 
 	// Make master services
 	mastersv, masterp := Service(masterdc.Name,
@@ -121,8 +134,8 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	// Make worker deployment config
 	masterurl := sparkMasterURL(mastersv.Name, masterp)
 	workerdc := sparkWorker(
-		"spark",
-		"172.30.122.181:5000/spark/openshift-spark",
+		namespace,
+		image,
 		int(*params.Cluster.WorkerCount), masterurl)
 
 	// Launch all of the objects
@@ -131,13 +144,14 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 		fmt.Println(err)
 	}
 	dcc.Create(&workerdc.DeploymentConfig)
-	client.Services("spark").Create(&mastersv.Service)
-	client.Services("spark").Create(&websv.Service)
+	client.Services(namespace).Create(&mastersv.Service)
+	client.Services(namespace).Create(&websv.Service)
 
-	payload := makeSingleErrorResponse(501, "Not Implemented",
-		"operation clusters.CreateCluster has not yet been implemented")
-
-	return clusters.NewCreateClusterDefault(501).WithPayload(payload)
+	cluster := &models.SingleCluster{&models.ClusterModel{}}
+	cluster.Cluster.Name = params.Cluster.Name
+	cluster.Cluster.WorkerCount = params.Cluster.WorkerCount
+	cluster.Cluster.MasterCount = params.Cluster.MasterCount
+	return clusters.NewCreateClusterCreated().WithLocation(masterurl).WithPayload(cluster)
 }
 
 // DeleteClusterResponse delete a cluster
