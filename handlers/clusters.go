@@ -93,7 +93,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	// in addition to labels for general identification, we should then use
 	// annotations on objects to help further refine what we are dealing with.
 
-	namespace := os.Getenv("OSHIKO_CLUSTER_NAMESPACE")
+	namespace := os.Getenv("OSHINKO_CLUSTER_NAMESPACE")
 	configfile := os.Getenv("OSHINKO_KUBE_CONFIG")
 	image := os.Getenv("OSHINKO_CLUSTER_IMAGE")
 	if namespace == "" || configfile == "" || image == "" {
