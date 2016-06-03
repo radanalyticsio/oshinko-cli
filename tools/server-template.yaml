@@ -1,0 +1,57 @@
+kind: Template
+apiVersion: v1
+template: spark
+metadata:
+  name: spark
+objects:
+
+- kind: Service
+  apiVersion: v1
+  metadata:
+    name: ${SERVER_NAME}
+    labels:
+      name: ${SERVER_NAME}
+  spec:
+    ports:
+      - protocol: TCP
+        port: 8080
+        targetPort: 8080
+    selector:
+      name: ${SERVER_NAME}
+
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    name: ${SERVER_NAME}
+  spec:
+    strategy:
+      type: Rolling
+    triggers:
+      - type: ConfigChange
+    replicas: 1
+    selector:
+      name: ${SERVER_NAME}
+    template:
+      metadata:
+        labels:
+          name: ${SERVER_NAME}
+      spec:
+        containers:
+          - name: ${SERVER_NAME}
+            image: ${OSHINKO_SERVER_IMAGE}
+            env:
+              - name: OSHINKO_SERVER_PORT
+                value: "8080"
+            ports:
+              - containerPort: 8080
+                protocol: TCP
+
+parameters:
+- name: OSHINKO_SERVER_IMAGE
+  description: Full name of the oshinko server image
+  required: true
+- name: SERVER_NAME
+  description: Name of the oshinko server service
+  generate: expression
+  from: "oshinko-rest-[a-z0-9]{4}"
+  required: true
