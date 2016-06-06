@@ -16,7 +16,7 @@ objects:
       - name: oshinko-rest-port
         protocol: TCP
         port: 8080
-        targetPort: 8080
+        targetPort: rest-port
     selector:
       name: ${SERVER_NAME}
 
@@ -44,7 +44,8 @@ objects:
               - name: OSHINKO_SERVER_PORT
                 value: "8080"
             ports:
-              - containerPort: 8080
+              - name: rest-port
+                containerPort: 8080
                 protocol: TCP
 
 parameters:
