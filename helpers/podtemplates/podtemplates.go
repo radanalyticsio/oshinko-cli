@@ -29,6 +29,14 @@ func (pt *OPodTemplateSpec) SetLabels(selectors map[string]string) *OPodTemplate
 	return pt
 }
 
+func (pt *OPodTemplateSpec) Label(name, value string) *OPodTemplateSpec {
+	if pt.Labels == nil {
+		pt.Labels = map[string]string{}
+	}
+	pt.Labels[name] = value
+	return pt
+}
+
 func (pt *OPodTemplateSpec) Containers(cntnrs ...*containers.OContainer) *OPodTemplateSpec {
 	kcntnrs := make([]kapi.Container, len(cntnrs))
 	for idx, c := range cntnrs {

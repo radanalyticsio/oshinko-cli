@@ -14,7 +14,7 @@ func DeploymentConfig(name, namespace string) *ODeploymentConfig {
 	m := ODeploymentConfig{}
 	m.Kind = "DeploymentConfig"
 	m.APIVersion = "v1"
-	m.SetName(kapi.SimpleNameGenerator.GenerateName(name + "-"))
+	m.SetName(name)
 	m.SetNamespace(namespace)
 
 	// Default Spec values.
@@ -25,6 +25,14 @@ func DeploymentConfig(name, namespace string) *ODeploymentConfig {
 
 func (dc *ODeploymentConfig) Replicas(r int) *ODeploymentConfig {
 	dc.Spec.Replicas = r
+	return dc
+}
+
+func (dc *ODeploymentConfig) Label(name, value string) *ODeploymentConfig {
+	if dc.Labels == nil {
+		dc.Labels = map[string]string{}
+	}
+	dc.Labels[name] = value
 	return dc
 }
 
@@ -129,6 +137,13 @@ func (dc *ODeploymentConfig) TriggerOnImageChange(ic *api.DeploymentTriggerImage
 func (dc *ODeploymentConfig) PodTemplateSpec(pt *podtemplates.OPodTemplateSpec) *ODeploymentConfig {
 	dc.Spec.Template = &pt.PodTemplateSpec
 	return dc
+}
+
+func (dc *ODeploymentConfig) GetPodTemplateSpecLabels() map[string]string {
+	if dc.Spec.Template == nil {
+		return map[string]string{}
+	}
+	return dc.Spec.Template.Labels
 }
 
 func (dc *ODeploymentConfig) FindPort(name string) int {

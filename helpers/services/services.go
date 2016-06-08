@@ -52,6 +52,14 @@ func (s *OService) SetLabels(selectors map[string]string) *OService {
 	return s
 }
 
+func (s *OService) Label(name, value string) *OService {
+	if s.Labels == nil {
+		s.Labels = map[string]string{}
+	}
+	s.Labels[name] = value
+	return s
+}
+
 func (s *OService) PodSelector(selector, value string) *OService {
 	s.Spec.Selector[selector] = value
 	return s
