@@ -22,8 +22,8 @@ import (
 	"k8s.io/kubernetes/pkg/util/sets"
 )
 
-func sparkMasterURL(name string, port *osv.OServicePort) string {
-	return "spark://" + name + ":" + strconv.Itoa(port.ServicePort.Port)
+func sparkMasterURL(name string, port *kapi.ServicePort) string {
+	return "spark://" + name + ":" + strconv.Itoa(port.Port)
 }
 
 func sparkWorker(namespace string,
@@ -36,11 +36,11 @@ func sparkWorker(namespace string,
 	// this deploymentconfig from pods beloning to another.
 	dc := odc.DeploymentConfig(clustername+"-spark-worker", namespace).
 		TriggerOnConfigChange().RollingStrategy().Label("oshinko-cluster", clustername).
-		PodSelector("oshinko-cluster", clustername).
-		Replicas(replicas)
+		Label("oshinko-type", "worker").
+		PodSelector("oshinko-cluster", clustername).Replicas(replicas)
 
 	// Create a pod template spec with the matching label
-	pt := opt.PodTemplateSpec().Label("oshinko-cluster", clustername)
+	pt := opt.PodTemplateSpec().Label("oshinko-cluster", clustername).Label("oshinko-type", "worker")
 
 	// Create a container with the correct start command
 	cont := ocon.Container(
@@ -60,12 +60,14 @@ func sparkMaster(namespace string, image string, clustername string) *odc.ODeplo
 	// this deploymentconfig from pods beloning to another.
 	dc := odc.DeploymentConfig(clustername+"-spark-master", namespace).
 		TriggerOnConfigChange().RollingStrategy().Label("oshinko-cluster", clustername).
+		Label("oshinko-type", "master").
 		PodSelector("oshinko-cluster", clustername)
 
 	// Create a pod template spec with the matching label
 	// Additionally, we need another label specifically for the master
 	// so that the services can find the correct pod
-	pt := opt.PodTemplateSpec().Label("oshinko-cluster", clustername).Label("spark-master", clustername)
+	pt := opt.PodTemplateSpec().Label("oshinko-cluster", clustername).
+		Label("oshinko-type", "master")
 
 	// Create a container with the correct ports and start command
 	masterp := ocon.ContainerPort("spark-master", 7077)
@@ -80,9 +82,12 @@ func sparkMaster(namespace string, image string, clustername string) *odc.ODeplo
 	return dc.PodTemplateSpec(pt.Containers(cont))
 }
 
-func Service(name string, port int, clustername string, podselectors map[string]string) (*osv.OService, *osv.OServicePort) {
+func Service(name string, port int,
+	clustername string,
+	otype string, podselectors map[string]string) (*osv.OService, *osv.OServicePort) {
 	p := osv.ServicePort(port).TargetPort(port)
-	return osv.Service(name).Label("oshinko-cluster", clustername).PodSelectors(podselectors).Ports(p), p
+	return osv.Service(name).Label("oshinko-cluster", clustername).
+		Label("oshinko-type", otype).PodSelectors(podselectors).Ports(p), p
 }
 
 // CreateClusterResponse create a cluster and return the representation
@@ -126,16 +131,16 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	// Make master services
 	mastersv, masterp := Service(masterdc.Name,
 		masterdc.FindPort("spark-master"),
-		*params.Cluster.Name,
+		*params.Cluster.Name, "master",
 		masterdc.GetPodTemplateSpecLabels())
 
 	websv, _ := Service(masterdc.Name+"-webui",
 		masterdc.FindPort("spark-webui"),
-		*params.Cluster.Name,
+		*params.Cluster.Name, "webui",
 		masterdc.GetPodTemplateSpecLabels())
 
 	// Make worker deployment config
-	masterurl := sparkMasterURL(mastersv.Name, masterp)
+	masterurl := sparkMasterURL(mastersv.Name, &masterp.ServicePort)
 	workerdc := sparkWorker(namespace, image, int(*params.Cluster.WorkerCount), masterurl, *params.Cluster.Name)
 
 	// Launch all of the objects
@@ -266,11 +271,84 @@ func DeleteClusterResponse(params clusters.DeleteSingleClusterParams) middleware
 	return clusters.NewDeleteSingleClusterNoContent()
 }
 
+func countworkers(client kclient.PodInterface, clustername string) int {
+
+	// Build a selector list for the "oshinko-type" label
+	otype, _ := labels.NewRequirement("oshinko-type", labels.EqualsOperator, sets.NewString("worker"))
+	cluster, _ := labels.NewRequirement("oshinko-cluster", labels.EqualsOperator, sets.NewString(clustername))
+	selectorlist := kapi.ListOptions{LabelSelector: labels.NewSelector().Add(*otype).Add(*cluster)}
+	pods, _ := client.List(selectorlist)
+	return len(pods.Items)
+}
+
+func retrievemasterurl(client kclient.ServiceInterface, clustername string) string {
+	// Build a selector list for the "oshinko-type" label
+	otype, _ := labels.NewRequirement("oshinko-type", labels.EqualsOperator, sets.NewString("master"))
+	cluster, _ := labels.NewRequirement("oshinko-cluster", labels.EqualsOperator, sets.NewString(clustername))
+	selectorlist := kapi.ListOptions{LabelSelector: labels.NewSelector().Add(*otype).Add(*cluster)}
+	srvs, _ := client.List(selectorlist)
+	srv := srvs.Items[0]
+	return sparkMasterURL(srv.Name, &srv.Spec.Ports[0])
+}
+
 // FindClustersResponse find a cluster and return its representation
 func FindClustersResponse() middleware.Responder {
-	payload := makeSingleErrorResponse(501, "Not Implemented",
-		"operation clusters.FindClusters has not yet been implemented")
-	return clusters.NewCreateClusterDefault(501).WithPayload(payload)
+
+	namespace := os.Getenv("OSHINKO_CLUSTER_NAMESPACE")
+	configfile := os.Getenv("OSHINKO_KUBE_CONFIG")
+	if namespace == "" || configfile == "" {
+		payload := makeSingleErrorResponse(400, "Missing Env",
+			"OSHIKO_CLUSTER_NAMESPACE and OSHINKO_KUBE_CONFIG env vars must be set")
+		return clusters.NewDeleteSingleClusterDefault(400).WithPayload(payload)
+	}
+
+	// kube rest client
+	client, _, err := serverapi.GetKubeClient(configfile)
+	if err != nil {
+		// TODO handle failure to get client
+	}
+	pc := client.Pods(namespace)
+	sc := client.Services(namespace)
+
+	// Create the payload that we're going to write into for the response
+	payload := clusters.FindClustersOKBodyBody{}
+	payload.Clusters = []*clusters.ClustersItems0{}
+
+	// Create a map so that we can track clusters by name while we
+	// find out information about them
+	clist := map[string]*clusters.ClustersItems0{}
+
+	// Build a selector list for the "oshinko-type" label
+	requirement, err := labels.NewRequirement("oshinko-type", labels.EqualsOperator, sets.NewString("master"))
+	selectorlist := kapi.ListOptions{LabelSelector: labels.NewSelector().Add(*requirement)}
+	pods, err := pc.List(selectorlist)
+
+	// From the list of master pods, figure out which clusters we have
+	for i := range pods.Items {
+
+		clustername := pods.Items[i].Labels["oshinko-cluster"]
+		if citem, ok := clist[clustername]; !ok {
+			clist[clustername] = new(clusters.ClustersItems0)
+			citem = clist[clustername]
+			citem.Name = new(string)
+			*citem.Name = clustername
+			citem.Href = new(string)
+			*citem.Href = "/clusters/" + clustername
+			citem.WorkerCount = new(int64)
+			// TODO we only want to count running pods
+			*citem.WorkerCount = int64(countworkers(pc, clustername))
+			citem.Status = new(string)
+			*citem.Status = "Running"
+			citem.MasterURL = new(string)
+			*citem.MasterURL = retrievemasterurl(sc, clustername)
+		}
+	}
+
+	for _, value := range clist {
+		payload.Clusters = append(payload.Clusters, value)
+	}
+
+	return clusters.NewFindClustersOK().WithPayload(payload)
 }
 
 // FindSingleClusterResponse find a cluster and return its representation
