@@ -206,10 +206,8 @@ func DeleteClusterResponse(params clusters.DeleteSingleClusterParams) middleware
 	}
 
 	// Build a selector list for the "oshinko-cluster" label
-	selector := labels.NewSelector()
 	requirement, err := labels.NewRequirement("oshinko-cluster", labels.EqualsOperator, sets.NewString(params.Name))
-	selector.Add(*requirement)
-	selectorlist := kapi.ListOptions{LabelSelector: selector}
+	selectorlist := kapi.ListOptions{LabelSelector: labels.NewSelector().Add(*requirement)}
 
 	// Delete all of the deployment configs
 	dcc := osclient.DeploymentConfigs(namespace)
