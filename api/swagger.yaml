@@ -168,11 +168,26 @@ paths:
                       type: string
                     href:
                       description: |-
-                        URL of the cluster, this is oshinko specific
+                        URL for the cluster information page in oshinko-rest
+                      type: string
+                    status:
+                      description: |-
+                        Current state of the cluster
+                      type: string
+                    worker-count:
+                      description: |-
+                        Number of worker nodes in the cluster
+                      type: integer
+                    master-url:
+                      description: |-
+                        URL to the spark master
                       type: string
                   required:
                     - name
                     - href
+                    - status
+                    - worker-count
+                    - master-url
         default:
           description: |-
             Unexpected error

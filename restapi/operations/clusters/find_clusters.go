@@ -60,17 +60,35 @@ swagger:model ClustersItems0
 */
 type ClustersItems0 struct {
 
-	/* URL of the cluster, this is oshinko specific
+	/* URL for the cluster information page in oshinko-rest
 
 	Required: true
 	*/
 	Href *string `json:"href"`
+
+	/* URL to the spark master
+
+	Required: true
+	*/
+	MasterURL *string `json:"master-url"`
 
 	/* Name of the cluster
 
 	Required: true
 	*/
 	Name *string `json:"name"`
+
+	/* Current state of the cluster
+
+	Required: true
+	*/
+	Status *string `json:"status"`
+
+	/* Number of worker nodes in the cluster
+
+	Required: true
+	*/
+	WorkerCount *int64 `json:"worker-count"`
 }
 
 // Validate validates this clusters items0
@@ -82,7 +100,22 @@ func (o *ClustersItems0) Validate(formats strfmt.Registry) error {
 		res = append(res, err)
 	}
 
+	if err := o.validateMasterURL(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
 	if err := o.validateName(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
+	if err := o.validateStatus(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
+	if err := o.validateWorkerCount(formats); err != nil {
 		// prop
 		res = append(res, err)
 	}
@@ -102,9 +135,36 @@ func (o *ClustersItems0) validateHref(formats strfmt.Registry) error {
 	return nil
 }
 
+func (o *ClustersItems0) validateMasterURL(formats strfmt.Registry) error {
+
+	if err := validate.Required("master-url", "body", o.MasterURL); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (o *ClustersItems0) validateName(formats strfmt.Registry) error {
 
 	if err := validate.Required("name", "body", o.Name); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (o *ClustersItems0) validateStatus(formats strfmt.Registry) error {
+
+	if err := validate.Required("status", "body", o.Status); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (o *ClustersItems0) validateWorkerCount(formats strfmt.Registry) error {
+
+	if err := validate.Required("worker-count", "body", o.WorkerCount); err != nil {
 		return err
 	}
 
