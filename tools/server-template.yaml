@@ -1,8 +1,8 @@
 kind: Template
 apiVersion: v1
-template: spark
+template: oshinko-rest
 metadata:
-  name: spark
+  name: oshinko-rest
 objects:
 
 - kind: Service
