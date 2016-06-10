@@ -87,20 +87,20 @@ definitions:
         description: |-
           Unique name for the cluster
         type: string
-      master-count:
+      masterCount:
         description: |-
           The count of master nodes requested in the cluster
         type: integer
         format: int
-      worker-count:
+      workerCount:
         description: |-
           The count of worker nodes requested in the cluster
         type: integer
         format: int
     required:
       - name
-      - master-count
-      - worker-count
+      - masterCount
+      - workerCount
   SingleCluster:
     properties:
       cluster:
@@ -174,11 +174,11 @@ paths:
                       description: |-
                         Current state of the cluster
                       type: string
-                    worker-count:
+                    workerCount:
                       description: |-
                         Number of worker nodes in the cluster
                       type: integer
-                    master-url:
+                    masterUrl:
                       description: |-
                         URL to the spark master
                       type: string
@@ -186,8 +186,8 @@ paths:
                     - name
                     - href
                     - status
-                    - worker-count
-                    - master-url
+                    - workerCount
+                    - masterUrl
         default:
           description: |-
             Unexpected error

@@ -20,7 +20,7 @@ type NewCluster struct {
 
 	Required: true
 	*/
-	MasterCount *int64 `json:"master-count"`
+	MasterCount *int64 `json:"masterCount"`
 
 	/* Unique name for the cluster
 
@@ -32,7 +32,7 @@ type NewCluster struct {
 
 	Required: true
 	*/
-	WorkerCount *int64 `json:"worker-count"`
+	WorkerCount *int64 `json:"workerCount"`
 }
 
 // Validate validates this new cluster
@@ -62,7 +62,7 @@ func (m *NewCluster) Validate(formats strfmt.Registry) error {
 
 func (m *NewCluster) validateMasterCount(formats strfmt.Registry) error {
 
-	if err := validate.Required("master-count", "body", m.MasterCount); err != nil {
+	if err := validate.Required("masterCount", "body", m.MasterCount); err != nil {
 		return err
 	}
 
@@ -80,7 +80,7 @@ func (m *NewCluster) validateName(formats strfmt.Registry) error {
 
 func (m *NewCluster) validateWorkerCount(formats strfmt.Registry) error {
 
-	if err := validate.Required("worker-count", "body", m.WorkerCount); err != nil {
+	if err := validate.Required("workerCount", "body", m.WorkerCount); err != nil {
 		return err
 	}
 

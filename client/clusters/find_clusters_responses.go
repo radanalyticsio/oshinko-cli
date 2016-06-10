@@ -122,7 +122,7 @@ type ClustersItems0 struct {
 
 	Required: true
 	*/
-	MasterURL *string `json:"master-url"`
+	MasterURL *string `json:"masterUrl"`
 
 	/* Name of the cluster
 
@@ -140,7 +140,7 @@ type ClustersItems0 struct {
 
 	Required: true
 	*/
-	WorkerCount *int64 `json:"worker-count"`
+	WorkerCount *int64 `json:"workerCount"`
 }
 
 // Validate validates this clusters items0
@@ -189,7 +189,7 @@ func (o *ClustersItems0) validateHref(formats strfmt.Registry) error {
 
 func (o *ClustersItems0) validateMasterURL(formats strfmt.Registry) error {
 
-	if err := validate.Required("master-url", "body", o.MasterURL); err != nil {
+	if err := validate.Required("masterUrl", "body", o.MasterURL); err != nil {
 		return err
 	}
 
@@ -216,7 +216,7 @@ func (o *ClustersItems0) validateStatus(formats strfmt.Registry) error {
 
 func (o *ClustersItems0) validateWorkerCount(formats strfmt.Registry) error {
 
-	if err := validate.Required("worker-count", "body", o.WorkerCount); err != nil {
+	if err := validate.Required("workerCount", "body", o.WorkerCount); err != nil {
 		return err
 	}
 
