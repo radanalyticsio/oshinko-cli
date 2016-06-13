@@ -6,11 +6,7 @@ package clusters
 import (
 	"net/http"
 
-	"github.com/go-openapi/errors"
 	middleware "github.com/go-openapi/runtime/middleware"
-	"github.com/go-openapi/strfmt"
-	"github.com/go-openapi/validate"
-	"github.com/redhatanalytics/oshinko-rest/models"
 )
 
 // FindSingleClusterHandlerFunc turns a function with the right signature into a find single cluster handler
@@ -54,48 +50,4 @@ func (o *FindSingleCluster) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	o.Context.Respond(rw, r, route.Produces, route, res)
 
-}
-
-/*FindSingleClusterOKBodyBody find single cluster o k body body
-
-swagger:model FindSingleClusterOKBodyBody
-*/
-type FindSingleClusterOKBodyBody struct {
-
-	/* cluster
-
-	Required: true
-	*/
-	Cluster *models.SingleCluster `json:"cluster"`
-}
-
-// Validate validates this find single cluster o k body body
-func (o *FindSingleClusterOKBodyBody) Validate(formats strfmt.Registry) error {
-	var res []error
-
-	if err := o.validateCluster(formats); err != nil {
-		// prop
-		res = append(res, err)
-	}
-
-	if len(res) > 0 {
-		return errors.CompositeValidationError(res...)
-	}
-	return nil
-}
-
-func (o *FindSingleClusterOKBodyBody) validateCluster(formats strfmt.Registry) error {
-
-	if err := validate.Required("findSingleClusterOK"+"."+"cluster", "body", o.Cluster); err != nil {
-		return err
-	}
-
-	if o.Cluster != nil {
-
-		if err := o.Cluster.Validate(formats); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }

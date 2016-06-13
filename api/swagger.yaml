@@ -246,9 +246,7 @@ paths:
           description: |-
             Cluster detail response
           schema:
-            properties:
-              cluster:
-                $ref: "#/definitions/SingleCluster"
+            $ref: "#/definitions/SingleCluster"
         default:
           description: |-
             Unexpected error
