@@ -48,6 +48,51 @@ func sparkMasterURL(name string, port *kapi.ServicePort) string {
 	return "spark://" + name + ":" + strconv.Itoa(port.Port)
 }
 
+func makeselector(otype string, clustername string) kapi.ListOptions {
+	// Build a selector list based on type and/or cluster name
+	ls := labels.NewSelector()
+	if otype != "" {
+		ot, _ := labels.NewRequirement("oshinko-type", labels.EqualsOperator, sets.NewString(otype))
+		ls = ls.Add(*ot)
+	}
+	if clustername != "" {
+		cname, _ := labels.NewRequirement("oshinko-cluster", labels.EqualsOperator, sets.NewString(clustername))
+		ls = ls.Add(*cname)
+	}
+	return kapi.ListOptions{LabelSelector: ls}
+}
+
+func getworkers(client kclient.PodInterface, clustername string) *kapi.PodList {
+	selectorlist := makeselector("worker", clustername)
+	pods, _ := client.List(selectorlist)
+	return pods
+}
+
+func countworkers(client kclient.PodInterface, clustername string) (int64, *kapi.PodList) {
+	pods := getworkers(client, clustername)
+	if pods != nil {
+		return int64(len(pods.Items)), pods
+	}
+	return 0, nil
+}
+
+func retrievemasterurl(client kclient.ServiceInterface, clustername string) string {
+	selectorlist := makeselector("master", clustername)
+	srvs, _ := client.List(selectorlist)
+	srv := srvs.Items[0]
+	return sparkMasterURL(srv.Name, &srv.Spec.Ports[0])
+}
+
+func tostrptr(val string) *string {
+	v := val
+	return &v
+}
+
+func toint64ptr(val int64) *int64 {
+	v := val
+	return &v
+}
+
 func sparkWorker(namespace string,
 	image string,
 	replicas int, masterurl, clustername string) *odc.ODeploymentConfig {
@@ -56,7 +101,7 @@ func sparkWorker(namespace string,
 	// We will use a label and pod selector based on the cluster name.
 	// Openshift will add additional labels and selectors to distinguish pods handled by
 	// this deploymentconfig from pods beloning to another.
-	dc := odc.DeploymentConfig(clustername+"-spark-worker", namespace).
+	dc := odc.DeploymentConfig(clustername+"-w", namespace).
 		TriggerOnConfigChange().RollingStrategy().Label("oshinko-cluster", clustername).
 		Label("oshinko-type", "worker").
 		PodSelector("oshinko-cluster", clustername).Replicas(replicas)
@@ -74,13 +119,13 @@ func sparkWorker(namespace string,
 	return dc.PodTemplateSpec(pt.Containers(cont))
 }
 
-func sparkMaster(namespace string, image string, clustername string) *odc.ODeploymentConfig {
+func sparkMaster(namespace, image, clustername, masterhost string) *odc.ODeploymentConfig {
 
 	// Create the basic deployment config
 	// We will use a label and pod selector based on the cluster name
 	// Openshift will add additional labels and selectors to distinguish pods handled by
 	// this deploymentconfig from pods beloning to another.
-	dc := odc.DeploymentConfig(clustername+"-spark-master", namespace).
+	dc := odc.DeploymentConfig(clustername+"-m", namespace).
 		TriggerOnConfigChange().RollingStrategy().Label("oshinko-cluster", clustername).
 		Label("oshinko-type", "master").
 		PodSelector("oshinko-cluster", clustername)
@@ -96,15 +141,15 @@ func sparkMaster(namespace string, image string, clustername string) *odc.ODeplo
 	webp := ocon.ContainerPort("spark-webui", 8080)
 	cont := ocon.Container(
 		dc.Name,
-		image).Command("/start-master",
-		dc.Name).Ports(masterp, webp)
+		image).Command("/start-master", masterhost).Ports(masterp, webp)
 
 	// Finally, assign the container to the pod template spec and
 	// assign the pod template spec to the deployment config
 	return dc.PodTemplateSpec(pt.Containers(cont))
 }
 
-func Service(name string, port int,
+func Service(name string,
+	port int,
 	clustername string,
 	otype string, podselectors map[string]string) (*osv.OService, *osv.OServicePort) {
 	p := osv.ServicePort(port).TargetPort(port)
@@ -148,21 +193,26 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 
 	// Make master deployment config
 	// Ignoring master-count for now, leave it defaulted at 1
-	masterdc := sparkMaster(namespace, image, *params.Cluster.Name)
+	clustername := *params.Cluster.Name
+
+	// pre spark 2, the name the master calls itself must match
+	// the name the workers use and the service name created
+	masterhost := *params.Cluster.Name
+	masterdc := sparkMaster(namespace, image, clustername, masterhost)
 
 	// Make master services
-	mastersv, masterp := Service(*params.Cluster.Name+"-m",
+	mastersv, masterp := Service(masterhost,
 		masterdc.FindPort("spark-master"),
-		*params.Cluster.Name, "master",
+		clustername, "master",
 		masterdc.GetPodTemplateSpecLabels())
 
-	websv, _ := Service(*params.Cluster.Name+"-w",
+	websv, _ := Service(masterhost+"-ui",
 		masterdc.FindPort("spark-webui"),
-		*params.Cluster.Name, "webui",
+		clustername, "webui",
 		masterdc.GetPodTemplateSpecLabels())
 
 	// Make worker deployment config
-	masterurl := sparkMasterURL(mastersv.Name, &masterp.ServicePort)
+	masterurl := sparkMasterURL(masterhost, &masterp.ServicePort)
 	workerdc := sparkWorker(namespace, image, int(*params.Cluster.WorkerCount), masterurl, *params.Cluster.Name)
 
 	// Launch all of the objects
@@ -189,20 +239,20 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	}
 
 	// Build the response
+	// Note, the pod list here will always be empty on create
 	cluster := &models.SingleCluster{&models.ClusterModel{}}
 	cluster.Cluster.Name = params.Cluster.Name
 	cluster.Cluster.WorkerCount = params.Cluster.WorkerCount
 	cluster.Cluster.MasterCount = params.Cluster.MasterCount
 
-	// TODO can we fill in some pods here, maybe the deployment pods?
 	return clusters.NewCreateClusterCreated().WithLocation(masterurl).WithPayload(cluster)
 }
 
-func WaitForZero(client kclient.ReplicationControllerInterface, name string) {
+func WaitForCount(client kclient.ReplicationControllerInterface, name string, count int) {
 	// TODO probably should not spin forever here
 	for {
 		r, _ := client.Get(name)
-		if r.Status.Replicas == 0 {
+		if r.Status.Replicas == count {
 			return
 		}
 		time.Sleep(1 * time.Second)
@@ -263,7 +313,7 @@ func DeleteClusterResponse(params clusters.DeleteSingleClusterParams) middleware
 	// Wait for the replica count to drop to 0 for each
 	// TODO if we failed to update the count above, we shouldn't wait for the repl here
 	for i := range repls.Items {
-		WaitForZero(rcc, repls.Items[i].Name)
+		WaitForCount(rcc, repls.Items[i].Name, 0)
 	}
 
 	// Delete each replication controller
@@ -287,51 +337,6 @@ func DeleteClusterResponse(params clusters.DeleteSingleClusterParams) middleware
 		}
 	}
 	return clusters.NewDeleteSingleClusterNoContent()
-}
-
-func makeselector(otype string, clustername string) kapi.ListOptions {
-	// Build a selector list based on type and/or cluster name
-	ls := labels.NewSelector()
-	if otype != "" {
-		ot, _ := labels.NewRequirement("oshinko-type", labels.EqualsOperator, sets.NewString(otype))
-		ls = ls.Add(*ot)
-	}
-	if clustername != "" {
-		cname, _ := labels.NewRequirement("oshinko-cluster", labels.EqualsOperator, sets.NewString(clustername))
-		ls = ls.Add(*cname)
-	}
-	return kapi.ListOptions{LabelSelector: ls}
-}
-
-func getworkers(client kclient.PodInterface, clustername string) *kapi.PodList {
-	selectorlist := makeselector("worker", clustername)
-	pods, _ := client.List(selectorlist)
-	return pods
-}
-
-func countworkers(client kclient.PodInterface, clustername string) (int64, *kapi.PodList) {
-	pods := getworkers(client, clustername)
-	if pods != nil {
-		return int64(len(pods.Items)), pods
-	}
-	return 0, nil
-}
-
-func retrievemasterurl(client kclient.ServiceInterface, clustername string) string {
-	selectorlist := makeselector("master", clustername)
-	srvs, _ := client.List(selectorlist)
-	srv := srvs.Items[0]
-	return sparkMasterURL(srv.Name, &srv.Spec.Ports[0])
-}
-
-func tostrptr(val string) *string {
-	v := val
-	return &v
-}
-
-func toint64ptr(val int64) *int64 {
-	v := val
-	return &v
 }
 
 // FindClustersResponse find a cluster and return its representation
@@ -386,6 +391,60 @@ func FindClustersResponse() middleware.Responder {
 	return clusters.NewFindClustersOK().WithPayload(payload)
 }
 
+func singleclusterresponse(
+	pc kclient.PodInterface,
+	sc kclient.ServiceInterface, clustername string) (*models.SingleCluster, error) {
+
+	// Build a selector list to get the master
+	selectorlist := makeselector("master", clustername)
+	pods, err := pc.List(selectorlist)
+	if err != nil {
+		//TODO do something here
+	}
+
+	// No master pod, we assume the cluster is not there
+	if len(pods.Items) == 0 {
+		return nil, nil
+
+	} else if len(pods.Items) > 1 {
+		//TODO do something here, duplicate clusters?
+	}
+
+	// Build the response
+	cluster := &models.SingleCluster{&models.ClusterModel{}}
+	cluster.Cluster.Name = tostrptr(clustername)
+	cluster.Cluster.MasterCount = toint64ptr(1)
+	cluster.Cluster.Pods = []*models.ClusterModelPodsItems0{}
+	//TODO make something real for status
+	cluster.Cluster.Status = tostrptr("Running")
+	cluster.Cluster.MasterURL = tostrptr(retrievemasterurl(sc, clustername))
+
+	// Report the master pod
+	master := pods.Items[0]
+	pod := new(models.ClusterModelPodsItems0)
+	pod.IP = tostrptr(master.Status.PodIP)
+	pod.Status = tostrptr(string(master.Status.Phase))
+	pod.Type = tostrptr(master.Labels["oshinko-type"])
+	cluster.Cluster.Pods = append(cluster.Cluster.Pods, pod)
+
+	// Report the worker pods
+	cnt, workers := countworkers(pc, clustername)
+	cluster.Cluster.WorkerCount = toint64ptr(cnt)
+	if workers != nil {
+		for i := range workers.Items {
+			w := &workers.Items[i]
+			pod := new(models.ClusterModelPodsItems0)
+			pod.IP = tostrptr(w.Status.PodIP)
+			pod.Status = tostrptr(string(w.Status.Phase))
+			pod.Type = tostrptr(w.Labels["oshinko-type"])
+			cluster.Cluster.Pods = append(cluster.Cluster.Pods, pod)
+		}
+	}
+
+	return cluster, nil
+}
+
+
 // FindSingleClusterResponse find a cluster and return its representation
 func FindSingleClusterResponse(params clusters.FindSingleClusterParams) middleware.Responder {
 
@@ -402,48 +461,12 @@ func FindSingleClusterResponse(params clusters.FindSingleClusterParams) middlewa
 	pc := client.Pods(namespace)
 	sc := client.Services(namespace)
 
-	// Build a selector list to get the master
-	selectorlist := makeselector("master", params.Name)
-	pods, err := pc.List(selectorlist)
+	cluster, err := singleclusterresponse(pc, sc, params.Name)
 	if err != nil {
-		//TODO do something here
-	}
+		// TODO do something here
 
-	if len(pods.Items) == 0 {
+	} else if cluster == nil {
 		return clusters.NewFindSingleClusterOK()
-	} else if len(pods.Items) > 1 {
-		//TODO do something here, duplicate clusters?
-	}
-
-	// Build the response
-	cluster := &models.SingleCluster{&models.ClusterModel{}}
-	cluster.Cluster.Name = tostrptr(params.Name)
-	cluster.Cluster.MasterCount = toint64ptr(1)
-	cluster.Cluster.Pods = []*models.ClusterModelPodsItems0{}
-	//TODO make something real for status
-	cluster.Cluster.Status = tostrptr("Running")
-	cluster.Cluster.MasterURL = tostrptr(retrievemasterurl(sc, params.Name))
-
-	// Report the master pod
-	master := pods.Items[0]
-	pod := new(models.ClusterModelPodsItems0)
-	pod.IP = tostrptr(master.Status.PodIP)
-	pod.Status = tostrptr(string(master.Status.Phase))
-	pod.Type = tostrptr(master.Labels["oshinko-type"])
-	cluster.Cluster.Pods = append(cluster.Cluster.Pods, pod)
-
-	// Report the worker pods
-	cnt, workers := countworkers(pc, params.Name)
-	cluster.Cluster.WorkerCount = toint64ptr(cnt)
-	if workers != nil {
-		for i := range workers.Items {
-			w := &workers.Items[i]
-			pod := new(models.ClusterModelPodsItems0)
-			pod.IP = tostrptr(w.Status.PodIP)
-			pod.Status = tostrptr(string(w.Status.Phase))
-			pod.Type = tostrptr(w.Labels["oshinko-type"])
-			cluster.Cluster.Pods = append(cluster.Cluster.Pods, pod)
-		}
 	}
 
 	return clusters.NewFindSingleClusterOK().WithPayload(cluster)
@@ -451,7 +474,53 @@ func FindSingleClusterResponse(params clusters.FindSingleClusterParams) middlewa
 
 // UpdateSingleClusterResponse update a cluster and return the new representation
 func UpdateSingleClusterResponse(params clusters.UpdateSingleClusterParams) middleware.Responder {
-	payload := makeSingleErrorResponse(501, "Not Implemented",
-		"operation clusters.UpdateSingleCluster has not yet been implemented")
-	return clusters.NewCreateClusterDefault(501).WithPayload(payload)
+
+	namespace, err := info.GetNamespace()
+	if namespace == "" || err != nil {
+		return clusters.NewDeleteSingleClusterDefault(400).WithPayload(missingnamespace(err))
+	}
+
+	// kube rest client
+	client, err := osa.GetKubeClient()
+	if err != nil {
+		return clusters.NewCreateClusterDefault(400).WithPayload(missingclient(err))
+	}
+	rcc := client.ReplicationControllers(namespace)
+
+	// Get the worker replication count
+	selectorlist := makeselector("worker", params.Name)
+	repls, err := rcc.List(selectorlist)
+	// TODO add something about not being able to find the replication controllers
+	if err != nil {
+	}
+	if len(repls.Items) == 0 {
+		// TODO do something here
+	}
+
+	// Well, there should only be one, but loop anyway
+	for i := range repls.Items {
+		if repls.Items[i].Spec.Replicas == int(*params.Cluster.WorkerCount) {
+			continue
+		}
+		repls.Items[i].Spec.Replicas = int(*params.Cluster.WorkerCount)
+		_, err = rcc.Update(&repls.Items[i])
+		// TODO add something about not being able to scale down
+		if err != nil {
+		}
+	}
+
+	for i := range repls.Items {
+		WaitForCount(rcc, repls.Items[i].Name, int(*params.Cluster.WorkerCount))
+	}
+
+	// throw an error if the name in the new cluster does not match the name in the old cluster
+	// (this could be added at some point, but it means changing the names, labels, and selectors on
+	// all the objects in the cluster)  (not implemented yet)
+
+	// get the master repl controller and compare master count
+	// error on master count change
+
+	cluster, err := singleclusterresponse(client.Pods(namespace), client.Services(namespace), params.Name)
+
+	return clusters.NewFindSingleClusterOK().WithPayload(cluster)
 }
