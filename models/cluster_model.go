@@ -17,6 +17,12 @@ swagger:model ClusterModel
 type ClusterModel struct {
 	NewCluster
 
+	/* URL to the spark master
+
+	Required: true
+	*/
+	MasterURL *string `json:"masterUrl"`
+
 	/* Pods that make up the cluster
 
 	Required: true
@@ -38,6 +44,10 @@ func (m *ClusterModel) Validate(formats strfmt.Registry) error {
 		res = append(res, err)
 	}
 
+	if err := m.validateMasterURL(formats); err != nil {
+		res = append(res, err)
+	}
+
 	if err := m.validatePods(formats); err != nil {
 		res = append(res, err)
 	}
@@ -49,6 +59,15 @@ func (m *ClusterModel) Validate(formats strfmt.Registry) error {
 	if len(res) > 0 {
 		return errors.CompositeValidationError(res...)
 	}
+	return nil
+}
+
+func (m *ClusterModel) validateMasterURL(formats strfmt.Registry) error {
+
+	if err := validate.Required("masterUrl", "body", m.MasterURL); err != nil {
+		return err
+	}
+
 	return nil
 }
 

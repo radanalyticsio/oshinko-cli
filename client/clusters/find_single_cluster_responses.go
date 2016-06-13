@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/go-openapi/errors"
 	"github.com/go-openapi/runtime"
+	"github.com/go-openapi/validate"
 
 	strfmt "github.com/go-openapi/strfmt"
 
@@ -49,7 +51,7 @@ func NewFindSingleClusterOK() *FindSingleClusterOK {
 Cluster detail response
 */
 type FindSingleClusterOK struct {
-	Payload *models.SingleCluster
+	Payload FindSingleClusterOKBodyBody
 }
 
 func (o *FindSingleClusterOK) Error() string {
@@ -58,10 +60,8 @@ func (o *FindSingleClusterOK) Error() string {
 
 func (o *FindSingleClusterOK) readResponse(response runtime.ClientResponse, consumer runtime.Consumer, formats strfmt.Registry) error {
 
-	o.Payload = new(models.SingleCluster)
-
 	// response payload
-	if err := consumer.Consume(response.Body(), o.Payload); err != nil && err != io.EOF {
+	if err := consumer.Consume(response.Body(), &o.Payload); err != nil && err != io.EOF {
 		return err
 	}
 
@@ -101,6 +101,50 @@ func (o *FindSingleClusterDefault) readResponse(response runtime.ClientResponse,
 	// response payload
 	if err := consumer.Consume(response.Body(), o.Payload); err != nil && err != io.EOF {
 		return err
+	}
+
+	return nil
+}
+
+/*FindSingleClusterOKBodyBody find single cluster o k body body
+
+swagger:model FindSingleClusterOKBodyBody
+*/
+type FindSingleClusterOKBodyBody struct {
+
+	/* cluster
+
+	Required: true
+	*/
+	Cluster *models.SingleCluster `json:"cluster"`
+}
+
+// Validate validates this find single cluster o k body body
+func (o *FindSingleClusterOKBodyBody) Validate(formats strfmt.Registry) error {
+	var res []error
+
+	if err := o.validateCluster(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
+	if len(res) > 0 {
+		return errors.CompositeValidationError(res...)
+	}
+	return nil
+}
+
+func (o *FindSingleClusterOKBodyBody) validateCluster(formats strfmt.Registry) error {
+
+	if err := validate.Required("findSingleClusterOK"+"."+"cluster", "body", o.Cluster); err != nil {
+		return err
+	}
+
+	if o.Cluster != nil {
+
+		if err := o.Cluster.Validate(formats); err != nil {
+			return err
+		}
 	}
 
 	return nil

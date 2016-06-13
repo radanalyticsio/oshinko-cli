@@ -18,7 +18,7 @@ swagger:response findSingleClusterOK
 type FindSingleClusterOK struct {
 
 	// In: body
-	Payload *models.SingleCluster `json:"body,omitempty"`
+	Payload FindSingleClusterOKBodyBody `json:"body,omitempty"`
 }
 
 // NewFindSingleClusterOK creates FindSingleClusterOK with default headers values
@@ -27,13 +27,13 @@ func NewFindSingleClusterOK() *FindSingleClusterOK {
 }
 
 // WithPayload adds the payload to the find single cluster o k response
-func (o *FindSingleClusterOK) WithPayload(payload *models.SingleCluster) *FindSingleClusterOK {
+func (o *FindSingleClusterOK) WithPayload(payload FindSingleClusterOKBodyBody) *FindSingleClusterOK {
 	o.Payload = payload
 	return o
 }
 
 // SetPayload sets the payload to the find single cluster o k response
-func (o *FindSingleClusterOK) SetPayload(payload *models.SingleCluster) {
+func (o *FindSingleClusterOK) SetPayload(payload FindSingleClusterOKBodyBody) {
 	o.Payload = payload
 }
 
@@ -41,11 +41,10 @@ func (o *FindSingleClusterOK) SetPayload(payload *models.SingleCluster) {
 func (o *FindSingleClusterOK) WriteResponse(rw http.ResponseWriter, producer runtime.Producer) {
 
 	rw.WriteHeader(200)
-	if o.Payload != nil {
-		if err := producer.Produce(rw, o.Payload); err != nil {
-			panic(err) // let the recovery middleware deal with this
-		}
+	if err := producer.Produce(rw, o.Payload); err != nil {
+		panic(err) // let the recovery middleware deal with this
 	}
+
 }
 
 /*FindSingleClusterDefault Unexpected error

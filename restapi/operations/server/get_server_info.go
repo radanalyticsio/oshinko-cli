@@ -54,50 +54,6 @@ func (o *GetServerInfo) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 }
 
-/*GetServerInfoOKBodyBody get server info o k body body
-
-swagger:model GetServerInfoOKBodyBody
-*/
-type GetServerInfoOKBodyBody struct {
-
-	/* application
-
-	Required: true
-	*/
-	Application *GetServerInfoOKBodyApplication `json:"application"`
-}
-
-// Validate validates this get server info o k body body
-func (o *GetServerInfoOKBodyBody) Validate(formats strfmt.Registry) error {
-	var res []error
-
-	if err := o.validateApplication(formats); err != nil {
-		// prop
-		res = append(res, err)
-	}
-
-	if len(res) > 0 {
-		return errors.CompositeValidationError(res...)
-	}
-	return nil
-}
-
-func (o *GetServerInfoOKBodyBody) validateApplication(formats strfmt.Registry) error {
-
-	if err := validate.Required("getServerInfoOK"+"."+"application", "body", o.Application); err != nil {
-		return err
-	}
-
-	if o.Application != nil {
-
-		if err := o.Application.Validate(formats); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 /*GetServerInfoOKBodyApplication get server info o k body application
 
 swagger:model GetServerInfoOKBodyApplication
@@ -150,6 +106,50 @@ func (o *GetServerInfoOKBodyApplication) validateVersion(formats strfmt.Registry
 
 	if err := validate.Required("getServerInfoOK"+"."+"application"+"."+"version", "body", o.Version); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+/*GetServerInfoOKBodyBody get server info o k body body
+
+swagger:model GetServerInfoOKBodyBody
+*/
+type GetServerInfoOKBodyBody struct {
+
+	/* application
+
+	Required: true
+	*/
+	Application *GetServerInfoOKBodyApplication `json:"application"`
+}
+
+// Validate validates this get server info o k body body
+func (o *GetServerInfoOKBodyBody) Validate(formats strfmt.Registry) error {
+	var res []error
+
+	if err := o.validateApplication(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
+	if len(res) > 0 {
+		return errors.CompositeValidationError(res...)
+	}
+	return nil
+}
+
+func (o *GetServerInfoOKBodyBody) validateApplication(formats strfmt.Registry) error {
+
+	if err := validate.Required("getServerInfoOK"+"."+"application", "body", o.Application); err != nil {
+		return err
+	}
+
+	if o.Application != nil {
+
+		if err := o.Application.Validate(formats); err != nil {
+			return err
+		}
 	}
 
 	return nil

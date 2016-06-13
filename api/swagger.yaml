@@ -18,6 +18,10 @@ definitions:
             description: |-
               Current status for the cluster
             type: string
+          masterUrl:
+            description: |-
+              URL to the spark master
+            type: string
           pods:
             description: |-
               Pods that make up the cluster
@@ -43,6 +47,7 @@ definitions:
                 - status
         required:
           - status
+          - masterUrl
           - pods
   ErrorModel:
     properties:
@@ -241,7 +246,9 @@ paths:
           description: |-
             Cluster detail response
           schema:
-            $ref: "#/definitions/SingleCluster"
+            properties:
+              cluster:
+                $ref: "#/definitions/SingleCluster"
         default:
           description: |-
             Unexpected error
