@@ -1,26 +1,48 @@
 package handlers
 
 import (
-	"os"
 	"strconv"
 	"time"
 
 	middleware "github.com/go-openapi/runtime/middleware"
 
-	_ "github.com/openshift/origin/pkg/api/install"
-	serverapi "github.com/openshift/origin/pkg/cmd/server/api"
+	osa "github.com/redhatanalytics/oshinko-rest/helpers/authentication"
 	ocon "github.com/redhatanalytics/oshinko-rest/helpers/containers"
 	odc "github.com/redhatanalytics/oshinko-rest/helpers/deploymentconfigs"
+	"github.com/redhatanalytics/oshinko-rest/helpers/info"
 	opt "github.com/redhatanalytics/oshinko-rest/helpers/podtemplates"
 	osv "github.com/redhatanalytics/oshinko-rest/helpers/services"
-	"github.com/redhatanalytics/oshinko-rest/restapi/operations/clusters"
-
 	"github.com/redhatanalytics/oshinko-rest/models"
+	"github.com/redhatanalytics/oshinko-rest/restapi/operations/clusters"
 	kapi "k8s.io/kubernetes/pkg/api"
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/labels"
 	"k8s.io/kubernetes/pkg/util/sets"
 )
+
+func missingnamespace(err error) *models.ErrorResponse {
+	msg := "Current namespace must be known for this operation"
+	if err != nil {
+		msg = msg + ", err: " + err.Error()
+	}
+	return makeSingleErrorResponse(400, "Cannot determine namespace", msg)
+}
+
+func missingimage(err error) *models.ErrorResponse {
+	msg := "Spark image must be known to create cluster"
+	if err != nil {
+		msg = msg + ", err: " + err.Error()
+	}
+	return makeSingleErrorResponse(400, "Cannot determine image", msg)
+}
+
+func missingclient(err error) *models.ErrorResponse {
+	msg := "Unable to create an openshift client"
+	if err != nil {
+		msg = msg + ", err: " + err.Error()
+	}
+	return makeSingleErrorResponse(400, "Cannot create client", msg)
+}
 
 func sparkMasterURL(name string, port *kapi.ServicePort) string {
 	return "spark://" + name + ":" + strconv.Itoa(port.Port)
@@ -99,26 +121,26 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	// in addition to labels for general identification, we should then use
 	// annotations on objects to help further refine what we are dealing with.
 
-	namespace := os.Getenv("OSHINKO_CLUSTER_NAMESPACE")
-	configfile := os.Getenv("OSHINKO_KUBE_CONFIG")
-	image := os.Getenv("OSHINKO_CLUSTER_IMAGE")
-	if namespace == "" || configfile == "" || image == "" {
-		payload := makeSingleErrorResponse(400, "Missing Env",
-			"OSHIKO_CLUSTER_NAMESPACE, OSHINKO_KUBE_CONFIG, and OSHINKO_CLUSTER_IMAGE env vars must be set")
-		return clusters.NewCreateClusterDefault(400).WithPayload(payload)
+	namespace, err := info.GetNamespace()
+	if namespace == "" || err != nil {
+		return clusters.NewCreateClusterDefault(400).WithPayload(missingnamespace(err))
+	}
+
+	image, err := info.GetSparkImage()
+	if image == "" || err != nil {
+		return clusters.NewCreateClusterDefault(400).WithPayload(missingimage(err))
 	}
 
 	// kube rest client
-	// TODO add an error on failure to get client (wait for merge of auth stuff)
-	client, _, err := serverapi.GetKubeClient(configfile)
+	client, err := osa.GetKubeClient()
 	if err != nil {
-		// handle error
+		return clusters.NewCreateClusterDefault(400).WithPayload(missingclient(err))
 	}
 
 	// openshift rest client
-	osclient, _, err := serverapi.GetOpenShiftClient(configfile)
+	osclient, err := osa.GetOpenShiftClient()
 	if err != nil {
-		//handle error
+		return clusters.NewCreateClusterDefault(400).WithPayload(missingclient(err))
 	}
 
 	// deployment config client
@@ -144,7 +166,6 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	workerdc := sparkWorker(namespace, image, int(*params.Cluster.WorkerCount), masterurl, *params.Cluster.Name)
 
 	// Launch all of the objects
-	// TODO if error says that the deploymentconfig already exists return a cluster <name> already exists
 	_, err = dcc.Create(&masterdc.DeploymentConfig)
 	if err != nil {
 		payload := makeSingleErrorResponse(409, "Creation failed", err.Error())
@@ -191,23 +212,21 @@ func WaitForZero(client kclient.ReplicationControllerInterface, name string) {
 // DeleteClusterResponse delete a cluster
 func DeleteClusterResponse(params clusters.DeleteSingleClusterParams) middleware.Responder {
 
-	namespace := os.Getenv("OSHINKO_CLUSTER_NAMESPACE")
-	configfile := os.Getenv("OSHINKO_KUBE_CONFIG")
-	if namespace == "" || configfile == "" {
-		payload := makeSingleErrorResponse(400, "Missing Env",
-			"OSHIKO_CLUSTER_NAMESPACE and OSHINKO_KUBE_CONFIG env vars must be set")
-		return clusters.NewDeleteSingleClusterDefault(400).WithPayload(payload)
+	namespace, err := info.GetNamespace()
+	if namespace == "" || err != nil {
+		return clusters.NewDeleteSingleClusterDefault(400).WithPayload(missingnamespace(err))
 	}
 
 	// openshift rest client
-	// TODO add an error on failure to get client (wait for merge of auth stuff)
-	osclient, _, err := serverapi.GetOpenShiftClient(configfile)
+	osclient, err := osa.GetOpenShiftClient()
 	if err != nil {
+		return clusters.NewCreateClusterDefault(400).WithPayload(missingclient(err))
 	}
 
 	// kube rest client
-	client, _, err := serverapi.GetKubeClient(configfile)
+	client, err := osa.GetKubeClient()
 	if err != nil {
+		return clusters.NewCreateClusterDefault(400).WithPayload(missingclient(err))
 	}
 
 	// Build a selector list for the "oshinko-cluster" label
@@ -294,18 +313,15 @@ func retrievemasterurl(client kclient.ServiceInterface, clustername string) stri
 // FindClustersResponse find a cluster and return its representation
 func FindClustersResponse() middleware.Responder {
 
-	namespace := os.Getenv("OSHINKO_CLUSTER_NAMESPACE")
-	configfile := os.Getenv("OSHINKO_KUBE_CONFIG")
-	if namespace == "" || configfile == "" {
-		payload := makeSingleErrorResponse(400, "Missing Env",
-			"OSHIKO_CLUSTER_NAMESPACE and OSHINKO_KUBE_CONFIG env vars must be set")
-		return clusters.NewDeleteSingleClusterDefault(400).WithPayload(payload)
+	namespace, err := info.GetNamespace()
+	if namespace == "" || err != nil {
+		return clusters.NewDeleteSingleClusterDefault(400).WithPayload(missingnamespace(err))
 	}
 
 	// kube rest client
-	client, _, err := serverapi.GetKubeClient(configfile)
+	client, err := osa.GetKubeClient()
 	if err != nil {
-		// TODO handle failure to get client
+		return clusters.NewCreateClusterDefault(400).WithPayload(missingclient(err))
 	}
 	pc := client.Pods(namespace)
 	sc := client.Services(namespace)
