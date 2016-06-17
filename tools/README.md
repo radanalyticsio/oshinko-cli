@@ -38,10 +38,17 @@ Assign the admin role:
 
     $ oc policy add-role-to-user admin system:serviceaccount:myproject:oshinko -n myproject
 
+## Default spark image
+
+The OSHINKO_CLUSTER_IMAGE parameter in the template is defaulted to a spark image hosted
+in an internal RedHat registry. In order to use this value, see the setup instructions in the
+README.md in the appropriate Oshinko image source repository. Otherwise, explicitly specify
+a spark image in an accessible registry as shown in the example.
+
 ## Sample template usage
 
 Example usage with an internal registry at 172.30.159.57:5000, and a project
 named "myproject":
 
-    $ oc process -f server-template.yaml -v OSHINKO_SERVER_IMAGE=172.30.159.57:5000/myproject/oshinko-rest-server, OSHINKO_CLUSTER_IMAGE=172.30.159.57:5000/myproject/openshift-spark > server-template.json
+    $ oc process -f server-template.yaml -v OSHINKO_SERVER_IMAGE=172.30.159.57:5000/myproject/oshinko-rest-server,OSHINKO_CLUSTER_IMAGE=172.30.159.57:5000/myproject/openshift-spark > server-template.json
     $ oc create -f server-template.json
