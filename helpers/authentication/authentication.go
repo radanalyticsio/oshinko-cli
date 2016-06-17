@@ -46,14 +46,7 @@ func SAConfig() (*restclient.Config, error) {
 
 func GetKubeClient() (*kclient.Client, error) {
 
-	// If the configfile option has been
-	// set, use it to get a client otherwise use the
-	// serviceaccount for authentication
-	configfile := info.GetKubeConfigPath()
-	if configfile != "" {
-		client, _, err := serverapi.GetKubeClient(configfile)
-		return client, err
-	} else {
+	if info.InAPod() {
 		saConfig, err := SAConfig()
 		if err != nil {
 			return nil, err
@@ -63,19 +56,15 @@ func GetKubeClient() (*kclient.Client, error) {
 			return nil, err
 		}
 		return client, err
+	} else {
+		client, _, err := serverapi.GetKubeClient(info.GetKubeConfigPath())
+		return client, err
 	}
 }
 
 func GetOpenShiftClient() (*client.Client, error) {
 
-	// If the configfile option has been
-	// set, use it to get a client otherwise use the
-	// serviceaccount for authentication
-	configfile := info.GetKubeConfigPath()
-	if configfile != "" {
-		client, _, err := serverapi.GetOpenShiftClient(configfile)
-		return client, err
-	} else {
+	if info.InAPod() {
 		saConfig, err := SAConfig()
 		if err != nil {
 			return nil, err
@@ -84,6 +73,9 @@ func GetOpenShiftClient() (*client.Client, error) {
 		if err != nil {
 			return nil, err
 		}
+		return client, err
+	} else {
+		client, _, err := serverapi.GetOpenShiftClient(info.GetKubeConfigPath())
 		return client, err
 	}
 }

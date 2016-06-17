@@ -10,8 +10,19 @@ const CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 const TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 const NS_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
+func InAPod() bool {
+	return os.Getenv("OSHINKO_REST_POD_NAME") != ""
+}
+
 func GetNamespace() (string, error) {
-	//If running in a pod use GetServiceAccountNS()
+	if InAPod() {
+		// Try the secrets file first
+		// If that fails, fall back to env var
+		ns, err := GetServiceAccountNS()
+		if ns != nil && err == nil {
+			return string(ns), err
+		}
+	}
 	return os.Getenv("OSHINKO_CLUSTER_NAMESPACE"), nil
 }
 

@@ -16,7 +16,7 @@ objects:
       - name: oshinko-rest-port
         protocol: TCP
         port: 8080
-        targetPort: rest-port
+        targetPort: 8080
     selector:
       name: ${SERVER_NAME}
 
@@ -43,11 +43,21 @@ objects:
             env:
               - name: OSHINKO_SERVER_PORT
                 value: "8080"
+              - name: OSHINKO_REST_POD_NAME
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.name
+              - name: OSHINKO_CLUSTER_NAMESPACE
+                valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+              - name: OSHINKO_CLUSTER_IMAGE
+                value: ${OSHINKO_CLUSTER_IMAGE}
             ports:
               - name: rest-port
                 containerPort: 8080
                 protocol: TCP
-
+        serviceaccount: oshinko
 parameters:
 - name: OSHINKO_SERVER_IMAGE
   description: Full name of the oshinko server image
@@ -56,4 +66,6 @@ parameters:
   description: Name of the oshinko server service
   generate: expression
   from: "oshinko-rest-[a-z0-9]{4}"
+  required: true
+- name: OSHINKO_CLUSTER_IMAGE
   required: true
