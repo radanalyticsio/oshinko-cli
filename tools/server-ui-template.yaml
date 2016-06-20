@@ -1,0 +1,141 @@
+kind: Template
+apiVersion: v1
+template: oshinko
+metadata:
+  name: oshinko
+objects:
+
+- kind: Service
+  apiVersion: v1
+  metadata:
+    name: ${OSHINKO_SERVER_NAME}
+    labels:
+      name: ${OSHINKO_SERVER_NAME}
+  spec:
+    ports:
+      - name: o-rest-port
+        protocol: TCP
+        port: 8080
+        targetPort: 8080
+    selector:
+      name: ${OSHINKO_SERVER_NAME}
+
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    name: ${OSHINKO_SERVER_NAME}
+  spec:
+    strategy:
+      type: Rolling
+    triggers:
+      - type: ConfigChange
+    replicas: 1
+    selector:
+      name: ${OSHINKO_SERVER_NAME}
+    template:
+      metadata:
+        labels:
+          name: ${OSHINKO_SERVER_NAME}
+      spec:
+        containers:
+          - name: ${OSHINKO_SERVER_NAME}
+            image: ${OSHINKO_SERVER_IMAGE}
+            env:
+              - name: OSHINKO_SERVER_PORT
+                value: "8080"
+              - name: OSHINKO_REST_POD_NAME
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.name
+              - name: OSHINKO_CLUSTER_NAMESPACE
+                valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+              - name: OSHINKO_CLUSTER_IMAGE
+                value: ${OSHINKO_CLUSTER_IMAGE}
+            ports:
+              - name: o-rest-port
+                containerPort: 8080
+                protocol: TCP
+        serviceaccount: oshinko
+
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    name: ${OSHINKO_WEB_NAME}
+    labels:
+      name: ${OSHINKO_WEB_NAME}
+  spec:
+    replicas: 1
+    selector:
+      name: ${OSHINKO_WEB_NAME}
+    strategy:
+      type: Rolling
+    triggers:
+      - type: ConfigChange
+    template:
+      metadata:
+        labels:
+          name: ${OSHINKO_WEB_NAME}
+      spec:
+        containers:
+          - name: ${OSHINKO_WEB_NAME}
+            image: ${OSHINKO_WEB_IMAGE}
+            env:
+              - name: OPENSHIFT_OSHINKO_REST
+                value: ${OSHINKO_SERVER_NAME}
+              - name: OPENSHIFT_OSHINKO_REST_PORT
+                value: "8080"
+            ports:
+              - name: o-web-port
+                containerPort: 8080
+                protocol: TCP
+
+- kind: Service
+  apiVersion: v1
+  metadata:
+    name: ${OSHINKO_WEB_NAME}
+    labels:
+      name: ${OSHINKO_WEB_NAME} 
+  spec:
+    ports:
+      - name: o-web-port
+        protocol: TCP
+        port: 8080
+        targetPort: 8080
+    selector:
+      name: ${OSHINKO_WEB_NAME}
+
+- kind: Route
+  apiVersion: v1
+  metadata:
+    name: ${OSHINKO_WEB_NAME}
+  spec:
+    host: ${OSHINKO_WEB_NAME}.${OSHINKO_WEB_HOST_IP}.xip.io
+    to:
+      kind: Service
+      name: ${OSHINKO_WEB_NAME}
+
+
+parameters:
+- name: OSHINKO_SERVER_IMAGE
+  description: Full name of the oshinko server image
+  value: 172.30.122.181:5000/foo/oshinko-rest
+- name: OSHINKO_SERVER_NAME
+  description: Name of the oshinko server service
+  generate: expression
+  from: "oshinko-rest-[a-z0-9]{4}"
+  required: true
+- name: OSHINKO_CLUSTER_IMAGE
+  description: Full name of the spark image to use when creating clusters
+  value: your-registry-hostname-here.io/apache-spark-2/spark20-hadoop27-openshift:2.0
+- name: OSHINKO_WEB_NAME
+  description: Name of the oshinko web service
+  generate: expression
+  from: "oshinko-web-[a-z0-9]{4}"
+  required: true
+- name: OSHINKO_WEB_IMAGE
+  description: Full name of the oshino web image
+  value: 172.30.122.181:5000/foo/o-webui
+- name: OSHINKO_WEB_HOST_IP
+  value: 10.19.20.9

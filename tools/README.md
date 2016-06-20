@@ -9,7 +9,18 @@ for the server.
 To use this template, an oshinko-rest-server image and a spark image must
 first be tagged into the OpenShift project. Then the template must be
 processed with the locations of the images. Finally, the output of the
-processed template can be used to create the service and pod.
+processed template can be used to create the service and pod. Check
+server-template.yaml to see the full list of parameters that may be
+specified and their defaults.
+
+## server-ui-template.yaml
+
+This is an extension of the server-template.yaml above and includes the
+oshinko-web-ui as well. This template requires that an oshinko-web-ui
+image also be tagged into the OpenShift project. Setup of the service
+account as described below and processing of the template is analogous
+to what is described for server-template.yaml. Check server-ui-template.yaml
+to see the full list of parameters that may be specified and their defaults.
 
 ## Service account
 
