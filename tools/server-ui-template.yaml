@@ -96,7 +96,7 @@ objects:
   metadata:
     name: ${OSHINKO_WEB_NAME}
     labels:
-      name: ${OSHINKO_WEB_NAME} 
+      name: ${OSHINKO_WEB_NAME}
   spec:
     ports:
       - name: o-web-port
@@ -138,4 +138,5 @@ parameters:
   description: Full name of the oshino web image
   required: true
 - name: OSHINKO_WEB_EXTERNAL_IP
+  description: The IP address applied to the external route for the webui
   required: true
