@@ -57,7 +57,7 @@ objects:
               - name: rest-port
                 containerPort: 8080
                 protocol: TCP
-        serviceaccount: oshinko
+        serviceAccount: oshinko
 parameters:
 - name: OSHINKO_SERVER_IMAGE
   description: Full name of the oshinko server image
