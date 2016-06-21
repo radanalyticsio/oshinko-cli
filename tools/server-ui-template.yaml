@@ -111,7 +111,7 @@ objects:
   metadata:
     name: ${OSHINKO_WEB_NAME}
   spec:
-    host: ${OSHINKO_WEB_NAME}.${OSHINKO_WEB_HOST_IP}.xip.io
+    host: ${OSHINKO_WEB_EXTERNAL_IP}
     to:
       kind: Service
       name: ${OSHINKO_WEB_NAME}
@@ -120,7 +120,7 @@ objects:
 parameters:
 - name: OSHINKO_SERVER_IMAGE
   description: Full name of the oshinko server image
-  value: 172.30.122.181:5000/foo/oshinko-rest
+  required: true
 - name: OSHINKO_SERVER_NAME
   description: Name of the oshinko server service
   generate: expression
@@ -128,7 +128,7 @@ parameters:
   required: true
 - name: OSHINKO_CLUSTER_IMAGE
   description: Full name of the spark image to use when creating clusters
-  value: your-registry-hostname-here.io/apache-spark-2/spark20-hadoop27-openshift:2.0
+  required: true
 - name: OSHINKO_WEB_NAME
   description: Name of the oshinko web service
   generate: expression
@@ -136,6 +136,6 @@ parameters:
   required: true
 - name: OSHINKO_WEB_IMAGE
   description: Full name of the oshino web image
-  value: 172.30.122.181:5000/foo/o-webui
-- name: OSHINKO_WEB_HOST_IP
-  value: 10.19.20.9
+  required: true
+- name: OSHINKO_WEB_EXTERNAL_IP
+  required: true
