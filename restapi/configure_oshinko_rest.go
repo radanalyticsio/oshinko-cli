@@ -4,10 +4,12 @@ import (
 	"crypto/tls"
 	"net/http"
 
-	errors "github.com/go-openapi/errors"
-	runtime "github.com/go-openapi/runtime"
+	"github.com/go-openapi/errors"
+	"github.com/go-openapi/runtime"
+	"github.com/go-openapi/swag"
 
 	"github.com/redhatanalytics/oshinko-rest/handlers"
+	"github.com/redhatanalytics/oshinko-rest/helpers/logging"
 	"github.com/redhatanalytics/oshinko-rest/restapi/operations"
 	"github.com/redhatanalytics/oshinko-rest/restapi/operations/clusters"
 	"github.com/redhatanalytics/oshinko-rest/restapi/operations/server"
@@ -15,8 +17,17 @@ import (
 
 // This file is safe to edit. Once it exists it will not be overwritten
 
+type oshinkoOptions struct {
+	LogFile string `long:"log-file" description:"the file to write logs into, defaults to stdout"`
+}
+
 func configureFlags(api *operations.OshinkoRestAPI) {
-	// api.CommandLineOptionsGroups = []swag.CommandLineOptionsGroup{ ... }
+	api.CommandLineOptionsGroups = []swag.CommandLineOptionsGroup{
+		{
+			ShortDescription: "Oshinko REST server options",
+			Options:          &oshinkoOptions{},
+		},
+	}
 }
 
 func configureAPI(api *operations.OshinkoRestAPI) http.Handler {
@@ -36,6 +47,18 @@ func configureAPI(api *operations.OshinkoRestAPI) http.Handler {
 
 	api.ServerShutdown = func() {}
 
+	for _, optsGroup := range api.CommandLineOptionsGroups {
+		opts, ok := optsGroup.Options.(*oshinkoOptions)
+		if ok == true {
+			if opts.LogFile != "" {
+				err := logging.SetLoggerFile(optsGroup.Options.(*oshinkoOptions).LogFile)
+				if err != nil {
+					logging.GetLogger().Println("unable to set log file;", err)
+				}
+			}
+		}
+	}
+
 	return setupGlobalMiddleware(api.Serve(setupMiddlewares))
 }
 
@@ -53,5 +76,6 @@ func setupMiddlewares(handler http.Handler) http.Handler {
 // The middleware configuration happens before anything, this middleware also applies to serving the swagger.json document.
 // So this is a good place to plug in a panic handling middleware, logging and metrics
 func setupGlobalMiddleware(handler http.Handler) http.Handler {
-	return handler
+	finalHandler := logging.AddLoggingHandler(handler)
+	return finalHandler
 }
