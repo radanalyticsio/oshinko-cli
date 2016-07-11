@@ -16,7 +16,7 @@ func (s *OshinkoRestTestSuite) TestCreateCluster(c *check.C) {
 
 	_, err := s.cli.Clusters.CreateCluster(params)
 
-	expectedStatusCode := 501
+	expectedStatusCode := 500
 	observedStatusCode := err.(*clusters.CreateClusterDefault).Code()
 
 	c.Assert(observedStatusCode, check.Equals, expectedStatusCode)
@@ -27,7 +27,7 @@ func (s *OshinkoRestTestSuite) TestDeleteSingleCluster(c *check.C) {
 
 	_, err := s.cli.Clusters.DeleteSingleCluster(params)
 
-	expectedStatusCode := 501
+	expectedStatusCode := 500
 	observedStatusCode := err.(*clusters.DeleteSingleClusterDefault).Code()
 
 	c.Assert(observedStatusCode, check.Equals, expectedStatusCode)
@@ -36,7 +36,7 @@ func (s *OshinkoRestTestSuite) TestDeleteSingleCluster(c *check.C) {
 func (s *OshinkoRestTestSuite) TestFindClusters(c *check.C) {
 	_, err := s.cli.Clusters.FindClusters(nil)
 
-	expectedStatusCode := 501
+	expectedStatusCode := 500
 	observedStatusCode := err.(*clusters.FindClustersDefault).Code()
 
 	c.Assert(observedStatusCode, check.Equals, expectedStatusCode)
@@ -47,7 +47,7 @@ func (s *OshinkoRestTestSuite) TestFindSingleCluster(c *check.C) {
 
 	_, err := s.cli.Clusters.FindSingleCluster(params)
 
-	expectedStatusCode := 501
+	expectedStatusCode := 500
 	observedStatusCode := err.(*clusters.FindSingleClusterDefault).Code()
 
 	c.Assert(observedStatusCode, check.Equals, expectedStatusCode)
@@ -62,7 +62,7 @@ func (s *OshinkoRestTestSuite) TestUpdateSingleCluster(c *check.C) {
 
 	_, err := s.cli.Clusters.UpdateSingleCluster(params)
 
-	expectedStatusCode := 501
+	expectedStatusCode := 500
 	observedStatusCode := err.(*clusters.UpdateSingleClusterDefault).Code()
 
 	c.Assert(observedStatusCode, check.Equals, expectedStatusCode)
