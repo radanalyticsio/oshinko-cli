@@ -5,6 +5,7 @@ package models
 
 import (
 	strfmt "github.com/go-openapi/strfmt"
+	"github.com/go-openapi/swag"
 
 	"github.com/go-openapi/errors"
 	"github.com/go-openapi/validate"
@@ -75,6 +76,21 @@ func (m *ClusterModel) validatePods(formats strfmt.Registry) error {
 
 	if err := validate.Required("pods", "body", m.Pods); err != nil {
 		return err
+	}
+
+	for i := 0; i < len(m.Pods); i++ {
+
+		if swag.IsZero(m.Pods[i]) { // not required
+			continue
+		}
+
+		if m.Pods[i] != nil {
+
+			if err := m.Pods[i].Validate(formats); err != nil {
+				return err
+			}
+		}
+
 	}
 
 	return nil

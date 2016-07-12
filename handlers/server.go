@@ -8,7 +8,7 @@ import (
 )
 
 // ServerResponse respond to the server info request
-func ServerResponse() middleware.Responder {
+func ServerResponse(params server.GetServerInfoParams) middleware.Responder {
 	vers := version.GetVersion()
 	name := version.GetAppName()
 	payload := server.GetServerInfoOKBodyBody{

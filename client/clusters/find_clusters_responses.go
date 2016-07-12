@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-openapi/errors"
 	"github.com/go-openapi/runtime"
+	"github.com/go-openapi/swag"
 	"github.com/go-openapi/validate"
 
 	strfmt "github.com/go-openapi/strfmt"
@@ -255,6 +256,21 @@ func (o *FindClustersOKBodyBody) validateClusters(formats strfmt.Registry) error
 
 	if err := validate.Required("findClustersOK"+"."+"clusters", "body", o.Clusters); err != nil {
 		return err
+	}
+
+	for i := 0; i < len(o.Clusters); i++ {
+
+		if swag.IsZero(o.Clusters[i]) { // not required
+			continue
+		}
+
+		if o.Clusters[i] != nil {
+
+			if err := o.Clusters[i].Validate(formats); err != nil {
+				return err
+			}
+		}
+
 	}
 
 	return nil

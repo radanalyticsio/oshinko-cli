@@ -442,7 +442,7 @@ func DeleteClusterResponse(params clusters.DeleteSingleClusterParams) middleware
 }
 
 // FindClustersResponse find a cluster and return its representation
-func FindClustersResponse() middleware.Responder {
+func FindClustersResponse(params clusters.FindClustersParams) middleware.Responder {
 
 	const mastermsg = "Unable to find spark masters"
 

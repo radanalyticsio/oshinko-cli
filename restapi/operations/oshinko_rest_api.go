@@ -70,6 +70,9 @@ type OshinkoRestAPI struct {
 
 	// Custom command line argument groups with their descriptions
 	CommandLineOptionsGroups []swag.CommandLineOptionsGroup
+
+	// User defined logger function.
+	Logger func(string, ...interface{})
 }
 
 // SetDefaultProduces sets the default produces media type

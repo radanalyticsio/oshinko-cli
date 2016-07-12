@@ -13,16 +13,16 @@ import (
 )
 
 // GetServerInfoHandlerFunc turns a function with the right signature into a get server info handler
-type GetServerInfoHandlerFunc func() middleware.Responder
+type GetServerInfoHandlerFunc func(GetServerInfoParams) middleware.Responder
 
 // Handle executing the request and returning a response
-func (fn GetServerInfoHandlerFunc) Handle() middleware.Responder {
-	return fn()
+func (fn GetServerInfoHandlerFunc) Handle(params GetServerInfoParams) middleware.Responder {
+	return fn(params)
 }
 
 // GetServerInfoHandler interface for that can handle valid get server info params
 type GetServerInfoHandler interface {
-	Handle() middleware.Responder
+	Handle(GetServerInfoParams) middleware.Responder
 }
 
 // NewGetServerInfo creates a new http.Handler for the get server info operation
@@ -42,13 +42,14 @@ type GetServerInfo struct {
 
 func (o *GetServerInfo) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	route, _ := o.Context.RouteInfo(r)
+	var Params = NewGetServerInfoParams()
 
-	if err := o.Context.BindValidRequest(r, route, nil); err != nil { // bind params
+	if err := o.Context.BindValidRequest(r, route, &Params); err != nil { // bind params
 		o.Context.Respond(rw, r, route.Produces, route, err)
 		return
 	}
 
-	res := o.Handler.Handle() // actually handle the request
+	res := o.Handler.Handle(Params) // actually handle the request
 
 	o.Context.Respond(rw, r, route.Produces, route, res)
 
