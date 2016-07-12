@@ -59,6 +59,8 @@ func configureAPI(api *operations.OshinkoRestAPI) http.Handler {
 		}
 	}
 
+	api.Logger = logging.GetLogger().Printf
+
 	return setupGlobalMiddleware(api.Serve(setupMiddlewares))
 }
 
