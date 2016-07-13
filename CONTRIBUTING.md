@@ -30,7 +30,7 @@ Dependencies
 ------------
 
 This project is using the vendor experiment that was merged in Go language
-version 1.5[[[1]]][ref1][[[2]]][ref2]. As such, **all** dependencies required by
+version 1.5[[1]][ref1][[2]][ref2]. As such, **all** dependencies required by
 oshinko-rest should be stored in the `vendor` directory at the top of the
 project, they should not be included through the standard `$GOPATH`
 mechanism.
