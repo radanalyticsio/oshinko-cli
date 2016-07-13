@@ -23,6 +23,6 @@ fi
 # 1.5 is still in use.
 export GO15VENDOREXPERIMENT=1
 
-godep go $1 $GO_OPTIONS -ldflags \
+go $1 $GO_OPTIONS -ldflags \
     "-X github.com/redhatanalytics/oshinko-rest/version.gitTag=$TAG -X github.com/redhatanalytics/oshinko-rest/version.appName=$APP" \
     $OUTPUT_FLAG $TARGET
