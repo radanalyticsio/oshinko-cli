@@ -53,6 +53,8 @@ objects:
                       fieldPath: metadata.namespace
               - name: OSHINKO_CLUSTER_IMAGE
                 value: ${OSHINKO_CLUSTER_IMAGE}
+              - name: OSHINKO_WEB_NAME
+                value: ${OSHINKO_WEB_NAME}
             ports:
               - name: o-rest-port
                 containerPort: 8080
@@ -97,6 +99,7 @@ objects:
     name: ${OSHINKO_WEB_NAME}
     labels:
       name: ${OSHINKO_WEB_NAME}
+      restname: ${OSHINKO_SERVER_NAME}
   spec:
     ports:
       - name: o-web-port

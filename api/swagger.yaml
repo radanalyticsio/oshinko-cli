@@ -135,9 +135,19 @@ paths:
                     description: |-
                       Application version
                     type: string
+                  web-url:
+                    description: |-
+                      Oshinko Web URL
+                    type: string
+                  web-service-name:
+                    description: |-
+                      Oshinko Web Service Name
+                    type: string
                 required:
                   - name
                   - version
+                  - web-url
+                  - web-service-name
               # INFO(elmiko) should we also add a versions object?
               # will we want to use a hard version in our URLs, for example
               # /v1/clusters

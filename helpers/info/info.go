@@ -78,3 +78,7 @@ func GetServiceAccountNS() ([]byte, error) {
 	}
 	return namespace, err
 }
+
+func GetWebServiceName() string {
+	return os.Getenv("OSHINKO_WEB_NAME")
+}
