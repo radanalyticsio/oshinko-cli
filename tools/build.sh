@@ -1,28 +1,36 @@
 #!/bin/sh
-set -ex
+set -e
 
-TAG=`git describe --tags --abbrev=0 2> /dev/null | head -n1`
-if [ -z $TAG ]; then
-    TAG='0.0.0'
-fi
+source tools/common.sh
 
-APP=oshinko-rest-server
+usage() {
+    echo
+    echo "Usage: $(basename $0) <command>"
+    echo "Commands for building the project, where <command> is one of the following:"
+    echo "  build -- build the project, storing in _output/"
+    echo "  install -- build and install binaries"
+    echo
+}
 
-if [ $1 = build ]; then
-    OUTPUT_FLAG="-o _output/oshinko-rest-server"
-fi
+case "$1" in
+    build)
+        OUTPUT_FLAG="-o _output/oshinko-rest-server"
+        TARGET=./cmd/oshinko-rest-server
+        ;;
+    install)
+        TARGET=./cmd/oshinko-rest-server
+        ;;
+    *)
+        usage
+        exit 0
+        ;;
+esac
 
-if [ $1 = test ]; then
-    TARGET=./tests
-    GO_OPTIONS=-v
-else
-    TARGET=./cmd/oshinko-rest-server
-fi
 
 # this export is needed for the vendor experiment for as long as go version
 # 1.5 is still in use.
 export GO15VENDOREXPERIMENT=1
 
-go $1 $GO_OPTIONS -ldflags \
-    "-X github.com/redhatanalytics/oshinko-rest/version.gitTag=$TAG -X github.com/redhatanalytics/oshinko-rest/version.appName=$APP" \
-    $OUTPUT_FLAG $TARGET
+set -x
+
+go $1 -ldflags "$TAG_APPNAME_FLAGS" $OUTPUT_FLAG $TARGET

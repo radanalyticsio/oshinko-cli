@@ -21,7 +21,7 @@ func PodTemplateSpec() *OPodTemplateSpec {
 	p := OPodTemplateSpec{}
 	p.Spec.DNSPolicy = kapi.DNSClusterFirst
 	p.Spec.RestartPolicy = kapi.RestartPolicyAlways
-        return &p
+	return &p
 }
 
 func (pt *OPodTemplateSpec) SetLabels(selectors map[string]string) *OPodTemplateSpec {

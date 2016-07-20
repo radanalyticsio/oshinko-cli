@@ -46,5 +46,48 @@ In this manner, we can ensure that the dependency chain for the oshinko-rest
 application will be frozen around the sources that are contained in the
 vendor directory.
 
+## Unit tests
+
+All code that is contributed to this project should include unit tests that
+exercise its functionality. Exceptions to this rule can be made in cases
+where the underlying functions rely on difficult to configure resources or
+the code is simple enough as to not have multiple execution paths.
+
+The unit tests reside in the `tests/unit` directory, and are namespaced in
+the `unittest` package. The [gocheck](http://labix.org/gocheck) framework is
+being used to structure these tests. To examine the suite structure or
+test runner hooks see the `tests/unit/configure_test.go` file.
+
+New tests should be added to files in the `tests/unit` directory, and should
+be named in the pattern of `<topic>_test.go`. Any function that matches
+the type and name of `func (*OshinkoUnitTestSuite) TestXxx (*check.C)` will
+be executed.
+
+The `OshinkoUnitTestSuite` structure can be found in the
+`tests/unit/configure_test.go` file. It can be modified with information
+that may need to be passed in to a test, or state that must be maintained
+between tests. This file also contains several functions that can be used
+for setting up and tearing down test or suites.
+
+To run the tests, either use the `test` target in the makefile to run all
+the tests, or use the `tools/test.sh` script to run them individually.
+
+### Example unit test
+
+This example shows a simple test being added to a file named
+`tests/unit/example_test.go`.
+
+```
+package unittest
+
+import (
+	"gopkg.in/check.v1"
+)
+
+func (s *OshinkoUnitTestSuite) TestExample(c *check.C) {
+    c.Assert(true, check.Equals, true)
+}
+```
+
 [ref1]: https://github.com/golang/go/commit/183cc0cd41f06f83cb7a2490a499e3f9101befff
 [ref2]: https://blog.gopheracademy.com/advent-2015/vendor-folder/

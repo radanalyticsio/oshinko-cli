@@ -56,14 +56,14 @@ func (dc *ODeploymentConfig) RollingStrategy() *ODeploymentConfig {
 }
 
 func (dc *ODeploymentConfig) RollingStrategyParams(rp *api.RollingDeploymentStrategyParams,
-                                                   req kapi.ResourceRequirements,
-                                                   lbls, anttns map[string]string) *ODeploymentConfig {
+	req kapi.ResourceRequirements,
+	lbls, anttns map[string]string) *ODeploymentConfig {
 	dc.Spec.Strategy = api.DeploymentStrategy{
-		Type: api.DeploymentStrategyTypeRolling,
+		Type:          api.DeploymentStrategyTypeRolling,
 		RollingParams: rp,
-		Resources: req,
-		Labels: lbls,
-		Annotations: anttns,
+		Resources:     req,
+		Labels:        lbls,
+		Annotations:   anttns,
 	}
 	return dc
 }
@@ -74,27 +74,27 @@ func (dc *ODeploymentConfig) RecreateStrategy() *ODeploymentConfig {
 }
 
 func (dc *ODeploymentConfig) RecreateStrategyParams(rp *api.RecreateDeploymentStrategyParams,
-                                                    req kapi.ResourceRequirements,
-                                                    lbls, anttns map[string]string) *ODeploymentConfig {
+	req kapi.ResourceRequirements,
+	lbls, anttns map[string]string) *ODeploymentConfig {
 	dc.Spec.Strategy = api.DeploymentStrategy{
-		Type: api.DeploymentStrategyTypeRecreate,
+		Type:           api.DeploymentStrategyTypeRecreate,
 		RecreateParams: rp,
-		Resources: req,
-		Labels: lbls,
-		Annotations: anttns,
+		Resources:      req,
+		Labels:         lbls,
+		Annotations:    anttns,
 	}
 	return dc
 }
 
 func (dc *ODeploymentConfig) CustomStrategyParams(cp *api.CustomDeploymentStrategyParams,
-                                                  req kapi.ResourceRequirements,
-                                                  lbls, anttns map[string]string) *ODeploymentConfig {
+	req kapi.ResourceRequirements,
+	lbls, anttns map[string]string) *ODeploymentConfig {
 	dc.Spec.Strategy = api.DeploymentStrategy{
-		Type: api.DeploymentStrategyTypeCustom,
+		Type:         api.DeploymentStrategyTypeCustom,
 		CustomParams: cp,
-		Resources: req,
-		Labels: lbls,
-		Annotations: anttns,
+		Resources:    req,
+		Labels:       lbls,
+		Annotations:  anttns,
 	}
 	return dc
 }
@@ -107,7 +107,7 @@ func (dc *ODeploymentConfig) TriggerOnConfigChange() *ODeploymentConfig {
 	}
 	dc.Spec.Triggers = append(
 		dc.Spec.Triggers,
-	        api.DeploymentTriggerPolicy{Type: api.DeploymentTriggerOnConfigChange})
+		api.DeploymentTriggerPolicy{Type: api.DeploymentTriggerOnConfigChange})
 	return dc
 }
 
@@ -121,7 +121,7 @@ func (dc *ODeploymentConfig) TriggerOnImageChange(ic *api.DeploymentTriggerImage
 			// If the Name matches, update
 			// TODO Namespace is allowed to be blank, we should probably handle that case at some point
 			if val.ImageChangeParams.From.Name == ic.From.Name &&
-			   val.ImageChangeParams.From.Namespace == ic.From.Namespace {
+				val.ImageChangeParams.From.Namespace == ic.From.Namespace {
 				dc.Spec.Triggers[idx].ImageChangeParams = ic
 				return dc
 			}
@@ -130,7 +130,7 @@ func (dc *ODeploymentConfig) TriggerOnImageChange(ic *api.DeploymentTriggerImage
 	dc.Spec.Triggers = append(
 		dc.Spec.Triggers,
 		api.DeploymentTriggerPolicy{Type: api.DeploymentTriggerOnImageChange,
-		                            ImageChangeParams: ic})
+			ImageChangeParams: ic})
 	return dc
 }
 
@@ -147,10 +147,12 @@ func (dc *ODeploymentConfig) GetPodTemplateSpecLabels() map[string]string {
 }
 
 func (dc *ODeploymentConfig) FindPort(name string) int {
-	for _, val := range dc.Spec.Template.Spec.Containers {
-		for _, port := range val.Ports {
-			if port.Name == name {
-				return port.ContainerPort
+	if dc.Spec.Template != nil {
+		for _, val := range dc.Spec.Template.Spec.Containers {
+			for _, port := range val.Ports {
+				if port.Name == name {
+					return port.ContainerPort
+				}
 			}
 		}
 	}

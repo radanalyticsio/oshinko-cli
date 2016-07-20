@@ -34,20 +34,20 @@ func (c *OContainer) EnvVars(envs ...kapi.EnvVar) *OContainer {
 }
 
 // TODO we might want to add some handling around building Quantities too
-func (pt *OContainer) ResourceLimit(name kapi.ResourceName, q resource.Quantity) *OContainer {
-	if pt.Resources.Limits == nil {
-		pt.Resources.Limits = make(kapi.ResourceList, 1)
+func (c *OContainer) ResourceLimit(name kapi.ResourceName, q resource.Quantity) *OContainer {
+	if c.Resources.Limits == nil {
+		c.Resources.Limits = make(kapi.ResourceList, 1)
 	}
-	pt.Resources.Limits[name] = q
-	return pt
+	c.Resources.Limits[name] = q
+	return c
 }
 
-func (pt *OContainer) ResourceRequest(name kapi.ResourceName, q resource.Quantity) *OContainer {
-	if pt.Resources.Requests == nil {
-		pt.Resources.Requests = make(kapi.ResourceList, 1)
+func (c *OContainer) ResourceRequest(name kapi.ResourceName, q resource.Quantity) *OContainer {
+	if c.Resources.Requests == nil {
+		c.Resources.Requests = make(kapi.ResourceList, 1)
 	}
-	pt.Resources.Requests[name] = q
-	return pt
+	c.Resources.Requests[name] = q
+	return c
 }
 
 func (c *OContainer) Ports(ports ...*OContainerPort) *OContainer {
@@ -62,7 +62,6 @@ func (c *OContainer) Ports(ports ...*OContainerPort) *OContainer {
 type OContainerPort struct {
 	kapi.ContainerPort
 }
-
 
 func ContainerPort(name string, port int) *OContainerPort {
 	cp := OContainerPort{}

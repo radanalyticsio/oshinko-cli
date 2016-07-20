@@ -1,4 +1,4 @@
-package tests
+package clienttest
 
 /*
 INFO(elmiko) This file exists as a helper to ensure that the tests in this
