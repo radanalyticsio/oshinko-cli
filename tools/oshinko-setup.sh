@@ -14,6 +14,7 @@ rpm -qa | grep -qw golang || sudo yum -y install golang
 rpm -qa | grep -qw make || sudo yum -y install make
 rpm -qa | grep -qw docker || sudo yum -y install docker
 rpm -qa | grep -qw wget || sudo yum -y install wget
+rpm -qa | grep -qw tar || sudo yum -y install tar
 
 ############ get the oshinko repos and build the images
 
@@ -103,3 +104,6 @@ OSHINKO_CLUSTER_IMAGE=$REGISTRY/oshinko/openshift-spark \
 OSHINKO_WEB_IMAGE=$REGISTRY/oshinko/oshinko-webui \
 OSHINKO_WEB_EXTERNAL_IP=mywebui.$WEBROUTEIP.xip.io > $CURRDIR/oshinko-template.json
 oc create -f $CURRDIR/oshinko-template.json
+
+# Add the s2I template
+oc create -f $SRCDIR/oshinko-s2i/pyspark/pyspark.json
