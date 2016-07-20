@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-source tools/common.sh
+. tools/common.sh
 
 usage() {
     echo
