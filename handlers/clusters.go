@@ -87,6 +87,34 @@ func retrieveMasterURL(client kclient.ServiceInterface, clustername string) stri
 	return ""
 }
 
+func checkForDeploymentConfigs(client oclient.DeploymentConfigInterface, clustername, namespace string) (bool, error) {
+	if client == nil {
+		osclient, err := osa.GetOpenShiftClient()
+		if err != nil {
+			return false, err
+		}
+		client = osclient.DeploymentConfigs(namespace)
+	}
+	selectorlist := makeSelector(masterType, clustername)
+	dcs, err := client.List(selectorlist)
+	if err != nil {
+		return false, err
+	}
+	if len(dcs.Items) == 0 {
+		return false, nil
+	}
+	selectorlist = makeSelector(workerType, clustername)
+	dcs, err = client.List(selectorlist)
+	if err != nil {
+		return false, err
+	}
+	if len(dcs.Items) == 0 {
+		return false, nil
+	}
+	return true, nil
+
+}
+
 func tostrptr(val string) *string {
 	v := val
 	return &v
@@ -110,6 +138,7 @@ func singleClusterResponse(clustername string,
 	}
 
 	// Note, we never expect "nil, nil" returned from the routine
+	// We should always return a cluster, or an error
 
 	// Build the response
 	cluster := &models.SingleCluster{&models.ClusterModel{}}
@@ -128,7 +157,12 @@ func singleClusterResponse(clustername string,
 	cluster.Cluster.MasterURL = tostrptr(masterurl)
 
 	//TODO make something real for status
-	cluster.Cluster.Status = tostrptr("Running")
+	if masterurl == "" {
+		cluster.Cluster.Status = tostrptr("MasterServiceMissing")
+
+	} else {
+		cluster.Cluster.Status = tostrptr("Running")
+	}
 
 	cluster.Cluster.Pods = []*models.ClusterModelPodsItems0{}
 
@@ -502,9 +536,13 @@ func FindClustersResponse(params clusters.FindClustersParams) middleware.Respond
 
 			// TODO we only want to count running pods (not terminating)
 			citem.WorkerCount = toint64ptr(cnt)
-			// TODO make something real for status
-			citem.Status = tostrptr("Running")
 			citem.MasterURL = tostrptr(retrieveMasterURL(sc, clustername))
+			// TODO make something real for status
+			if *citem.MasterURL == "" {
+				citem.Status = tostrptr("MasterServiceMissing")
+			} else {
+				citem.Status = tostrptr("Running")
+			}
 			payload.Clusters = append(payload.Clusters, citem)
 		}
 	}
@@ -534,6 +572,18 @@ func FindSingleClusterResponse(params clusters.FindSingleClusterParams) middlewa
 		return reterr(fail(err, nameSpaceMsg, 500))
 	}
 
+	// Before we do further checks, make sure that we have deploymentconfigs
+	// If either the master or the worker deploymentconfig are missing, we
+	// assume that the cluster is missing. These are the base objects that
+	// we use to create a cluster
+	ok, err := checkForDeploymentConfigs(nil, clustername, namespace)
+	if err != nil {
+		return reterr(fail(err, clientMsg, 500))
+	}
+	if !ok {
+		return reterr(fail(nil, "No such cluster", 404))
+	}
+
 	client, err := osa.GetKubeClient()
 	if err != nil {
 		return reterr(fail(err, clientMsg, 500))
@@ -554,18 +604,6 @@ func FindSingleClusterResponse(params clusters.FindSingleClusterParams) middlewa
 		return reterr(fail(err, progMsg, 500))
 	}
 
-	// If there are no pods and no master url, there may not be a cluster at all.
-	// Check for the existence of replication controllers as a final check
-	// If we don't find any, just return an empty response
-	if len(cluster.Cluster.Pods) == 0 && *cluster.Cluster.MasterURL == "" {
-		rcc := client.ReplicationControllers(namespace)
-		// make a selector for label "oshinko-cluster"
-		selectorlist := makeSelector("", clustername)
-		repls, err := rcc.List(selectorlist)
-		if err != nil || len(repls.Items) == 0 {
-			return clusters.NewFindSingleClusterOK()
-		}
-	}
 	return clusters.NewFindSingleClusterOK().WithPayload(cluster)
 }
 
