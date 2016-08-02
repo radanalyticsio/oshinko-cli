@@ -6,6 +6,7 @@ import (
 	"k8s.io/kubernetes/pkg/api/resource"
 
 	"github.com/redhatanalytics/oshinko-rest/helpers/containers"
+	"github.com/redhatanalytics/oshinko-rest/helpers/probes"
 )
 
 func (s *OshinkoUnitTestSuite) TestContainer(c *check.C) {
@@ -101,4 +102,24 @@ func (s *OshinkoUnitTestSuite) TestHostIP(c *check.C) {
 	expectedHostIP := "some.test.ip"
 	newContainerPort.HostIP(expectedHostIP)
 	c.Assert(newContainerPort.ContainerPort.HostIP, check.Equals, expectedHostIP)
+}
+
+func (s *OshinkoUnitTestSuite) TestSetLivenessProbe(c *check.C) {
+	newContainer := containers.Container("name", "image")
+	expectedPort := 8080
+	expectedProbe := probes.NewHTTPGetProbe(expectedPort)
+	newContainer.SetLivenessProbe(expectedProbe)
+	c.Assert(newContainer.LivenessProbe, check.DeepEquals, &expectedProbe)
+	c.Assert(newContainer.LivenessProbe.Handler.HTTPGet.Port.IntValue(),
+		check.Equals, expectedPort)
+}
+
+func (s *OshinkoUnitTestSuite) TestSetReadinessProbe(c *check.C) {
+	newContainer := containers.Container("name", "image")
+	expectedPort := 8080
+	expectedProbe := probes.NewHTTPGetProbe(expectedPort)
+	newContainer.SetReadinessProbe(expectedProbe)
+	c.Assert(newContainer.ReadinessProbe, check.DeepEquals, &expectedProbe)
+	c.Assert(newContainer.ReadinessProbe.Handler.HTTPGet.Port.IntValue(),
+		check.Equals, expectedPort)
 }

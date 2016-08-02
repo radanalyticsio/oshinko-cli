@@ -13,6 +13,7 @@ import (
 	odc "github.com/redhatanalytics/oshinko-rest/helpers/deploymentconfigs"
 	"github.com/redhatanalytics/oshinko-rest/helpers/info"
 	opt "github.com/redhatanalytics/oshinko-rest/helpers/podtemplates"
+	"github.com/redhatanalytics/oshinko-rest/helpers/probes"
 	osv "github.com/redhatanalytics/oshinko-rest/helpers/services"
 	"github.com/redhatanalytics/oshinko-rest/models"
 	"github.com/redhatanalytics/oshinko-rest/restapi/operations/clusters"
@@ -206,10 +207,13 @@ func sparkWorker(namespace string,
 	// Create a pod template spec with the matching label
 	pt := opt.PodTemplateSpec().Label(clusterLabel, clustername).Label(typeLabel, workerType)
 
-	// Create a container with the correct start command
-	cont := ocon.Container(
-		dc.Name,
-		image).Command("/start-worker", masterurl)
+	// Create a container with the correct ports and start command
+	webport := 8081
+	webp := ocon.ContainerPort(webPortName, webport)
+	cont := ocon.Container(dc.Name, image).
+		Command("/start-worker", masterurl).
+		Ports(webp).
+		SetLivenessProbe(probes.NewHTTPGetProbe(webport))
 
 	// Finally, assign the container to the pod template spec and
 	// assign the pod template spec to the deployment config
@@ -232,11 +236,14 @@ func sparkMaster(namespace, image, clustername, masterhost string) *odc.ODeploym
 		Label(typeLabel, masterType)
 
 	// Create a container with the correct ports and start command
+	httpProbe := probes.NewHTTPGetProbe(8080)
 	masterp := ocon.ContainerPort(masterPortName, 7077)
 	webp := ocon.ContainerPort(webPortName, 8080)
-	cont := ocon.Container(
-		dc.Name,
-		image).Command("/start-master", masterhost).Ports(masterp, webp)
+	cont := ocon.Container(dc.Name, image).
+		Command("/start-master", masterhost).
+		Ports(masterp, webp).
+		SetLivenessProbe(httpProbe).
+		SetReadinessProbe(httpProbe)
 
 	// Finally, assign the container to the pod template spec and
 	// assign the pod template spec to the deployment config
