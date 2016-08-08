@@ -1,12 +1,24 @@
 #!/bin/bash
 
-if [ -z $1 ]
-then
-    echo "for the moment, pass me an IP address to use in the exposed route for oshinko-web, for example:"
-    echo "./oshinko-setup 10.16.40.70"
-    exit
-fi
-WEBROUTEIP=$1
+
+while getopts :w:h opt; do
+    case $opt in
+        w)
+            WEBROUTE=$OPTARG
+            ;;
+        h)
+            echo "Usage: oshinko-setup.sh [-w <hostname to use in exposed route to oshinko-web]"
+            echo "Example: oshinko-setup.sh -w mywebui.10.16.40.70.xip.io"
+            echo "    results in the oshinko web service exposed at mywebui.10.16.40.70.xip.io"
+            echo "If -w is not set, the default route will be used based on routing suffix, etc set at installation"
+            exit
+            ;;
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+            exit
+            ;;
+    esac
+done
 
 # install some stuff we need for building
 rpm -qa | grep -qw git || sudo yum -y install git
@@ -97,12 +109,18 @@ oc create sa oshinko                          # note, VV, first oshinko is the p
 oc policy add-role-to-user admin system:serviceaccount:oshinko:oshinko -n oshinko
 
 # process the standard oshinko template and launch it
+if [ -n "$WEBROUTE" ] ; then
+    ROUTEVALUE=$WEBROUTE
+fi
+
 cd $SRCDIR/oshinko-rest
+
 oc process -f tools/server-ui-template.yaml \
 OSHINKO_SERVER_IMAGE=$REGISTRY/oshinko/oshinko-rest-server \
 OSHINKO_CLUSTER_IMAGE=$REGISTRY/oshinko/openshift-spark \
 OSHINKO_WEB_IMAGE=$REGISTRY/oshinko/oshinko-webui \
-OSHINKO_WEB_EXTERNAL_IP=mywebui.$WEBROUTEIP.xip.io > $CURRDIR/oshinko-template.json
+OSHINKO_WEB_ROUTE_HOSTNAME=$ROUTEVALUE > $CURRDIR/oshinko-template.json
+
 oc create -f $CURRDIR/oshinko-template.json
 
 # Add the s2I template
