@@ -161,17 +161,13 @@ parameters:
   required: true
 - name: OSHINKO_SERVER_NAME
   description: Name of the oshinko server service
-  generate: expression
-  from: "oshinko-rest-[a-z0-9]{4}"
-  required: true
+  value: "oshinko-rest"
 - name: OSHINKO_CLUSTER_IMAGE
   description: Full name of the spark image to use when creating clusters
   required: true
 - name: OSHINKO_WEB_NAME
   description: Name of the oshinko web service
-  generate: expression
-  from: "oshinko-web-[a-z0-9]{4}"
-  required: true
+  value: "oshinko-web"
 - name: OSHINKO_WEB_IMAGE
   description: Full name of the oshino web image
   required: true

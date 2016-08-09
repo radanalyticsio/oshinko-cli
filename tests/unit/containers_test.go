@@ -36,7 +36,7 @@ func (s *OshinkoUnitTestSuite) TestEnvVars(c *check.C) {
 	expectedEnv := []kapi.EnvVar{
 		kapi.EnvVar{Name: "name1", Value: "value1"},
 		kapi.EnvVar{Name: "name2", Value: "value2"}}
-	newContainer.EnvVars(expectedEnv[0], expectedEnv[1])
+	newContainer.EnvVars(expectedEnv)
 	c.Assert(newContainer.Container.Env, check.DeepEquals, expectedEnv)
 }
 

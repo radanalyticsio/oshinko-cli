@@ -28,7 +28,7 @@ func (c *OContainer) EnvVar(name, value string) *OContainer {
 	return c
 }
 
-func (c *OContainer) EnvVars(envs ...kapi.EnvVar) *OContainer {
+func (c *OContainer) EnvVars(envs []kapi.EnvVar) *OContainer {
 	c.Container.Env = envs
 	return c
 }
