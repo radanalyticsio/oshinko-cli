@@ -12,6 +12,7 @@ import (
 	osa "github.com/redhatanalytics/oshinko-rest/helpers/authentication"
 	ocon "github.com/redhatanalytics/oshinko-rest/helpers/containers"
 	odc "github.com/redhatanalytics/oshinko-rest/helpers/deploymentconfigs"
+	oe "github.com/redhatanalytics/oshinko-rest/helpers/errors"
 	"github.com/redhatanalytics/oshinko-rest/helpers/info"
 	opt "github.com/redhatanalytics/oshinko-rest/helpers/podtemplates"
 	"github.com/redhatanalytics/oshinko-rest/helpers/probes"
@@ -41,7 +42,7 @@ func generalErr(err error, title, msg string, code int32) *models.ErrorResponse 
 	if err != nil {
 		msg = msg + ", err: " + err.Error()
 	}
-	return makeSingleErrorResponse(code, title, msg)
+	return oe.NewSingleErrorResponse(code, title, msg)
 }
 
 func responseFailure(err error, msg string, code int32) *models.ErrorResponse {
