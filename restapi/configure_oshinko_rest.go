@@ -9,6 +9,7 @@ import (
 	"github.com/go-openapi/swag"
 
 	"github.com/redhatanalytics/oshinko-rest/handlers"
+	oe "github.com/redhatanalytics/oshinko-rest/helpers/errors"
 	"github.com/redhatanalytics/oshinko-rest/helpers/logging"
 	"github.com/redhatanalytics/oshinko-rest/restapi/operations"
 	"github.com/redhatanalytics/oshinko-rest/restapi/operations/clusters"
@@ -77,7 +78,9 @@ func setupMiddlewares(handler http.Handler) http.Handler {
 
 // The middleware configuration happens before anything, this middleware also applies to serving the swagger.json document.
 // So this is a good place to plug in a panic handling middleware, logging and metrics
-func setupGlobalMiddleware(handler http.Handler) http.Handler {
-	finalHandler := logging.AddLoggingHandler(handler)
+func setupGlobalMiddleware(handler http.Handler) (finalHandler http.Handler) {
+	finalHandler = handler
+	finalHandler = oe.AddErrorHandler(finalHandler)
+	finalHandler = logging.AddLoggingHandler(finalHandler)
 	return finalHandler
 }

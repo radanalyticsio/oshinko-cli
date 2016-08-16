@@ -23,6 +23,7 @@ coverage_packages = [
     'helpers/authentication',
     'helpers/containers',
     'helpers/deploymentconfigs',
+    'helpers/errors',
     'helpers/info',
     'helpers/logging',
     'helpers/podtemplates',
