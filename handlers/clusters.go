@@ -677,7 +677,15 @@ func UpdateSingleClusterResponse(params clusters.UpdateSingleClusterParams) midd
 	if err != nil || len(repls.Items) == 0 {
 		return reterr(fail(err, findReplMsg, 500))
 	}
-	repl := repls.Items[0]
+	// Use the latest replication controller.  There could be more than one
+	// if the user did something like oc env to set a new env var on a deployment
+	newestRepl := repls.Items[0]
+	for i := 0; i < len(repls.Items); i++ {
+		if repls.Items[i].CreationTimestamp.Unix() > newestRepl.CreationTimestamp.Unix() {
+			newestRepl = repls.Items[i]
+		}
+	}
+	repl := newestRepl
 
 	// If the current replica count does not match the request, update the replication controller
 	if repl.Spec.Replicas != workercount {
