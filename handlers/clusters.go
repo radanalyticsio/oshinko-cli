@@ -199,7 +199,14 @@ func makeEnvVars(clustername string) []kapi.EnvVar {
 	envs = append(envs, kapi.EnvVar{Name: "OSHINKO_SPARK_CLUSTER", Value: clustername})
 	envs = append(envs, kapi.EnvVar{Name: "OSHINKO_REST_HOST", Value: os.Getenv("OSHINKO_REST_SERVICE_HOST")})
 	envs = append(envs, kapi.EnvVar{Name: "OSHINKO_REST_PORT", Value: os.Getenv("OSHINKO_REST_SERVICE_PORT")})
+	return envs
+}
 
+func makeWorkerEnvVars(clustername string) []kapi.EnvVar {
+	envs := []kapi.EnvVar{}
+
+	envs = makeEnvVars(clustername)
+	envs = append(envs, kapi.EnvVar{Name: "SPARK_MASTER_ADDRESS", Value: "spark://" + clustername + ":7077"})
 	return envs
 }
 
@@ -223,9 +230,8 @@ func sparkWorker(namespace string,
 	webport := 8081
 	webp := ocon.ContainerPort(webPortName, webport)
 	cont := ocon.Container(dc.Name, image).
-		Command("/start-worker", masterurl).
 		Ports(webp).
-		SetLivenessProbe(probes.NewHTTPGetProbe(webport)).EnvVars(makeEnvVars(clustername))
+		SetLivenessProbe(probes.NewHTTPGetProbe(webport)).EnvVars(makeWorkerEnvVars(clustername))
 
 	// Finally, assign the container to the pod template spec and
 	// assign the pod template spec to the deployment config
@@ -252,7 +258,6 @@ func sparkMaster(namespace, image, clustername, masterhost string) *odc.ODeploym
 	masterp := ocon.ContainerPort(masterPortName, 7077)
 	webp := ocon.ContainerPort(webPortName, 8080)
 	cont := ocon.Container(dc.Name, image).
-		Command("/start-master", masterhost).
 		Ports(masterp, webp).
 		SetLivenessProbe(httpProbe).
 		SetReadinessProbe(httpProbe).EnvVars(makeEnvVars(clustername))

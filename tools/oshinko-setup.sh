@@ -1,14 +1,19 @@
 #!/bin/bash
 
 
-while getopts :w:h opt; do
+while getopts :s:w:h opt; do
     case $opt in
+        s)
+            SPARK_IMAGE=$OPTARG
+            ;;
         w)
             WEBROUTE=$OPTARG
             ;;
         h)
             echo "Usage: oshinko-setup.sh [-w <hostname to use in exposed route to oshinko-web]"
             echo "Example: oshinko-setup.sh -w mywebui.10.16.40.70.xip.io"
+            echo "Usage: oshinko-setup.sh [-s <spark docker image to use for clusters>]"
+            echo "Example: oshinko-setup.sh -s myregistry.com:5000/sparkimage"
             echo "    results in the oshinko web service exposed at mywebui.10.16.40.70.xip.io"
             echo "If -w is not set, the default route will be used based on routing suffix, etc set at installation"
             exit
@@ -44,9 +49,6 @@ fi
 if [ ! -d "oshinko-webui" ]; then
     git clone git@github.com:redhatanalytics/oshinko-webui
 fi
-if [ ! -d "openshift-spark" ]; then
-    git clone git@github.com:redhatanalytics/openshift-spark
-fi
 if [ ! -d "oshinko-s2i" ]; then
     git clone git@github.com:redhatanalytics/oshinko-s2i
 fi
@@ -55,9 +57,14 @@ cd $SRCDIR/oshinko-rest; sudo make image
 cd $SRCDIR/oshinko-webui; sudo docker build -t oshinko-webui .
 cd $SRCDIR/oshinko-s2i; make build
 
-# this works but it can probably be smarter .. maybe hadoop doesn't
-# have to download each time. Maybe we can check for current images? 
-cd $SRCDIR/openshift-spark; sudo make build
+if [ -z $SPARK_IMAGE ]; then
+    if [ ! -d "openshift-spark" ]; then
+        git clone git@github.com:redhatanalytics/openshift-spark
+    fi
+    # this works but it can probably be smarter .. maybe hadoop doesn't
+    # have to download each time. Maybe we can check for current images?
+    cd $SRCDIR/openshift-spark; sudo make build
+fi
 
 ########### get the origin image and run oc cluster up
 ########### this part can be replaced with some other openshift install recipe
@@ -100,12 +107,17 @@ while [ $r -ne 0 ]; do
     sleep 1
 done
 
+if [ -z $SPARK_IMAGE ]; then
+    sudo docker tag openshift-spark $REGISTRY/oshinko/oshinko-spark
+else
+    sudo docker tag $SPARK_IMAGE $REGISTRY/oshinko/oshinko-spark
+fi
+sudo docker push $REGISTRY/oshinko/oshinko-spark
+
 sudo docker tag oshinko-rest-server $REGISTRY/oshinko/oshinko-rest-server
 sudo docker push $REGISTRY/oshinko/oshinko-rest-server
 sudo docker tag oshinko-webui $REGISTRY/oshinko/oshinko-webui
 sudo docker push $REGISTRY/oshinko/oshinko-webui
-sudo docker tag openshift-spark $REGISTRY/oshinko/openshift-spark
-sudo docker push $REGISTRY/oshinko/openshift-spark
 sudo docker tag daikon-pyspark $REGISTRY/oshinko/daikon-pyspark
 sudo docker push $REGISTRY/oshinko/daikon-pyspark
 
@@ -122,11 +134,11 @@ cd $SRCDIR/oshinko-rest
 
 oc process -f tools/server-ui-template.yaml \
 OSHINKO_SERVER_IMAGE=$REGISTRY/oshinko/oshinko-rest-server \
-OSHINKO_CLUSTER_IMAGE=$REGISTRY/oshinko/openshift-spark \
+OSHINKO_CLUSTER_IMAGE=$REGISTRY/oshinko/oshinko-spark \
 OSHINKO_WEB_IMAGE=$REGISTRY/oshinko/oshinko-webui \
 OSHINKO_WEB_ROUTE_HOSTNAME=$ROUTEVALUE > $CURRDIR/oshinko-template.json
 
 oc create -f $CURRDIR/oshinko-template.json
 
 # Add the s2I template
-oc create -f $SRCDIR/oshinko-s2i/pyspark/pyspark.json
+oc create -f $SRCDIR/oshinko-s2i/pyspark/pysparkdc.json
