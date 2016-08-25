@@ -228,7 +228,7 @@ paths:
           headers:
             Location:
               description: |-
-                URL of the cluster, this is oshinko specific
+                URL of the cluster detail page within the oshinko rest server
               type: string
           schema:
             $ref: "#/definitions/SingleCluster"
