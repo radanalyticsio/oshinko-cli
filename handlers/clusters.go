@@ -390,7 +390,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	if err != nil {
 		return reterr(responseFailure(err, respMsg, 500))
 	}
-	return clusters.NewCreateClusterCreated().WithLocation(masterurl).WithPayload(cluster)
+	return clusters.NewCreateClusterCreated().WithLocation("/clusters/"+clustername).WithPayload(cluster)
 }
 
 func waitForCount(client kclient.ReplicationControllerInterface, name string, count int) {
