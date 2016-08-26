@@ -22,6 +22,10 @@ definitions:
             description: |-
               URL to the spark master
             type: string
+          masterWebUrl:
+            description: |-
+              URL to the spark master web UI
+            type: string
           pods:
             description: |-
               Pods that make up the cluster
@@ -48,6 +52,7 @@ definitions:
         required:
           - status
           - masterUrl
+          - masterWebUrl
           - pods
   ErrorModel:
     properties:
@@ -197,12 +202,17 @@ paths:
                       description: |-
                         URL to the spark master
                       type: string
+                    masterWebUrl:
+                      description: |-
+                        URL to the spark master web UI
+                      type: string
                   required:
                     - name
                     - href
                     - status
                     - workerCount
                     - masterUrl
+                    - masterWebUrl
         default:
           description: |-
             Unexpected error

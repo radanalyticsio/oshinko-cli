@@ -36,7 +36,12 @@ const masterType = "master"
 const webuiType = "webui"
 
 const masterPortName = "spark-master"
+const masterPort = 7077
 const webPortName = "spark-webui"
+const webPort = 8080
+
+// The suffix to add to the spark master hostname (clustername) for the web service
+const webServiceSuffix = "-ui"
 
 func generalErr(err error, title, msg string, code int32) *models.ErrorResponse {
 	if err != nil {
@@ -206,7 +211,12 @@ func makeWorkerEnvVars(clustername string) []kapi.EnvVar {
 	envs := []kapi.EnvVar{}
 
 	envs = makeEnvVars(clustername)
-	envs = append(envs, kapi.EnvVar{Name: "SPARK_MASTER_ADDRESS", Value: "spark://" + clustername + ":7077"})
+	envs = append(envs, kapi.EnvVar{
+		Name:  "SPARK_MASTER_ADDRESS",
+		Value: "spark://" + clustername + ":" + strconv.Itoa(masterPort)})
+	envs = append(envs, kapi.EnvVar{
+		Name:  "SPARK_MASTER_UI_ADDRESS",
+		Value: "http://" + clustername + webServiceSuffix + ":" + strconv.Itoa(webPort)})
 	return envs
 }
 
@@ -254,9 +264,9 @@ func sparkMaster(namespace, image, clustername, masterhost string) *odc.ODeploym
 		Label(typeLabel, masterType)
 
 	// Create a container with the correct ports and start command
-	httpProbe := probes.NewHTTPGetProbe(8080)
-	masterp := ocon.ContainerPort(masterPortName, 7077)
-	webp := ocon.ContainerPort(webPortName, 8080)
+	httpProbe := probes.NewHTTPGetProbe(webPort)
+	masterp := ocon.ContainerPort(masterPortName, masterPort)
+	webp := ocon.ContainerPort(webPortName, webPort)
 	cont := ocon.Container(dc.Name, image).
 		Ports(masterp, webp).
 		SetLivenessProbe(httpProbe).
@@ -340,7 +350,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 		clustername, masterType,
 		masterdc.GetPodTemplateSpecLabels())
 
-	websv, _ := service(masterhost+"-ui",
+	websv, _ := service(masterhost+webServiceSuffix,
 		masterdc.FindPort(webPortName),
 		clustername, webuiType,
 		masterdc.GetPodTemplateSpecLabels())
