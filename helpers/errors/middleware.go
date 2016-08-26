@@ -100,6 +100,8 @@ func AddErrorHandler(next http.Handler) http.Handler {
 					NewSingleErrorResponse(int32(er.status), statusCode(er.status), mesg))
 			}
 		}
-		w.Write(*resp)
+		if resp != nil {
+			w.Write(*resp)
+		}
 	})
 }

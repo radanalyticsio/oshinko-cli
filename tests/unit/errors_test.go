@@ -22,8 +22,9 @@ func (s *OshinkoUnitTestSuite) TestNewSingleErrorReponse(c *check.C) {
 }
 
 type testResponseWriter struct {
-	header   http.Header
-	response *[]byte
+	header      http.Header
+	response    *[]byte
+	writeCalled bool
 }
 
 func (w *testResponseWriter) Header() http.Header {
@@ -77,4 +78,12 @@ func (s *OshinkoUnitTestSuite) TestAddErrorHandler(c *check.C) {
 	wrappedHandler.ServeHTTP(&testWriter, &testRequest)
 	c.Assert(*testWriter.response, check.DeepEquals, expectedResponse)
 	c.Assert(observedWriteLen, check.Equals, expectedWriteLen)
+
+	testHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(204)
+	})
+	wrappedHandler = errors.AddErrorHandler(testHandler)
+	testWriter = testResponseWriter{}
+	wrappedHandler.ServeHTTP(&testWriter, &testRequest)
+	c.Assert(testWriter.writeCalled, check.Equals, false)
 }
