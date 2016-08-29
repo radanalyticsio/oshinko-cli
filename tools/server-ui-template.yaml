@@ -9,8 +9,6 @@ objects:
   apiVersion: v1
   metadata:
     name: ${OSHINKO_SERVER_NAME}
-    annotations:
-      service.alpha.openshift.io/dependencies: '[{"name":"${OSHINKO_WEB_NAME}","namespace":"","kind":"Service"}]'
     labels:
       name: ${OSHINKO_SERVER_NAME}
   spec:
@@ -26,6 +24,8 @@ objects:
   apiVersion: v1
   metadata:
     name: ${OSHINKO_WEB_NAME}
+    annotations:
+      service.alpha.openshift.io/dependencies: '[{"name":"${OSHINKO_SERVER_NAME}","namespace":"","kind":"Service"}]'
     labels:
       name: ${OSHINKO_WEB_NAME}
       restname: ${OSHINKO_SERVER_NAME}
