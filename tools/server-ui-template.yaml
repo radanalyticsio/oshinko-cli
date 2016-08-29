@@ -9,11 +9,29 @@ objects:
   apiVersion: v1
   metadata:
     name: ${OSHINKO_SERVER_NAME}
+    annotations:
+      service.alpha.openshift.io/dependencies: '[{"name":"${OSHINKO_WEB_NAME}","namespace":"","kind":"Service"}]'
     labels:
       name: ${OSHINKO_SERVER_NAME}
   spec:
     ports:
       - name: o-rest-port
+        protocol: TCP
+        port: 8081
+        targetPort: 8081
+    selector:
+      name: ${OSHINKO_SERVER_NAME}
+
+- kind: Service
+  apiVersion: v1
+  metadata:
+    name: ${OSHINKO_WEB_NAME}
+    labels:
+      name: ${OSHINKO_WEB_NAME}
+      restname: ${OSHINKO_SERVER_NAME}
+  spec:
+    ports:
+      - name: o-web-port
         protocol: TCP
         port: 8080
         targetPort: 8080
@@ -23,7 +41,7 @@ objects:
 - kind: DeploymentConfig
   apiVersion: v1
   metadata:
-    name: ${OSHINKO_SERVER_NAME}
+    name: ${OSHINKO_DEPLOYMENT_NAME}
   spec:
     strategy:
       type: Rolling
@@ -42,7 +60,7 @@ objects:
             image: ${OSHINKO_SERVER_IMAGE}
             env:
               - name: OSHINKO_SERVER_PORT
-                value: "8080"
+                value: "8081"
               - name: OSHINKO_REST_POD_NAME
                 valueFrom:
                   fieldRef:
@@ -57,13 +75,13 @@ objects:
                 value: ${OSHINKO_WEB_NAME}
             ports:
               - name: o-rest-port
-                containerPort: 8080
+                containerPort: 8081
                 protocol: TCP
             readinessProbe:
               failureThreshold: 3
               httpGet:
                 path: /
-                port: 8080
+                port: 8081
                 scheme: HTTP
               periodSeconds: 10
               successThreshold: 1
@@ -72,40 +90,18 @@ objects:
               failureThreshold: 3
               httpGet:
                 path: /
-                port: 8080
+                port: 8081
                 scheme: HTTP
               periodSeconds: 10
               successThreshold: 1
               timeoutSeconds: 1
-        serviceAccount: oshinko
-
-- kind: DeploymentConfig
-  apiVersion: v1
-  metadata:
-    name: ${OSHINKO_WEB_NAME}
-    labels:
-      name: ${OSHINKO_WEB_NAME}
-  spec:
-    replicas: 1
-    selector:
-      name: ${OSHINKO_WEB_NAME}
-    strategy:
-      type: Rolling
-    triggers:
-      - type: ConfigChange
-    template:
-      metadata:
-        labels:
-          name: ${OSHINKO_WEB_NAME}
-      spec:
-        containers:
           - name: ${OSHINKO_WEB_NAME}
             image: ${OSHINKO_WEB_IMAGE}
             env:
               - name: OPENSHIFT_OSHINKO_REST
-                value: ${OSHINKO_SERVER_NAME}
+                value: 127.0.0.1
               - name: OPENSHIFT_OSHINKO_REST_PORT
-                value: "8080"
+                value: "8081"
             ports:
               - name: o-web-port
                 containerPort: 8080
@@ -128,21 +124,7 @@ objects:
               periodSeconds: 10
               successThreshold: 1
               timeoutSeconds: 1
-- kind: Service
-  apiVersion: v1
-  metadata:
-    name: ${OSHINKO_WEB_NAME}
-    labels:
-      name: ${OSHINKO_WEB_NAME}
-      restname: ${OSHINKO_SERVER_NAME}
-  spec:
-    ports:
-      - name: o-web-port
-        protocol: TCP
-        port: 8080
-        targetPort: 8080
-    selector:
-      name: ${OSHINKO_WEB_NAME}
+        serviceAccount: oshinko
 
 - kind: Route
   apiVersion: v1
@@ -173,3 +155,7 @@ parameters:
   required: true
 - name: OSHINKO_WEB_ROUTE_HOSTNAME
   description: The hostname used to create the external route for the webui
+- name: OSHINKO_DEPLOYMENT_NAME
+  description: Name of the oshinko deployment
+  value: "oshinko"
+
