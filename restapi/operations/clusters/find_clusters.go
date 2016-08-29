@@ -74,6 +74,12 @@ type ClustersItems0 struct {
 	*/
 	MasterURL *string `json:"masterUrl"`
 
+	/* URL to the spark master web UI
+
+	Required: true
+	*/
+	MasterWebURL *string `json:"masterWebUrl"`
+
 	/* Name of the cluster
 
 	Required: true
@@ -103,6 +109,11 @@ func (o *ClustersItems0) Validate(formats strfmt.Registry) error {
 	}
 
 	if err := o.validateMasterURL(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
+	if err := o.validateMasterWebURL(formats); err != nil {
 		// prop
 		res = append(res, err)
 	}
@@ -140,6 +151,15 @@ func (o *ClustersItems0) validateHref(formats strfmt.Registry) error {
 func (o *ClustersItems0) validateMasterURL(formats strfmt.Registry) error {
 
 	if err := validate.Required("masterUrl", "body", o.MasterURL); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (o *ClustersItems0) validateMasterWebURL(formats strfmt.Registry) error {
+
+	if err := validate.Required("masterWebUrl", "body", o.MasterWebURL); err != nil {
 		return err
 	}
 

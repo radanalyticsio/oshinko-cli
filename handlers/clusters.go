@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -54,10 +53,6 @@ func responseFailure(err error, msg string, code int32) *models.ErrorResponse {
 	return generalErr(err, "Cannot build response", msg, code)
 }
 
-func sparkMasterURL(name string, port *kapi.ServicePort) string {
-	return "spark://" + name + ":" + strconv.Itoa(port.Port)
-}
-
 func makeSelector(otype string, clustername string) kapi.ListOptions {
 	// Build a selector list based on type and/or cluster name
 	ls := labels.NewSelector()
@@ -85,12 +80,16 @@ func countWorkers(client kclient.PodInterface, clustername string) (int64, *kapi
 	return cnt, pods, err
 }
 
-func retrieveMasterURL(client kclient.ServiceInterface, clustername string) string {
-	selectorlist := makeSelector(masterType, clustername)
+func retrieveServiceURL(client kclient.ServiceInterface, stype, clustername string) string {
+	selectorlist := makeSelector(stype, clustername)
 	srvs, err := client.List(selectorlist)
 	if err == nil && len(srvs.Items) != 0 {
 		srv := srvs.Items[0]
-		return sparkMasterURL(srv.Name, &srv.Spec.Ports[0])
+		scheme := "http://"
+		if stype == masterType {
+			scheme = "spark://"
+		}
+		return scheme + srv.Name + ":" + strconv.Itoa(srv.Spec.Ports[0].Port)
 	}
 	return ""
 }
@@ -135,7 +134,7 @@ func toint64ptr(val int64) *int64 {
 
 func singleClusterResponse(clustername string,
 	pc kclient.PodInterface,
-	sc kclient.ServiceInterface, masterurl string) (*models.SingleCluster, error) {
+	sc kclient.ServiceInterface) (*models.SingleCluster, error) {
 
 	addpod := func(p kapi.Pod) *models.ClusterModelPodsItems0 {
 		pod := new(models.ClusterModelPodsItems0)
@@ -152,17 +151,10 @@ func singleClusterResponse(clustername string,
 	cluster := &models.SingleCluster{&models.ClusterModel{}}
 	cluster.Cluster.Name = tostrptr(clustername)
 
-	// If we passed in a master url, just use it
-	if masterurl == "" {
-		// If the developer passed in a nil sc, error!
-		if sc == nil {
-			return nil, errors.New(
-				"Programming error," +
-					"building cluster response but masterurl and service client are empty ")
-		}
-		masterurl = retrieveMasterURL(sc, clustername)
-	}
+	masterurl := retrieveServiceURL(sc, masterType, clustername)
+	masterweburl := retrieveServiceURL(sc, webuiType, clustername)
 	cluster.Cluster.MasterURL = tostrptr(masterurl)
+	cluster.Cluster.MasterWebURL = tostrptr(masterweburl)
 
 	//TODO make something real for status
 	if masterurl == "" {
@@ -222,7 +214,7 @@ func makeWorkerEnvVars(clustername string) []kapi.EnvVar {
 
 func sparkWorker(namespace string,
 	image string,
-	replicas int, masterurl, clustername string) *odc.ODeploymentConfig {
+	replicas int, clustername string) *odc.ODeploymentConfig {
 
 	// Create the basic deployment config
 	// We will use a label and pod selector based on the cluster name.
@@ -345,7 +337,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 
 	// Create the services that will be associated with the master pod
 	// They will be created with selectors based on the pod labels
-	mastersv, masterp := service(masterhost,
+	mastersv, _ := service(masterhost,
 		masterdc.FindPort(masterPortName),
 		clustername, masterType,
 		masterdc.GetPodTemplateSpecLabels())
@@ -356,8 +348,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 		masterdc.GetPodTemplateSpecLabels())
 
 	// Create the worker deployment config
-	masterurl := sparkMasterURL(masterhost, &masterp.ServicePort)
-	workerdc := sparkWorker(namespace, image, workercount, masterurl, clustername)
+	workerdc := sparkWorker(namespace, image, workercount, clustername)
 
 	// Launch all of the objects
 	_, err = dcc.Create(&masterdc.DeploymentConfig)
@@ -385,8 +376,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	// TODO ties into cluster status, make a note if the service is missing
 	sc.Create(&websv.Service)
 
-	// Since we already know what the masterurl is, pass it in explicitly and do not pass a service client
-	cluster, err := singleClusterResponse(clustername, client.Pods(namespace), nil, masterurl)
+	cluster, err := singleClusterResponse(clustername, client.Pods(namespace), sc)
 	if err != nil {
 		return reterr(responseFailure(err, respMsg, 500))
 	}
@@ -570,7 +560,9 @@ func FindClustersResponse(params clusters.FindClustersParams) middleware.Respond
 
 			// TODO we only want to count running pods (not terminating)
 			citem.WorkerCount = toint64ptr(cnt)
-			citem.MasterURL = tostrptr(retrieveMasterURL(sc, clustername))
+			citem.MasterURL = tostrptr(retrieveServiceURL(sc, masterType, clustername))
+			citem.MasterWebURL = tostrptr(retrieveServiceURL(sc, webuiType, clustername))
+
 			// TODO make something real for status
 			if *citem.MasterURL == "" {
 				citem.Status = tostrptr("MasterServiceMissing")
@@ -625,7 +617,7 @@ func FindSingleClusterResponse(params clusters.FindSingleClusterParams) middlewa
 	pc := client.Pods(namespace)
 	sc := client.Services(namespace)
 
-	cluster, err := singleClusterResponse(clustername, pc, sc, "")
+	cluster, err := singleClusterResponse(clustername, pc, sc)
 	if err != nil {
 		// In this case, the entire purpose of this call is to create this
 		// response object (as opposed to create and update which might fail
@@ -711,7 +703,7 @@ func UpdateSingleClusterResponse(params clusters.UpdateSingleClusterParams) midd
 		}
 	}
 
-	cluster, err := singleClusterResponse(clustername, client.Pods(namespace), client.Services(namespace), "")
+	cluster, err := singleClusterResponse(clustername, client.Pods(namespace), client.Services(namespace))
 	if err != nil {
 		return reterr(responseFailure(err, respMsg, 500))
 	}

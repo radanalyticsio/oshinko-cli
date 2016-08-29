@@ -24,6 +24,12 @@ type ClusterModel struct {
 	*/
 	MasterURL *string `json:"masterUrl"`
 
+	/* URL to the spark master web UI
+
+	Required: true
+	*/
+	MasterWebURL *string `json:"masterWebUrl"`
+
 	/* Pods that make up the cluster
 
 	Required: true
@@ -49,6 +55,10 @@ func (m *ClusterModel) Validate(formats strfmt.Registry) error {
 		res = append(res, err)
 	}
 
+	if err := m.validateMasterWebURL(formats); err != nil {
+		res = append(res, err)
+	}
+
 	if err := m.validatePods(formats); err != nil {
 		res = append(res, err)
 	}
@@ -66,6 +76,15 @@ func (m *ClusterModel) Validate(formats strfmt.Registry) error {
 func (m *ClusterModel) validateMasterURL(formats strfmt.Registry) error {
 
 	if err := validate.Required("masterUrl", "body", m.MasterURL); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *ClusterModel) validateMasterWebURL(formats strfmt.Registry) error {
+
+	if err := validate.Required("masterWebUrl", "body", m.MasterWebURL); err != nil {
 		return err
 	}
 

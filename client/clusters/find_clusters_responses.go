@@ -107,6 +107,143 @@ func (o *FindClustersDefault) readResponse(response runtime.ClientResponse, cons
 	return nil
 }
 
+/*ClustersItems0 clusters items0
+
+swagger:model ClustersItems0
+*/
+type ClustersItems0 struct {
+
+	/* URL for the cluster information page in oshinko-rest
+
+	Required: true
+	*/
+	Href *string `json:"href"`
+
+	/* URL to the spark master
+
+	Required: true
+	*/
+	MasterURL *string `json:"masterUrl"`
+
+	/* URL to the spark master web UI
+
+	Required: true
+	*/
+	MasterWebURL *string `json:"masterWebUrl"`
+
+	/* Name of the cluster
+
+	Required: true
+	*/
+	Name *string `json:"name"`
+
+	/* Current state of the cluster
+
+	Required: true
+	*/
+	Status *string `json:"status"`
+
+	/* Number of worker nodes in the cluster
+
+	Required: true
+	*/
+	WorkerCount *int64 `json:"workerCount"`
+}
+
+// Validate validates this clusters items0
+func (o *ClustersItems0) Validate(formats strfmt.Registry) error {
+	var res []error
+
+	if err := o.validateHref(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
+	if err := o.validateMasterURL(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
+	if err := o.validateMasterWebURL(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
+	if err := o.validateName(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
+	if err := o.validateStatus(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
+	if err := o.validateWorkerCount(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
+	if len(res) > 0 {
+		return errors.CompositeValidationError(res...)
+	}
+	return nil
+}
+
+func (o *ClustersItems0) validateHref(formats strfmt.Registry) error {
+
+	if err := validate.Required("href", "body", o.Href); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (o *ClustersItems0) validateMasterURL(formats strfmt.Registry) error {
+
+	if err := validate.Required("masterUrl", "body", o.MasterURL); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (o *ClustersItems0) validateMasterWebURL(formats strfmt.Registry) error {
+
+	if err := validate.Required("masterWebUrl", "body", o.MasterWebURL); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (o *ClustersItems0) validateName(formats strfmt.Registry) error {
+
+	if err := validate.Required("name", "body", o.Name); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (o *ClustersItems0) validateStatus(formats strfmt.Registry) error {
+
+	if err := validate.Required("status", "body", o.Status); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (o *ClustersItems0) validateWorkerCount(formats strfmt.Registry) error {
+
+	if err := validate.Required("workerCount", "body", o.WorkerCount); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 /*FindClustersOKBodyBody find clusters o k body body
 
 swagger:model FindClustersOKBodyBody
@@ -154,123 +291,6 @@ func (o *FindClustersOKBodyBody) validateClusters(formats strfmt.Registry) error
 			}
 		}
 
-	}
-
-	return nil
-}
-
-/*ClustersItems0 clusters items0
-
-swagger:model ClustersItems0
-*/
-type ClustersItems0 struct {
-
-	/* URL for the cluster information page in oshinko-rest
-
-	Required: true
-	*/
-	Href *string `json:"href"`
-
-	/* URL to the spark master
-
-	Required: true
-	*/
-	MasterURL *string `json:"masterUrl"`
-
-	/* Name of the cluster
-
-	Required: true
-	*/
-	Name *string `json:"name"`
-
-	/* Current state of the cluster
-
-	Required: true
-	*/
-	Status *string `json:"status"`
-
-	/* Number of worker nodes in the cluster
-
-	Required: true
-	*/
-	WorkerCount *int64 `json:"workerCount"`
-}
-
-// Validate validates this clusters items0
-func (o *ClustersItems0) Validate(formats strfmt.Registry) error {
-	var res []error
-
-	if err := o.validateHref(formats); err != nil {
-		// prop
-		res = append(res, err)
-	}
-
-	if err := o.validateMasterURL(formats); err != nil {
-		// prop
-		res = append(res, err)
-	}
-
-	if err := o.validateName(formats); err != nil {
-		// prop
-		res = append(res, err)
-	}
-
-	if err := o.validateStatus(formats); err != nil {
-		// prop
-		res = append(res, err)
-	}
-
-	if err := o.validateWorkerCount(formats); err != nil {
-		// prop
-		res = append(res, err)
-	}
-
-	if len(res) > 0 {
-		return errors.CompositeValidationError(res...)
-	}
-	return nil
-}
-
-func (o *ClustersItems0) validateHref(formats strfmt.Registry) error {
-
-	if err := validate.Required("href", "body", o.Href); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (o *ClustersItems0) validateMasterURL(formats strfmt.Registry) error {
-
-	if err := validate.Required("masterUrl", "body", o.MasterURL); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (o *ClustersItems0) validateName(formats strfmt.Registry) error {
-
-	if err := validate.Required("name", "body", o.Name); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (o *ClustersItems0) validateStatus(formats strfmt.Registry) error {
-
-	if err := validate.Required("status", "body", o.Status); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (o *ClustersItems0) validateWorkerCount(formats strfmt.Registry) error {
-
-	if err := validate.Required("workerCount", "body", o.WorkerCount); err != nil {
-		return err
 	}
 
 	return nil
