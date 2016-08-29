@@ -72,7 +72,7 @@ the `oc cluster up` command.
 Example usage:
 
     $ oshinko-setup.sh -w mywebui.10.16.40.70.xip.io
-  
+
 This will setup a cluster and install oshinko with the oshinko web ui
 accessible at mywebui.10.16.40.70.xip.io (using xip.io is a way to
 get DNS to resolve to the IP, 10.16.40.70 in the example).  You would
@@ -92,3 +92,32 @@ of that value is what tells Spark to run as the master node.
 It should be noted, that if you do not use a custom Spark image with
 the -s flag, a Spark image will be built for you from the openshift-spark
 repository.
+
+## Sample script to deploy oshinko from existing containers
+
+The `oshinko-deploy.sh` script can deploy the oshinko suite into an already
+running OpenShift instance. It requires that certain images exist in your
+local docker registry, namely; `oshinko-rest-server`, `oshinko-webui`,
+`daikon-pyspark`, and optionally `openshift-spark`.
+
+With these in place, the script will deploy and setup oshinko into a project
+of your choosing. This script also assumes that you can run docker commands
+without an escalation of privileges.
+
+example usage:
+
+    $ ./oshinko-deploy.sh -w myweb.10.16.40.70.xip.io -s myregistry.com:5000/sparkimage -p myproject -u developer
+
+Running this will deploy oshinko into the project `myproject` using the
+`developer` user, it will expose the webui at
+`http://myweb.10.16.40.70.xio.io`, and oshinko will use the spark image from
+`myregistry.com:5000/sparkimage` as the base for deployment.
+
+### A note on permissions
+
+Some of the operations in this script may require superuser privileges
+depending on the configuration of your system and OpenShift deployment. In
+specific, the usage of docker and the permissions for logging in as the
+`system:admin` user in OpenShift are assumed. If these are not configured for
+non-root access in your system, then you may need to invoke this script using
+the `sudo` command or as the `root` user.
