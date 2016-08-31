@@ -98,7 +98,7 @@ repository.
 The `oshinko-deploy.sh` script can deploy the oshinko suite into an already
 running OpenShift instance. It requires that certain images exist in your
 local docker registry, namely; `oshinko-rest-server`, `oshinko-webui`,
-`daikon-pyspark`, and optionally `openshift-spark`.
+`radanalytics-pyspark`, and optionally `openshift-spark`.
 
 With these in place, the script will deploy and setup oshinko into a project
 of your choosing. This script also assumes that you can run docker commands

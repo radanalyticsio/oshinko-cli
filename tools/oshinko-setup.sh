@@ -118,8 +118,8 @@ sudo docker tag oshinko-rest-server $REGISTRY/oshinko/oshinko-rest-server
 sudo docker push $REGISTRY/oshinko/oshinko-rest-server
 sudo docker tag oshinko-webui $REGISTRY/oshinko/oshinko-webui
 sudo docker push $REGISTRY/oshinko/oshinko-webui
-sudo docker tag daikon-pyspark $REGISTRY/oshinko/daikon-pyspark
-sudo docker push $REGISTRY/oshinko/daikon-pyspark
+sudo docker tag radanalytics-pyspark $REGISTRY/oshinko/radanalytics-pyspark
+sudo docker push $REGISTRY/oshinko/radanalytics-pyspark
 
 # set up the oshinko service account
 oc create sa oshinko                          # note, VV, first oshinko is the proj name :)

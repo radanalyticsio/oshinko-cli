@@ -6,7 +6,7 @@
 #   * oshinko-rest-server
 #   * oshinko-webui
 #   * openshift-spark
-#   * daikon-pyspark
+#   * radanalytics-pyspark
 # * you have a file named "server-ui-template.yaml" in the current directory
 #
 # Usage:
@@ -84,8 +84,8 @@ docker tag oshinko-rest-server $REGISTRY/$PROJECT/oshinko-rest-server
 docker push $REGISTRY/$PROJECT/oshinko-rest-server
 docker tag oshinko-webui $REGISTRY/$PROJECT/oshinko-webui
 docker push $REGISTRY/$PROJECT/oshinko-webui
-docker tag daikon-pyspark $REGISTRY/$PROJECT/daikon-pyspark
-docker push $REGISTRY/$PROJECT/daikon-pyspark
+docker tag radanalytics-pyspark $REGISTRY/$PROJECT/radanalytics-pyspark
+docker push $REGISTRY/$PROJECT/radanalytics-pyspark
 
 if [ -z "$SPARK_IMAGE" ]; then
     docker tag openshift-spark $REGISTRY/$PROJECT/oshinko-spark
