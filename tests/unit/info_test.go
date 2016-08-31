@@ -101,7 +101,8 @@ func (s *OshinkoUnitTestSuite) TestGetServiceAccountToken(c *check.C) {
 	observedToken, observedErr := info.GetServiceAccountToken()
 	c.Assert(observedToken, check.DeepEquals, expectedToken)
 	c.Assert(observedErr, check.Not(check.Equals), nil)
-	// TODO(elmiko) add a test that mocks out the file read for the token
+	// INFO(elmiko) this cannot be tested further given that a file read is
+	// required based on a const path set in the package.
 }
 
 func (s *OshinkoUnitTestSuite) TestGetServiceAccountNS(c *check.C) {
@@ -109,7 +110,8 @@ func (s *OshinkoUnitTestSuite) TestGetServiceAccountNS(c *check.C) {
 	observedNS, observedErr := info.GetServiceAccountNS()
 	c.Assert(observedNS, check.DeepEquals, expectedNS)
 	c.Assert(observedErr, check.Not(check.Equals), nil)
-	// TODO(elmiko) add a test that mocks out the file read for the namespace
+	// INFO(elmiko) this cannot be tested further given that a file read is
+	// required based on a const path set in the package.
 }
 
 func (s *OshinkoUnitTestSuite) TestGetWebServiceName(c *check.C) {

@@ -20,12 +20,10 @@ oshinko_repo = 'github.com/redhatanalytics/oshinko-rest/'
 oshinko_test_package = oshinko_repo + 'tests/unit'
 coverage_packages = [
     'handlers',
-    'helpers/authentication',
     'helpers/containers',
     'helpers/deploymentconfigs',
     'helpers/errors',
     'helpers/info',
-    'helpers/logging',
     'helpers/podtemplates',
     'helpers/services',
     'helpers/uuid',
