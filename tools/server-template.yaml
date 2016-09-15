@@ -69,4 +69,4 @@ parameters:
   required: true
 - name: OSHINKO_CLUSTER_IMAGE
   description: Full name of the spark image to use when creating clusters
-  value: your-registry-hostname-here.io/apache-spark-2/spark20-hadoop27-openshift:2.0
+  required: true
