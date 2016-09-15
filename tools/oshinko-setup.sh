@@ -93,7 +93,7 @@ if [ ! -d "$ORIGIN_DIR" ]; then
     sudo cp ${ORIGIN_DIR}/* /usr/bin
 fi
 
-sudo sed -i "s/# INSECURE_REGISTRY='--insecure-registry '/INSECURE_REGISTRY='--insecure-registry 172.30.0.0\/16'/" /etc/sysconfig/docker
+sudo sed -i -e "/^# INSECURE_REGISTRY/{ s/.*/INSECURE_REGISTRY='--insecure-registry 172.30.0.0\/16'/ }" /etc/sysconfig/docker
 sudo systemctl restart docker
 
 # make sure your local host name can be resolved!
