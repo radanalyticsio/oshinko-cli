@@ -63,12 +63,17 @@ cd $SRCDIR/oshinko-rest; sudo make image
 cd $SRCDIR/oshinko-webui; sudo docker build -t oshinko-webui .
 
 if [ -z $SPARK_IMAGE ]; then
+    cd $SRCDIR
     if [ ! -d "openshift-spark" ]; then
         git clone git@github.com:redhatanalytics/openshift-spark
     fi
     # this works but it can probably be smarter .. maybe hadoop doesn't
     # have to download each time. Maybe we can check for current images?
     cd $SRCDIR/openshift-spark; sudo make build
+
+    # Make the openshift-spark-py27-sti image for oshinko-s2i
+    cd $SRCDIR/openshift-spark/openshift-spark-py27-sti
+    make artifacts && sudo make build
 
     # Make the s2i image since we are using defaults
     cd $SRCDIR/oshinko-s2i; make build
