@@ -49,13 +49,6 @@ Assign the admin role:
 
     $ oc policy add-role-to-user admin system:serviceaccount:myproject:oshinko -n myproject
 
-## Default spark image
-
-The OSHINKO_CLUSTER_IMAGE parameter in the template is defaulted to a spark image hosted
-in an internal RedHat registry. In order to use this value, see the setup instructions in the
-README.md in the appropriate Oshinko image source repository. Otherwise, explicitly specify
-a spark image in an accessible registry as shown in the example.
-
 ## Sample template usage
 
 Example usage with an internal registry at 172.30.159.57:5000, and a project
@@ -98,7 +91,7 @@ repository.
 The `oshinko-deploy.sh` script can deploy the oshinko suite into an already
 running OpenShift instance. It requires that certain images exist in your
 local docker registry, namely; `oshinko-rest-server`, `oshinko-webui`,
-`radanalytics-pyspark`, and optionally `openshift-spark`.
+`openshift-pyspark`, and optionally `radanalytics-pyspark`.
 
 With these in place, the script will deploy and setup oshinko into a project
 of your choosing. This script also assumes that you can run docker commands
