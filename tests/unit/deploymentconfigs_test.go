@@ -5,8 +5,8 @@ import (
 	"gopkg.in/check.v1"
 	kapi "k8s.io/kubernetes/pkg/api"
 
-	"github.com/redhatanalytics/oshinko-rest/helpers/deploymentconfigs"
-	"github.com/redhatanalytics/oshinko-rest/helpers/podtemplates"
+	"github.com/radanalyticsio/oshinko-rest/helpers/deploymentconfigs"
+	"github.com/radanalyticsio/oshinko-rest/helpers/podtemplates"
 )
 
 func (s *OshinkoUnitTestSuite) TestDeploymentConfig(c *check.C) {

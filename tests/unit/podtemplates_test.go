@@ -4,8 +4,8 @@ import (
 	"gopkg.in/check.v1"
 	kapi "k8s.io/kubernetes/pkg/api"
 
-	"github.com/redhatanalytics/oshinko-rest/helpers/containers"
-	"github.com/redhatanalytics/oshinko-rest/helpers/podtemplates"
+	"github.com/radanalyticsio/oshinko-rest/helpers/containers"
+	"github.com/radanalyticsio/oshinko-rest/helpers/podtemplates"
 )
 
 // This function is named TestCreatePodTemplateSpec because there is another

@@ -3,8 +3,8 @@ package clienttest
 import (
 	check "gopkg.in/check.v1"
 
-	"github.com/redhatanalytics/oshinko-rest/client/clusters"
-	"github.com/redhatanalytics/oshinko-rest/models"
+	"github.com/radanalyticsio/oshinko-rest/client/clusters"
+	"github.com/radanalyticsio/oshinko-rest/models"
 )
 
 func (s *OshinkoRestTestSuite) TestCreateCluster(c *check.C) {

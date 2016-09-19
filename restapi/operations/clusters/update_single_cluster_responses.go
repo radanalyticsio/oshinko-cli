@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-openapi/runtime"
 
-	"github.com/redhatanalytics/oshinko-rest/models"
+	"github.com/radanalyticsio/oshinko-rest/models"
 )
 
 /*UpdateSingleClusterAccepted Cluster update response

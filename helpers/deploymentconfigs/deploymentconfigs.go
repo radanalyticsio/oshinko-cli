@@ -2,7 +2,7 @@ package deploymentconfigs
 
 import (
 	"github.com/openshift/origin/pkg/deploy/api"
-	"github.com/redhatanalytics/oshinko-rest/helpers/podtemplates"
+	"github.com/radanalyticsio/oshinko-rest/helpers/podtemplates"
 	kapi "k8s.io/kubernetes/pkg/api"
 )
 

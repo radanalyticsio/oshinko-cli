@@ -13,8 +13,8 @@ usage() {
     echo
 }
 
-CLIENTTEST="github.com/redhatanalytics/oshinko-rest/tests/client"
-UNITTEST="github.com/redhatanalytics/oshinko-rest/tests/unit"
+CLIENTTEST="github.com/radanalyticsio/oshinko-rest/tests/client"
+UNITTEST="github.com/radanalyticsio/oshinko-rest/tests/unit"
 
 case "$1" in
     all)

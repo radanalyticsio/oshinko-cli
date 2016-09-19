@@ -3,7 +3,7 @@ package clienttest
 import (
 	check "gopkg.in/check.v1"
 
-	"github.com/redhatanalytics/oshinko-rest/version"
+	"github.com/radanalyticsio/oshinko-rest/version"
 )
 
 func (s *OshinkoRestTestSuite) TestServerInfo(c *check.C) {

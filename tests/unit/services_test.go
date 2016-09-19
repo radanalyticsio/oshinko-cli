@@ -5,7 +5,7 @@ import (
 	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/util/intstr"
 
-	"github.com/redhatanalytics/oshinko-rest/helpers/services"
+	"github.com/radanalyticsio/oshinko-rest/helpers/services"
 )
 
 func (s *OshinkoUnitTestSuite) TestService(c *check.C) {

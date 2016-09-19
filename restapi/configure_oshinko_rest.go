@@ -8,12 +8,12 @@ import (
 	"github.com/go-openapi/runtime"
 	"github.com/go-openapi/swag"
 
-	"github.com/redhatanalytics/oshinko-rest/handlers"
-	oe "github.com/redhatanalytics/oshinko-rest/helpers/errors"
-	"github.com/redhatanalytics/oshinko-rest/helpers/logging"
-	"github.com/redhatanalytics/oshinko-rest/restapi/operations"
-	"github.com/redhatanalytics/oshinko-rest/restapi/operations/clusters"
-	"github.com/redhatanalytics/oshinko-rest/restapi/operations/server"
+	"github.com/radanalyticsio/oshinko-rest/handlers"
+	oe "github.com/radanalyticsio/oshinko-rest/helpers/errors"
+	"github.com/radanalyticsio/oshinko-rest/helpers/logging"
+	"github.com/radanalyticsio/oshinko-rest/restapi/operations"
+	"github.com/radanalyticsio/oshinko-rest/restapi/operations/clusters"
+	"github.com/radanalyticsio/oshinko-rest/restapi/operations/server"
 )
 
 // This file is safe to edit. Once it exists it will not be overwritten

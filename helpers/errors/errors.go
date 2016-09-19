@@ -2,7 +2,7 @@
 package errors
 
 import (
-	"github.com/redhatanalytics/oshinko-rest/models"
+	"github.com/radanalyticsio/oshinko-rest/models"
 )
 
 // NewSingleErrorResponse creates a new error reponse object for use as a return

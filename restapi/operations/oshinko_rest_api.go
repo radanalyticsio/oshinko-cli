@@ -15,8 +15,8 @@ import (
 	strfmt "github.com/go-openapi/strfmt"
 	"github.com/go-openapi/swag"
 
-	"github.com/redhatanalytics/oshinko-rest/restapi/operations/clusters"
-	"github.com/redhatanalytics/oshinko-rest/restapi/operations/server"
+	"github.com/radanalyticsio/oshinko-rest/restapi/operations/clusters"
+	"github.com/radanalyticsio/oshinko-rest/restapi/operations/server"
 )
 
 // NewOshinkoRestAPI creates a new OshinkoRest instance

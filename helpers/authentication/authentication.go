@@ -11,7 +11,7 @@ import (
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/util/crypto"
 
-	"github.com/redhatanalytics/oshinko-rest/helpers/info"
+	"github.com/radanalyticsio/oshinko-rest/helpers/info"
 )
 
 func SAConfig() (*restclient.Config, error) {

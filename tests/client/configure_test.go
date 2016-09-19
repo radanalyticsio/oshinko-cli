@@ -16,9 +16,9 @@ import (
 	strfmt "github.com/go-openapi/strfmt"
 	check "gopkg.in/check.v1"
 
-	"github.com/redhatanalytics/oshinko-rest/client"
-	"github.com/redhatanalytics/oshinko-rest/restapi"
-	"github.com/redhatanalytics/oshinko-rest/restapi/operations"
+	"github.com/radanalyticsio/oshinko-rest/client"
+	"github.com/radanalyticsio/oshinko-rest/restapi"
+	"github.com/radanalyticsio/oshinko-rest/restapi/operations"
 )
 
 // Test connects gocheck to the "go test" runner

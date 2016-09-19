@@ -10,7 +10,7 @@ import (
 	"github.com/go-openapi/swag"
 	graceful "github.com/tylerb/graceful"
 
-	"github.com/redhatanalytics/oshinko-rest/restapi/operations"
+	"github.com/radanalyticsio/oshinko-rest/restapi/operations"
 )
 
 //go:generate swagger generate server -t ../.. -A OshinkoRest -f ./swagger.yml

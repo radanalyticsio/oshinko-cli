@@ -87,7 +87,7 @@ containing the *main.go* file for oshinko-rest, for example:
 
     $ oc login -u myuser
     $ source oshinko-env
-    $ cd /home/oshinko-rest/src/github.com/redhatanalytics/oshinko-rest/cmd/oshinko-rest-server
+    $ cd /home/oshinko-rest/src/github.com/radanalyticsio/oshinko-rest/cmd/oshinko-rest-server
     $ ls
     main.go
 
@@ -105,8 +105,8 @@ To pass arguments to oshinko-rest, the invocation will look something like:
 Breakpoints can be set by file:line or by package.function, as long as it
 is unambiguous. For example:
 
-    (dlv) break  /home/oshinko-rest/src/github.com/redhatanalytics/oshinko-rest/handlers/server.go:12
-    Breakpoint 1 set at 0x5f3ebc for github.com/redhatanalytics/oshinko-rest/handlers.ServerResponse() /home/oshinko-rest/src/github.com/redhatanalytics/oshinko-rest/handlers/server.go:12
+    (dlv) break  /home/oshinko-rest/src/github.com/radanalyticsio/oshinko-rest/handlers/server.go:12
+    Breakpoint 1 set at 0x5f3ebc for github.com/radanalyticsio/oshinko-rest/handlers.ServerResponse() /home/oshinko-rest/src/github.com/radanalyticsio/oshinko-rest/handlers/server.go:12
 
     (dlv) break main.main
     Breakpoint 1 set at 0x4020eb for main.main() ./main.go:17

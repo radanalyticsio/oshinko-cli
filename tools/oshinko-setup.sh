@@ -46,17 +46,17 @@ sudo systemctl start docker
 CURRDIR=`pwd`
 export GOPATH=$CURRDIR/oshinko
 
-SRCDIR=$CURRDIR/oshinko/src/github.com/redhatanalytics
+SRCDIR=$CURRDIR/oshinko/src/github.com/radanalyticsio
 mkdir -p $SRCDIR
 cd $SRCDIR
 if [ ! -d "oshinko-rest" ]; then
-    git clone git@github.com:redhatanalytics/oshinko-rest
+    git clone git@github.com:radanalyticsio/oshinko-rest
 fi
 if [ ! -d "oshinko-webui" ]; then
-    git clone git@github.com:redhatanalytics/oshinko-webui
+    git clone git@github.com:radanalyticsio/oshinko-webui
 fi
 if [ ! -d "oshinko-s2i" ]; then
-    git clone git@github.com:redhatanalytics/oshinko-s2i
+    git clone git@github.com:radanalyticsio/oshinko-s2i
 fi
 
 cd $SRCDIR/oshinko-rest; sudo make image
@@ -65,7 +65,7 @@ cd $SRCDIR/oshinko-webui; sudo docker build -t oshinko-webui .
 if [ -z $SPARK_IMAGE ]; then
     cd $SRCDIR
     if [ ! -d "openshift-spark" ]; then
-        git clone git@github.com:redhatanalytics/openshift-spark
+        git clone git@github.com:radanalyticsio/openshift-spark
     fi
     # this works but it can probably be smarter .. maybe hadoop doesn't
     # have to download each time. Maybe we can check for current images?

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/redhatanalytics/oshinko-rest/helpers/uuid"
+	"github.com/radanalyticsio/oshinko-rest/helpers/uuid"
 )
 
 // LogResponseWriter is a wrapper struct which allows us to retain the

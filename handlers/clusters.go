@@ -8,16 +8,16 @@ import (
 
 	middleware "github.com/go-openapi/runtime/middleware"
 	oclient "github.com/openshift/origin/pkg/client"
-	osa "github.com/redhatanalytics/oshinko-rest/helpers/authentication"
-	ocon "github.com/redhatanalytics/oshinko-rest/helpers/containers"
-	odc "github.com/redhatanalytics/oshinko-rest/helpers/deploymentconfigs"
-	oe "github.com/redhatanalytics/oshinko-rest/helpers/errors"
-	"github.com/redhatanalytics/oshinko-rest/helpers/info"
-	opt "github.com/redhatanalytics/oshinko-rest/helpers/podtemplates"
-	"github.com/redhatanalytics/oshinko-rest/helpers/probes"
-	osv "github.com/redhatanalytics/oshinko-rest/helpers/services"
-	"github.com/redhatanalytics/oshinko-rest/models"
-	"github.com/redhatanalytics/oshinko-rest/restapi/operations/clusters"
+	osa "github.com/radanalyticsio/oshinko-rest/helpers/authentication"
+	ocon "github.com/radanalyticsio/oshinko-rest/helpers/containers"
+	odc "github.com/radanalyticsio/oshinko-rest/helpers/deploymentconfigs"
+	oe "github.com/radanalyticsio/oshinko-rest/helpers/errors"
+	"github.com/radanalyticsio/oshinko-rest/helpers/info"
+	opt "github.com/radanalyticsio/oshinko-rest/helpers/podtemplates"
+	"github.com/radanalyticsio/oshinko-rest/helpers/probes"
+	osv "github.com/radanalyticsio/oshinko-rest/helpers/services"
+	"github.com/radanalyticsio/oshinko-rest/models"
+	"github.com/radanalyticsio/oshinko-rest/restapi/operations/clusters"
 	kapi "k8s.io/kubernetes/pkg/api"
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/labels"
@@ -380,7 +380,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	if err != nil {
 		return reterr(responseFailure(err, respMsg, 500))
 	}
-	return clusters.NewCreateClusterCreated().WithLocation("/clusters/"+clustername).WithPayload(cluster)
+	return clusters.NewCreateClusterCreated().WithLocation("/clusters/" + clustername).WithPayload(cluster)
 }
 
 func waitForCount(client kclient.ReplicationControllerInterface, name string, count int) {
