@@ -24,7 +24,6 @@ test:
 debug:
 	scripts/build.sh debug
 
-
 # Run command tests. Uses whatever binaries are currently built.
 #
 # Example:

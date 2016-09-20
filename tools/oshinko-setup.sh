@@ -128,8 +128,8 @@ else
     sudo docker tag $SPARK_IMAGE $REGISTRY/oshinko/oshinko-spark
 fi
 sudo docker push $REGISTRY/oshinko/oshinko-spark
-sudo docker tag oshinko-rest-server $REGISTRY/oshinko/oshinko-rest-server
-sudo docker push $REGISTRY/oshinko/oshinko-rest-server
+sudo docker tag oshinko-rest $REGISTRY/oshinko/oshinko-rest
+sudo docker push $REGISTRY/oshinko/oshinko-rest
 sudo docker tag oshinko-webui $REGISTRY/oshinko/oshinko-webui
 sudo docker push $REGISTRY/oshinko/oshinko-webui
 
@@ -145,7 +145,7 @@ fi
 cd $SRCDIR/oshinko-rest
 
 oc process -f tools/server-ui-template.yaml \
-OSHINKO_SERVER_IMAGE=$REGISTRY/oshinko/oshinko-rest-server \
+OSHINKO_SERVER_IMAGE=$REGISTRY/oshinko/oshinko-rest \
 OSHINKO_CLUSTER_IMAGE=$REGISTRY/oshinko/oshinko-spark \
 OSHINKO_WEB_IMAGE=$REGISTRY/oshinko/oshinko-webui \
 OSHINKO_WEB_ROUTE_HOSTNAME=$ROUTEVALUE > $CURRDIR/oshinko-template.json

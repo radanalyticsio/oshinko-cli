@@ -3,7 +3,7 @@
 # This script is for deploying oshinko into an already running cluster.
 # It assumes a few things:
 # * you have the following images in your local docker registry:
-#   * oshinko-rest-server
+#   * oshinko-rest
 #   * oshinko-webui
 #   * openshift-spark
 #   * radanalytics-pyspark
@@ -88,8 +88,8 @@ while [ $r -ne 0 ]; do
     sleep 1
 done
 
-docker tag oshinko-rest-server $REGISTRY/$PROJECT/oshinko-rest-server
-docker push $REGISTRY/$PROJECT/oshinko-rest-server
+docker tag oshinko-rest $REGISTRY/$PROJECT/oshinko-rest
+docker push $REGISTRY/$PROJECT/oshinko-rest
 docker tag oshinko-webui $REGISTRY/$PROJECT/oshinko-webui
 docker push $REGISTRY/$PROJECT/oshinko-webui
 docker tag radanalytics-pyspark $REGISTRY/$PROJECT/radanalytics-pyspark
@@ -116,7 +116,7 @@ fi
 
 # process the standard oshinko template and launch it
 oc process -f server-ui-template.yaml \
-OSHINKO_SERVER_IMAGE=$REGISTRY/$PROJECT/oshinko-rest-server \
+OSHINKO_SERVER_IMAGE=$REGISTRY/$PROJECT/oshinko-rest \
 OSHINKO_CLUSTER_IMAGE=$REGISTRY/$PROJECT/oshinko-spark \
 OSHINKO_WEB_IMAGE=$REGISTRY/$PROJECT/oshinko-webui \
 OSHINKO_WEB_ROUTE_HOSTNAME=$ROUTEVALUE \

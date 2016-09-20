@@ -2,11 +2,11 @@
 
 ## server-template.yaml
 
-This is a template that can be processed for adding an oshinko-rest-server
+This is a template that can be processed for adding an oshinko-rest
 image to OpenShift. It maintains the default 0.0.0.0:8080 host:port option
 for the server.
 
-To use this template, an oshinko-rest-server image and a spark image must
+To use this template, an oshinko-rest image and a spark image must
 first be tagged into the OpenShift project. Then the template must be
 processed with the locations of the images. Finally, the output of the
 processed template can be used to create the service and pod. Check
@@ -24,9 +24,9 @@ to see the full list of parameters that may be specified and their defaults.
 
 ## Service account
 
-The oshinko-rest-server uses an "oshinko" service account to perform openshift
+The oshinko-rest image uses an "oshinko" service account to perform openshift
 operations. This service account must be created and given the admin role in
-*each* project which will use the oshinko-rest-server, for example:
+*each* project which will use the oshinko-rest image, for example:
 
 Create a new project *myproject*:
 
@@ -54,7 +54,7 @@ Assign the admin role:
 Example usage with an internal registry at 172.30.159.57:5000, and a project
 named "myproject":
 
-    $ oc process -f server-template.yaml -v OSHINKO_SERVER_IMAGE=172.30.159.57:5000/myproject/oshinko-rest-server,OSHINKO_CLUSTER_IMAGE=172.30.159.57:5000/myproject/openshift-spark > server-template.json
+    $ oc process -f server-template.yaml -v OSHINKO_SERVER_IMAGE=172.30.159.57:5000/myproject/oshinko-rest,OSHINKO_CLUSTER_IMAGE=172.30.159.57:5000/myproject/openshift-spark > server-template.json
     $ oc create -f server-template.json
 
 ## Sample script to setup oshinko
@@ -90,7 +90,7 @@ repository.
 
 The `oshinko-deploy.sh` script can deploy the oshinko suite into an already
 running OpenShift instance. It requires that certain images exist in your
-local docker registry, namely; `oshinko-rest-server`, `oshinko-webui`,
+local docker registry, namely; `oshinko-rest`, `oshinko-webui`,
 `openshift-pyspark`, and optionally `radanalytics-pyspark`.
 
 With these in place, the script will deploy and setup oshinko into a project

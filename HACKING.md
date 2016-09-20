@@ -30,7 +30,7 @@ To run the rest server as a container, use the `make image` target to build a
 container image. With the image built, it can be started from the command
 line using a syntax similar to:
 
-    $ docker run --rm -it -p 8080:8080 oshinko-rest-server
+    $ docker run --rm -it -p 8080:8080 oshinko-rest
 
 This will start the server listening on `0.0.0.0:8080`, which is the default
 option. To customize this behavior, the environment variables
