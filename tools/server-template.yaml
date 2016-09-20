@@ -62,6 +62,7 @@ parameters:
 - name: OSHINKO_SERVER_IMAGE
   description: Full name of the oshinko server image
   required: true
+  value: radanalyticsio/oshinko-rest
 - name: SERVER_NAME
   description: Name of the oshinko server service
   generate: expression
@@ -70,3 +71,4 @@ parameters:
 - name: OSHINKO_CLUSTER_IMAGE
   description: Full name of the spark image to use when creating clusters
   required: true
+  value: radanalyticsio/openshift-spark

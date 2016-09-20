@@ -141,18 +141,21 @@ parameters:
 - name: OSHINKO_SERVER_IMAGE
   description: Full name of the oshinko server image
   required: true
+  value: radanalyticsio/oshinko-rest
 - name: OSHINKO_SERVER_NAME
   description: Name of the oshinko server service
   value: "oshinko-rest"
 - name: OSHINKO_CLUSTER_IMAGE
   description: Full name of the spark image to use when creating clusters
   required: true
+  value: radanalyticsio/openshift-spark
 - name: OSHINKO_WEB_NAME
   description: Name of the oshinko web service
   value: "oshinko-web"
 - name: OSHINKO_WEB_IMAGE
   description: Full name of the oshino web image
   required: true
+  value: radanalyticsio/oshinko-webui
 - name: OSHINKO_WEB_ROUTE_HOSTNAME
   description: The hostname used to create the external route for the webui
 - name: OSHINKO_DEPLOYMENT_NAME
