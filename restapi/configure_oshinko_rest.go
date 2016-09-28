@@ -4,6 +4,8 @@ import (
 	"crypto/tls"
 	"net/http"
 
+	"github.com/rs/cors"
+
 	"github.com/go-openapi/errors"
 	"github.com/go-openapi/runtime"
 	"github.com/go-openapi/swag"
@@ -82,5 +84,9 @@ func setupGlobalMiddleware(handler http.Handler) (finalHandler http.Handler) {
 	finalHandler = handler
 	finalHandler = oe.AddErrorHandler(finalHandler)
 	finalHandler = logging.AddLoggingHandler(finalHandler)
+	corsHeaders := cors.New(cors.Options{
+		AllowedMethods: []string{"GET", "HEAD", "POST", "DELETE", "PUT", "OPTIONS"},
+	})
+	finalHandler = corsHeaders.Handler(finalHandler)
 	return finalHandler
 }
