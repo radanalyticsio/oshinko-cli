@@ -42,6 +42,7 @@ func (s *OshinkoRestTestSuite) SetUpSuite(c *check.C) {
 	server.ConfigureAPI()
 
 	server.Host = "127.0.0.1"
+	server.EnabledListeners = []string{"http"}
 
 	s.server = server
 

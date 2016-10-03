@@ -21,16 +21,14 @@ import (
 
 // NewOshinkoRestAPI creates a new OshinkoRest instance
 func NewOshinkoRestAPI(spec *loads.Document) *OshinkoRestAPI {
-	o := &OshinkoRestAPI{
-		spec:            spec,
+	return &OshinkoRestAPI{
 		handlers:        make(map[string]map[string]http.Handler),
 		formats:         strfmt.Default,
 		defaultConsumes: "application/json",
 		defaultProduces: "application/json",
 		ServerShutdown:  func() {},
+		spec:            spec,
 	}
-
-	return o
 }
 
 /*OshinkoRestAPI The REST API server for the Oshinko suite of applications */
@@ -83,6 +81,11 @@ func (o *OshinkoRestAPI) SetDefaultProduces(mediaType string) {
 // SetDefaultConsumes returns the default consumes media type
 func (o *OshinkoRestAPI) SetDefaultConsumes(mediaType string) {
 	o.defaultConsumes = mediaType
+}
+
+// SetSpec sets a spec that will be served for the clients.
+func (o *OshinkoRestAPI) SetSpec(spec *loads.Document) {
+	o.spec = spec
 }
 
 // DefaultProduces returns the default produces media type
@@ -203,6 +206,14 @@ func (o *OshinkoRestAPI) HandlerFor(method, path string) (http.Handler, bool) {
 	}
 	h, ok := o.handlers[um][path]
 	return h, ok
+}
+
+func (o *OshinkoRestAPI) Context() *middleware.Context {
+	if o.context == nil {
+		o.context = middleware.NewRoutableContext(o.spec, o, nil)
+	}
+
+	return o.context
 }
 
 func (o *OshinkoRestAPI) initHandlerCache() {

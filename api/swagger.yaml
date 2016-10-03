@@ -9,6 +9,8 @@ consumes:
   - application/json
 produces:
   - application/json
+schemes:
+  - https
 definitions:
   ClusterModel:
     allOf:

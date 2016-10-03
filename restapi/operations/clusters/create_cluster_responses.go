@@ -17,7 +17,7 @@ import (
 swagger:response createClusterCreated
 */
 type CreateClusterCreated struct {
-	/*URL of the cluster, this is oshinko specific
+	/*URL of the cluster detail page within the oshinko rest server
 	  Required: true
 	*/
 	Location string `json:"Location"`
