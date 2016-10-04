@@ -1,4 +1,4 @@
-# tools for use with oshinko-reset
+# tools for use with oshinko-rest
 
 ## server-template.yaml
 
