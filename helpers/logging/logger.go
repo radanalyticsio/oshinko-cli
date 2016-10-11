@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log"
 	"os"
+
+	"github.com/radanalyticsio/oshinko-rest/helpers/flags"
 )
 
 var logger *log.Logger
@@ -38,4 +40,12 @@ func SetLoggerFile(filename string) (err error) {
 		err = errors.New("Logger already allocated")
 	}
 	return
+}
+
+// Debug prints a message to the log if debug mode is enabled, it accepts
+// arguments similar to log.Println.
+func Debug(a ...interface{}) {
+	if flags.DebugEnabled() {
+		GetLogger().Println(a...)
+	}
 }

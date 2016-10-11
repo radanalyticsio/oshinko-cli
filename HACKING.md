@@ -68,7 +68,31 @@ Now you're ready to run:
     $ cd /path/to/oshinko_binary
     $ oshinko-rest
 
-## Debugging with Delve
+## Debugging
+
+### Logs
+
+Basic log-level debugging can be improved by running the server with the
+debug option enabled (`--debug` or `-d`). With debug enabled, the server
+will print all request and response bodies to the log.
+
+To add debug-only logs to your code, please use the `Debug` function in the
+logging helper package.
+
+```
+import (
+    "github.com/radanalyticsio/oshinko-rest/helpers/logging"
+)
+
+func MyFunc() {
+    ...
+
+    logging.Debug("a thing happened!")
+
+    ...
+}
+```
+### Delve
 
 Delve can be found at https://github.com/derekparker/delve with
 instructions for building/installing.

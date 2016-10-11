@@ -8,10 +8,10 @@ import (
 
 	"github.com/go-openapi/errors"
 	"github.com/go-openapi/runtime"
-	"github.com/go-openapi/swag"
 
 	"github.com/radanalyticsio/oshinko-rest/handlers"
 	oe "github.com/radanalyticsio/oshinko-rest/helpers/errors"
+	"github.com/radanalyticsio/oshinko-rest/helpers/flags"
 	"github.com/radanalyticsio/oshinko-rest/helpers/logging"
 	"github.com/radanalyticsio/oshinko-rest/restapi/operations"
 	"github.com/radanalyticsio/oshinko-rest/restapi/operations/clusters"
@@ -20,17 +20,8 @@ import (
 
 // This file is safe to edit. Once it exists it will not be overwritten
 
-type oshinkoOptions struct {
-	LogFile string `long:"log-file" description:"the file to write logs into, defaults to stdout"`
-}
-
 func configureFlags(api *operations.OshinkoRestAPI) {
-	api.CommandLineOptionsGroups = []swag.CommandLineOptionsGroup{
-		{
-			ShortDescription: "Oshinko REST server options",
-			Options:          &oshinkoOptions{},
-		},
-	}
+	api.CommandLineOptionsGroups = flags.GetLineOptionsGroups()
 }
 
 func configureAPI(api *operations.OshinkoRestAPI) http.Handler {
@@ -50,17 +41,15 @@ func configureAPI(api *operations.OshinkoRestAPI) http.Handler {
 
 	api.ServerShutdown = func() {}
 
-	for _, optsGroup := range api.CommandLineOptionsGroups {
-		opts, ok := optsGroup.Options.(*oshinkoOptions)
-		if ok == true {
-			if opts.LogFile != "" {
-				err := logging.SetLoggerFile(optsGroup.Options.(*oshinkoOptions).LogFile)
-				if err != nil {
-					logging.GetLogger().Println("unable to set log file;", err)
-				}
-			}
+	if logFile := flags.GetLogFile(); logFile != "" {
+		err := logging.SetLoggerFile(logFile)
+		if err != nil {
+			logging.GetLogger().Println("unable to set log file;", err)
 		}
 	}
+
+	// Print something if we are in debug mode
+	logging.Debug("Debug mode enabled")
 
 	api.Logger = logging.GetLogger().Printf
 
