@@ -73,7 +73,10 @@ func AddLoggingHandler(next http.Handler) http.Handler {
 		l.Println(reqId, lr.status)
 
 		if flags.DebugEnabled() {
-			resstr := fmt.Sprintf("%s", *lr.response)
+            resstr := ""
+            if lr.response != nil {
+                resstr = fmt.Sprintf("%s", *lr.response)
+            }
 			Debug(reqId, "Response: ", resstr)
 		}
 	})

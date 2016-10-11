@@ -1,9 +1,14 @@
-GIT_TAG=`git describe --tags --abbrev=0 2> /dev/null | head -n1`
-if [ -z $GIT_TAG ]; then
-    GIT_TAG='unknown'
+if [ -n "$OSHINKO_SERVER_TAG" ]
+then
+    TAG="$OSHINKO_SERVER_TAG"
+elif [ -d .git ]
+then
+    GIT_TAG=`git describe --tags --abbrev=0 2> /dev/null | head -n1`
+    GIT_COMMIT=`git log -n1 --pretty=format:%h 2> /dev/null`
+    TAG="${GIT_TAG}-${GIT_COMMIT}"
+else
+    TAG="unknown"
 fi
-GIT_COMMIT=`git log -n1 --pretty=format:%h`
-TAG="${GIT_TAG}-${GIT_COMMIT}"
 
 APP=oshinko-rest-server
 

@@ -9,11 +9,13 @@ existence of this file.
 
 import (
 	"fmt"
+	"log"
 	"testing"
 
 	loads "github.com/go-openapi/loads"
 	httptransport "github.com/go-openapi/runtime/client"
 	strfmt "github.com/go-openapi/strfmt"
+	flags "github.com/jessevdk/go-flags"
 	check "gopkg.in/check.v1"
 
 	"github.com/radanalyticsio/oshinko-rest/client"
@@ -38,6 +40,17 @@ func (s *OshinkoRestTestSuite) SetUpSuite(c *check.C) {
 
 	api := operations.NewOshinkoRestAPI(swaggerSpec)
 	server := restapi.NewServer(api)
+
+	parser := flags.NewNamedParser("oshinko-rest-client-test", flags.Default)
+	server.ConfigureFlags()
+	for _, optsGroup := range api.CommandLineOptionsGroups {
+		_, err := parser.AddGroup(optsGroup.ShortDescription, optsGroup.LongDescription, optsGroup.Options)
+		if err != nil {
+			log.Fatalln(err)
+		}
+	}
+	args := []string{"--debug"}
+	parser.ParseArgs(args)
 
 	server.ConfigureAPI()
 

@@ -1,0 +1,95 @@
+kind: Template
+apiVersion: v1
+metadata:
+  name: oshinko-client-tests-setup-template
+
+objects:
+- kind: ImageStream
+  apiVersion: v1
+  metadata:
+    name: oshinko-client-tests-image
+  spec: {}
+
+- kind: BuildConfig
+  apiVersion: v1
+  metadata:
+    name: oshinko-client-tests-build
+  spec:
+    runPolicy: Serial
+    triggers:
+      - type: ConfigChange
+    source:
+      type: Git
+      git:
+        uri: ${SOURCE_REPO}
+        ref: ${SOURCE_REF}
+      dockerfile: |-
+        FROM golang
+        ADD . /go/src/github.com/radanalyticsio/oshinko-rest/
+        WORKDIR /go/src/github.com/radanalyticsio/oshinko-rest
+        RUN chmod a+rwX -R .
+        RUN go get gopkg.in/check.v1
+        ENTRYPOINT /go/src/github.com/radanalyticsio/oshinko-rest/tools/test.sh client
+    strategy:
+      type: Docker
+    output:
+      to:
+        kind: ImageStreamTag
+        name: oshinko-client-tests-image:latest
+
+- kind: Pod
+  apiVersion: v1
+  metadata:
+    name: ${CLIENT_TEST_NAME}
+    annotations:
+      description: Functional client tests for the oshinko-rest server
+  spec:
+    restartPolicy: Never
+    serviceAccountName: oshinko
+    containers:
+      - name: ${CLIENT_TEST_NAME}
+        image: ${CLIENT_TEST_IMAGE}
+        command:
+          - /go/src/github.com/radanalyticsio/oshinko-rest/tools/test.sh
+          - client
+        env:
+          - name: OSHINKO_SERVER_PORT
+            value: "8080"
+          - name: OSHINKO_REST_POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: OSHINKO_CLUSTER_NAMESPACE
+            valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          - name: OSHINKO_CLUSTER_IMAGE
+            value: radanalyticsio/openshift-spark
+          - name: OSHINKO_SERVER_TAG
+            value: ${SOURCE_REF}
+        ports:
+          - name: rest-port
+            containerPort: 8080
+            protocol: TCP
+
+parameters:
+- name: CLIENT_TEST_NAME
+  description: |-
+    The name of the current test run.
+  generate: expression
+  from: "client-test-[a-z0-9]{3}"
+- name: CLIENT_TEST_IMAGE
+  description: |-
+    The image location for the client test container image, this should be
+    the internal registry URI where the ImageStreamTag resides.
+  required: true
+- name: SOURCE_REPO
+  description: |-
+    Source URI to use for building the oshinko-rest client tests.
+  value: https://github.com/radanalyticsio/oshinko-rest
+- name: SOURCE_REF
+  description: |-
+    Branch or commit of the source repository to use for building the
+    oshinko-rest client tests. Also used as the version tag for the server.
+  value: master
+

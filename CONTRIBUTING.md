@@ -54,7 +54,7 @@ where the underlying functions rely on difficult to configure resources or
 the code is simple enough as to not have multiple execution paths.
 
 The unit tests reside in the `tests/unit` directory, and are namespaced in
-the `unittest` package. The [gocheck](http://labix.org/gocheck) framework is
+the `unittest` package. The [gocheck][gocheckurl] framework is
 being used to structure these tests. To examine the suite structure or
 test runner hooks see the `tests/unit/configure_test.go` file.
 
@@ -69,8 +69,7 @@ that may need to be passed in to a test, or state that must be maintained
 between tests. This file also contains several functions that can be used
 for setting up and tearing down test or suites.
 
-To run the tests, either use the `test` target in the makefile to run all
-the tests, or use the `tools/test.sh` script to run them individually.
+To run these tests use the `test` target in the Makefile.
 
 ### Example unit test
 
@@ -89,5 +88,26 @@ func (s *OshinkoUnitTestSuite) TestExample(c *check.C) {
 }
 ```
 
+## Client tests
+
+A suite of client tests exists in the `tests/client` directory. These tests
+make use of the [gocheck][gocheckurl] framework that is used for the unit
+tests. They work by instantiating a server and issuing client commands
+against that server.
+
+To write new client tests, it is strongly advised to investigate the
+configuration code in `tests/client/configure_test.go`, and the
+`TestCreateAndDeleteCluster` test in the
+`tests/client/clusters_client_test.go` file. There are several features,
+such as access to the server object, which are created as members of the
+`OshinkoRestTestSuite` which will be helpful for test developers.
+
+To run the client tests, the `tools/oshinko-test.sh` is provided to assist
+with the OpenShift interactions. This script requires that you have access
+to the `oc` command *and* that you are authenticated as a user with
+permissions to perform all the admin functions required. Please inspect this
+script for more details.
+
+[gocheckurl]: http://labix.org/gocheck
 [ref1]: https://github.com/golang/go/commit/183cc0cd41f06f83cb7a2490a499e3f9101befff
 [ref2]: https://blog.gopheracademy.com/advent-2015/vendor-folder/
