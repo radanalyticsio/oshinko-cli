@@ -37,6 +37,7 @@ type logRequestReader struct {
 }
 
 func (r *logRequestReader) Read(p []byte) (n int, err error) {
+	r.Body = make([]byte, len(p))
 	n, err = r.original.Read(r.Body)
 	copy(p, r.Body)
 	return
@@ -56,8 +57,12 @@ func AddLoggingHandler(next http.Handler) http.Handler {
 		reqId = fmt.Sprintf("[req-id %s]", reqId)
 		l.Println(reqId, r.Method, r.URL)
 		lr := &logResponseWriter{w, 0, nil}
-		br := &logRequestReader{r.Body, make([]byte, r.ContentLength)}
-		r.Body = br
+		// This is to satisfy the compiler, it will not be used unless
+		// debug mode is enabled
+		br := &logRequestReader{r.Body, make([]byte, 0)}
+		if flags.DebugEnabled() {
+			r.Body = br
+		}
 		next.ServeHTTP(lr, r)
 
 		if flags.DebugEnabled() {
