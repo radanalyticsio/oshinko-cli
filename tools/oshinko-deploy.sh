@@ -29,7 +29,7 @@ DEFAULT_SPARK_IMAGE=radanalyticsio/openshift-spark
 DEFAULT_OPENSHIFT_USER=developer
 DEFAULT_OPENSHIFT_PROJECT=myproject
 
-while getopts :dc:u:p:s:w:r:o:h opt; do
+while getopts :dc:u:p:s:w:r:o:t:h opt; do
     case $opt in
         d)
             OS_ALLINONE=true
@@ -57,6 +57,9 @@ while getopts :dc:u:p:s:w:r:o:h opt; do
         o)
             WEBROUTE=$OPTARG
             ;;
+        t)
+            ALT_TEMPLATE=$OPTARG
+            ;;
         h)
             echo "usage: oshinko-deploy.sh [options]"
             echo
@@ -70,8 +73,9 @@ while getopts :dc:u:p:s:w:r:o:h opt; do
             echo "  -p PROJECT    OpenShift project name to install oshinko into (default: $DEFAULT_OPENSHIFT_USER)"
             echo "  -s IMAGE      spark docker image to use for clusters (default: $DEFAULT_SPARK_IMAGE)"
             echo "  -w IMAGE      oshinko-webui docker image to use for deployment (default: $DEFAULT_OSHINKO_WEB_IMAGE)"
-            echo "  -r IMAGE      oshinko-webui docker image to use for deployment (default: $DEFAULT_OSHINKO_WEB_IMAGE)"
+            echo "  -r IMAGE      oshinko-rest docker image to use for deployment (default: $DEFAULT_OSHINKO_REST_IMAGE)"
             echo "  -o HOSTNAME   hostname to use in exposed route to oshinko-web"
+            echo "  -t TEMPLATE   an OpenShift template file to deploy oshinko (default: tools/server-ui-template.yaml curl'd from upstream)"
             echo
             exit
             ;;
@@ -133,9 +137,13 @@ oc new-project $PROJECT
 oc create sa oshinko -n $PROJECT
 oc policy add-role-to-user admin system:serviceaccount:$PROJECT:oshinko -n $PROJECT
 
-curl -s \
-    https://raw.githubusercontent.com/radanalyticsio/oshinko-rest/master/tools/server-ui-template.yaml \
+if [ -n "$ALT_TEMPLATE" ]
+then
+    oc create -n $PROJECT -f $ALT_TEMPLATE
+else
+    curl -s https://raw.githubusercontent.com/radanalyticsio/oshinko-rest/master/tools/server-ui-template.yaml \
   | oc create -n $PROJECT -f -
+fi
 
 if [ -n "$WEBROUTE" ]
 then
