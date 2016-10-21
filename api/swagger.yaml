@@ -11,6 +11,7 @@ produces:
   - application/json
 schemes:
   - https
+  - http
 definitions:
   ClusterModel:
     allOf:
@@ -99,20 +100,27 @@ definitions:
         description: |-
           Unique name for the cluster
         type: string
-      masterCount:
+      config:
         description: |-
-          The count of master nodes requested in the cluster
-        type: integer
-        format: int
-      workerCount:
-        description: |-
-          The count of worker nodes requested in the cluster
-        type: integer
-        format: int
+          Cluster configuration values
+        type: object
+        properties:
+          name:
+            description: |-
+              The name of a stored cluster configuration
+          masterCount:
+            description: |-
+              The count of master nodes requested in the cluster (must be > 0)
+            type: integer
+            format: int
+          workerCount:
+            description: |-
+              The count of worker nodes requested in the cluster (must be > 0)
+            type: integer
+            format: int
     required:
       - name
-      - masterCount
-      - workerCount
+    additionalProperties: false
   SingleCluster:
     properties:
       cluster:

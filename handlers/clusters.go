@@ -16,6 +16,7 @@ import (
 	opt "github.com/radanalyticsio/oshinko-rest/helpers/podtemplates"
 	"github.com/radanalyticsio/oshinko-rest/helpers/probes"
 	osv "github.com/radanalyticsio/oshinko-rest/helpers/services"
+	"github.com/radanalyticsio/oshinko-rest/helpers/clusterconfigs"
 	"github.com/radanalyticsio/oshinko-rest/models"
 	"github.com/radanalyticsio/oshinko-rest/restapi/operations/clusters"
 	kapi "k8s.io/kubernetes/pkg/api"
@@ -26,6 +27,10 @@ import (
 
 const nameSpaceMsg = "Cannot determine target openshift namespace"
 const clientMsg = "Unable to create an openshift client"
+const lookupMsg = "Error while looking up cluster"
+const clusterConfigMsg = "Cluster configuration error"
+const replMsgMaster = "Cannot find replication controller for spark master"
+const replMsgWorker = "Cannot find replication controller for spark workers"
 
 const typeLabel = "oshinko-type"
 const clusterLabel = "oshinko-cluster"
@@ -134,7 +139,7 @@ func toint64ptr(val int64) *int64 {
 
 func singleClusterResponse(clustername string,
 	pc kclient.PodInterface,
-	sc kclient.ServiceInterface) (*models.SingleCluster, error) {
+	sc kclient.ServiceInterface, config *models.NewClusterConfig) (*models.SingleCluster, error) {
 
 	addpod := func(p kapi.Pod) *models.ClusterModelPodsItems0 {
 		pod := new(models.ClusterModelPodsItems0)
@@ -165,6 +170,7 @@ func singleClusterResponse(clustername string,
 	}
 
 	cluster.Cluster.Pods = []*models.ClusterModelPodsItems0{}
+	cluster.Cluster.Config = &models.NewClusterConfig{}
 
 	// Report the master pod
 	selectorlist := makeSelector(masterType, clustername)
@@ -172,21 +178,21 @@ func singleClusterResponse(clustername string,
 	if err != nil {
 		return nil, err
 	}
-	cluster.Cluster.MasterCount = toint64ptr(int64(len(pods.Items)))
 	for i := range pods.Items {
 		cluster.Cluster.Pods = append(cluster.Cluster.Pods, addpod(pods.Items[i]))
 	}
 
 	// Report the worker pods
-	cnt, workers, err := countWorkers(pc, clustername)
+	_, workers, err := countWorkers(pc, clustername)
 	if err != nil {
 		return nil, err
 	}
-	cluster.Cluster.WorkerCount = toint64ptr(cnt)
 	for i := range workers.Items {
 		cluster.Cluster.Pods = append(cluster.Cluster.Pods, addpod(workers.Items[i]))
 	}
 
+        cluster.Cluster.Config.WorkerCount = (*config).WorkerCount
+        cluster.Cluster.Config.MasterCount = (*config).MasterCount
 	return cluster, nil
 }
 
@@ -298,7 +304,6 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 		}
 		return 500
 	}
-
 	const mDepConfigMsg = "Unable to create master deployment configuration"
 	const wDepConfigMsg = "Unable to create worker deployment configuration"
 	const masterSrvMsg = "Unable to create spark master service endpoint"
@@ -309,7 +314,13 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	// pre spark 2, the name the master calls itself must match
 	// the name the workers use and the service name created
 	masterhost := *params.Cluster.Name
-	workercount := int(*params.Cluster.WorkerCount)
+
+	// Copy any named config referenced and update it with any explicit config values
+	finalconfig, err := clusterconfigs.GetClusterConfig(params.Cluster.Config)
+	if err != nil {
+		return reterr(fail(err, clusterConfigMsg, 409))
+	}
+	workercount := int(finalconfig.WorkerCount)
 
 	namespace, err := info.GetNamespace()
 	if namespace == "" || err != nil {
@@ -376,7 +387,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	// TODO ties into cluster status, make a note if the service is missing
 	sc.Create(&websv.Service)
 
-	cluster, err := singleClusterResponse(clustername, client.Pods(namespace), sc)
+	cluster, err := singleClusterResponse(clustername, client.Pods(namespace), sc, &finalconfig)
 	if err != nil {
 		return reterr(responseFailure(err, respMsg, 500))
 	}
@@ -604,7 +615,7 @@ func FindSingleClusterResponse(params clusters.FindSingleClusterParams) middlewa
 	// we use to create a cluster
 	ok, err := checkForDeploymentConfigs(nil, clustername, namespace)
 	if err != nil {
-		return reterr(fail(err, clientMsg, 500))
+		return reterr(fail(err, lookupMsg, 500))
 	}
 	if !ok {
 		return reterr(fail(nil, "No such cluster", 404))
@@ -617,7 +628,17 @@ func FindSingleClusterResponse(params clusters.FindSingleClusterParams) middlewa
 	pc := client.Pods(namespace)
 	sc := client.Services(namespace)
 
-	cluster, err := singleClusterResponse(clustername, pc, sc)
+	rcc := client.ReplicationControllers(namespace)
+	mrepl, err := getReplController(rcc, clustername, masterType)
+	if err != nil || mrepl == nil {
+		return reterr(fail(err, replMsgMaster, 500))
+	}
+	wrepl, err := getReplController(rcc, clustername, workerType)
+	if err != nil || wrepl == nil {
+		return reterr(fail(err, replMsgWorker, 500))
+	}
+	config := models.NewClusterConfig{MasterCount: int64(mrepl.Spec.Replicas), WorkerCount: int64(wrepl.Spec.Replicas)}
+	cluster, err := singleClusterResponse(clustername, pc, sc, &config)
 	if err != nil {
 		// In this case, the entire purpose of this call is to create this
 		// response object (as opposed to create and update which might fail
@@ -631,6 +652,24 @@ func FindSingleClusterResponse(params clusters.FindSingleClusterParams) middlewa
 	}
 
 	return clusters.NewFindSingleClusterOK().WithPayload(cluster)
+}
+
+func getReplController(client kclient.ReplicationControllerInterface, clustername, otype string) (*kapi.ReplicationController, error) {
+
+	selectorlist := makeSelector(otype, clustername)
+	repls, err := client.List(selectorlist)
+	if err != nil || len(repls.Items) == 0 {
+		return nil, err
+	}
+	// Use the latest replication controller.  There could be more than one
+	// if the user did something like oc env to set a new env var on a deployment
+	newestRepl := repls.Items[0]
+	for i := 0; i < len(repls.Items); i++ {
+		if repls.Items[i].CreationTimestamp.Unix() > newestRepl.CreationTimestamp.Unix() {
+			newestRepl = repls.Items[i]
+		}
+	}
+	return &newestRepl, err
 }
 
 // UpdateSingleClusterResponse update a cluster and return the new representation
@@ -653,8 +692,30 @@ func UpdateSingleClusterResponse(params clusters.UpdateSingleClusterParams) midd
 	const respMsg = "Updated cluster but failed to construct a response object"
 
 	clustername := params.Name
-	workercount := int(*params.Cluster.WorkerCount)
-	mastercount := int(*params.Cluster.MasterCount)
+
+	// Before we do further checks, make sure that we have deploymentconfigs
+	// If either the master or the worker deploymentconfig are missing, we
+	// assume that the cluster is missing. These are the base objects that
+	// we use to create a cluster
+	namespace, err := info.GetNamespace()
+	if namespace == "" || err != nil {
+		return reterr(fail(err, nameSpaceMsg, 500))
+	}
+	ok, err := checkForDeploymentConfigs(nil, clustername, namespace)
+	if err != nil {
+		return reterr(fail(err, lookupMsg, 500))
+	}
+	if !ok {
+		return reterr(fail(nil, "No such cluster", 404))
+	}
+
+	// Copy any named config referenced and update it with any explicit config values
+	finalconfig, err := clusterconfigs.GetClusterConfig(params.Cluster.Config)
+	if err != nil {
+		return reterr(fail(err, clusterConfigMsg, 409))
+	}
+	workercount := int(finalconfig.WorkerCount)
+	mastercount := int(finalconfig.MasterCount)
 
 	// Simple things first. At this time we do not support cluster name change and
 	// we do not suppport scaling the master count (likely need HA setup for that to make sense)
@@ -666,44 +727,25 @@ func UpdateSingleClusterResponse(params clusters.UpdateSingleClusterParams) midd
 		return reterr(fail(nil, masterMsg, 409))
 	}
 
-	namespace, err := info.GetNamespace()
-	if namespace == "" || err != nil {
-		return reterr(fail(err, nameSpaceMsg, 500))
-	}
-
 	client, err := osa.GetKubeClient()
 	if err != nil {
 		return reterr(fail(err, clientMsg, 500))
 	}
 	rcc := client.ReplicationControllers(namespace)
-
-	// Get the replication controller for the cluster (there should only be 1)
-	// (it's unlikely we would get more than 1 since it is created by the deploymentconfig)
-	selectorlist := makeSelector(workerType, clustername)
-	repls, err := rcc.List(selectorlist)
-	if err != nil || len(repls.Items) == 0 {
-		return reterr(fail(err, findReplMsg, 500))
+        repl, err := getReplController(rcc, clustername, workerType)
+	if err != nil || repl == nil {
+		return reterr(fail(err, replMsgWorker, 500))
 	}
-	// Use the latest replication controller.  There could be more than one
-	// if the user did something like oc env to set a new env var on a deployment
-	newestRepl := repls.Items[0]
-	for i := 0; i < len(repls.Items); i++ {
-		if repls.Items[i].CreationTimestamp.Unix() > newestRepl.CreationTimestamp.Unix() {
-			newestRepl = repls.Items[i]
-		}
-	}
-	repl := newestRepl
 
 	// If the current replica count does not match the request, update the replication controller
 	if repl.Spec.Replicas != workercount {
 		repl.Spec.Replicas = workercount
-		_, err = rcc.Update(&repl)
+		_, err = rcc.Update(repl)
 		if err != nil {
 			return reterr(fail(err, updateReplMsg, 500))
 		}
 	}
-
-	cluster, err := singleClusterResponse(clustername, client.Pods(namespace), client.Services(namespace))
+	cluster, err := singleClusterResponse(clustername, client.Pods(namespace), client.Services(namespace), &finalconfig)
 	if err != nil {
 		return reterr(responseFailure(err, respMsg, 500))
 	}

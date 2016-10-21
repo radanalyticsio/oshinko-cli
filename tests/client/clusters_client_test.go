@@ -11,7 +11,8 @@ func (s *OshinkoRestTestSuite) TestCreateCluster(c *check.C) {
 	cname := "TestCluster"
 	mcount := int64(1)
 	wcount := int64(3)
-	cdetails := models.NewCluster{Name: &cname, MasterCount: &mcount, WorkerCount: &wcount}
+        cconfig := models.NewClusterConfig{MasterCount: mcount, WorkerCount: wcount}
+	cdetails := models.NewCluster{Name: &cname, Config: &cconfig}
 	params := clusters.NewCreateClusterParams().WithCluster(&cdetails)
 
 	_, err := s.cli.Clusters.CreateCluster(params)
@@ -57,7 +58,8 @@ func (s *OshinkoRestTestSuite) TestUpdateSingleCluster(c *check.C) {
 	cname := "TestCluster"
 	mcount := int64(1)
 	wcount := int64(3)
-	cdetails := models.NewCluster{Name: &cname, MasterCount: &mcount, WorkerCount: &wcount}
+        cconfig := models.NewClusterConfig{MasterCount: mcount, WorkerCount: wcount}    
+	cdetails := models.NewCluster{Name: &cname, Config: &cconfig}
 	params := clusters.NewUpdateSingleClusterParams().WithName("TestCluster").WithCluster(&cdetails)
 
 	_, err := s.cli.Clusters.UpdateSingleCluster(params)
