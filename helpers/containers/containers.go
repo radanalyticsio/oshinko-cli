@@ -13,7 +13,6 @@ func Container(name, image string) *OContainer {
 	c := OContainer{}
 	c.Name = name
 	c.Image = image
-	c.ImagePullPolicy = kapi.PullIfNotPresent
 	c.TerminationMessagePath = "/dev/termination-log"
 	return &c
 }
