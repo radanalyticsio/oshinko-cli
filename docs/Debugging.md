@@ -31,14 +31,12 @@ configured appropriately.
 Doing docker push <openshift registry>/<project>/<image> complains about
 “**No credentials**” or just stalls after saying that “**The push refers to a repository...**”
 
-Be sure that your are logged in to the docker registry in question.
+Be sure that your are logged in to OpenShift and the docker registry in question:
 
-Login to openshift and get the token via `oc whoami -t`
-
-`docker login -u <username> -e <anything that looks like an email address> -p <token from above> <ip:port of docker registry>`
+    $ oc whoami
+    $ docker login -u <username> -e <anything that looks like an email address> -p $(oc whoami -t) <ip:port of docker registry>
 
 Try pushing again
-
 
 ## Running oshinko-rest
 
@@ -46,15 +44,18 @@ If oshinko-rest fails to start (or fails with permissions errors in the
 logs), you may want to check to be sure that a service account has been
 created for your project and that it has the admin role.
 
-Check for service account
-`oc get sa`
-`oc describe sa <service account name>`
+Check for service account:
 
-Create service account
-`oc create sa <service accnount name>`
-Elevate permissions
-`oc policy add-role-to-user admin system:serviceaccount:<project>:<service account name> -n <project>`
+    $ oc get sa
+    $ oc describe sa <service account name>
 
+Create service account if it's missing:
+
+    $ oc create sa <service accnount name>
+
+Elevate permissions:
+
+    $ oc policy add-role-to-user admin system:serviceaccount:<project>:<service account name> -n <project>
 
 ## Running oshinko-web
 
@@ -65,11 +66,12 @@ is up and running, you may have a skydns issue where you are unable
 to resolve dns references of services by name.
 
 As a debugging test, you can try the following from a terminal inside
-the pod running oshinko-webui.
-`curl http://<oshinko rest service name>:8080`
+the pod running oshinko-webui:
+
+    $ curl http://<oshinko rest service name>:8080
+
 If that command returns a list of information about the oshinko-rest service,
 then oshinko-rest is running and skydns is working correctly.
-
 
 ## Running Spark jobs
 
@@ -81,8 +83,7 @@ If you see the following message:
 `Exception in thread "main" java.io.IOException: failure to login`
 you may need to set the SPARK_USER environment variable before running your job.
 You can try the following to run the sample SparkPi job:
-`SPARK_USER=anyname spark-submit --master spark://<cluster name>:7077  --class org.apache.spark.examples.SparkPi /opt/spark/examples/jars/spark-examples_2.11-2.0.0-preview.jar 10`
+
+    $ SPARK_USER=anyname spark-submit --master spark://<cluster name>:7077  --class org.apache.spark.examples.SparkPi /opt/spark/examples/jars/spark-examples_2.11-2.0.0-preview.jar 10
 
 ****
-
-

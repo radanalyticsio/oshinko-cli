@@ -167,7 +167,7 @@ parameters:
   description: Name of the oshinko web service
   value: "oshinko-web"
 - name: OSHINKO_WEB_IMAGE
-  description: Full name of the oshino web image
+  description: Full name of the oshinko web image
   required: true
   value: radanalyticsio/oshinko-webui
 - name: OSHINKO_WEB_ROUTE_HOSTNAME
