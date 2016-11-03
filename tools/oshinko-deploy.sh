@@ -29,7 +29,7 @@ DEFAULT_SPARK_IMAGE=radanalyticsio/openshift-spark
 DEFAULT_OPENSHIFT_USER=developer
 DEFAULT_OPENSHIFT_PROJECT=myproject
 
-while getopts :dc:u:p:s:w:r:o:t:h opt; do
+while getopts :dc:u:p:s:w:r:o:t:ih opt; do
     case $opt in
         d)
             OS_ALLINONE=true
@@ -60,6 +60,9 @@ while getopts :dc:u:p:s:w:r:o:t:h opt; do
         t)
             ALT_TEMPLATE=$OPTARG
             ;;
+        i)
+            S2I_TEMPLATES=false
+            ;;
         h)
             echo "usage: oshinko-deploy.sh [options]"
             echo
@@ -76,6 +79,7 @@ while getopts :dc:u:p:s:w:r:o:t:h opt; do
             echo "  -r IMAGE      oshinko-rest docker image to use for deployment (default: $DEFAULT_OSHINKO_REST_IMAGE)"
             echo "  -o HOSTNAME   hostname to use in exposed route to oshinko-web"
             echo "  -t TEMPLATE   an OpenShift template file to deploy oshinko (default: tools/server-ui-template.yaml curl'd from upstream)"
+            echo "  -i            do not load the oshinko s2i templates into the project (default: curl from the oshinko-s2i upstream repo)"
             echo
             exit
             ;;
@@ -142,6 +146,13 @@ then
     oc create -n $PROJECT -f $ALT_TEMPLATE
 else
     curl -s https://raw.githubusercontent.com/radanalyticsio/oshinko-rest/master/tools/server-ui-template.yaml \
+  | oc create -n $PROJECT -f -
+fi
+
+
+if [ -z "$S2I_TEMPLATES" ]
+then
+    curl -s https://raw.githubusercontent.com/radanalyticsio/oshinko-s2i/master/pyspark/pysparkbuilddc.json \
   | oc create -n $PROJECT -f -
 fi
 
