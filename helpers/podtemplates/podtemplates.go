@@ -3,6 +3,7 @@ package podtemplates
 import (
 	"github.com/radanalyticsio/oshinko-rest/helpers/containers"
 	kapi "k8s.io/kubernetes/pkg/api"
+	"fmt"
 )
 
 type OPodTemplateSpec struct {
@@ -43,5 +44,24 @@ func (pt *OPodTemplateSpec) Containers(cntnrs ...*containers.OContainer) *OPodTe
 		kcntnrs[idx] = c.Container
 	}
 	pt.Spec.Containers = kcntnrs
+	return pt
+}
+
+func (pt *OPodTemplateSpec) SetConfigMapVolume(configmap string) *OPodTemplateSpec {
+	fmt.Println("configmap is", configmap)
+	if pt.Spec.Volumes == nil {
+		fmt.Println("making an empty volume list")
+		pt.Spec.Volumes = []kapi.Volume{}
+	}
+
+	cm := kapi.ConfigMapVolumeSource{}
+	cm.LocalObjectReference.Name = configmap
+
+	// This is the source for the volume, there are lots of different kinds.
+	// We just need a pointer to the configmap source
+	vsource := kapi.VolumeSource{ConfigMap: &cm}
+
+	v := kapi.Volume{Name: configmap, VolumeSource: vsource}
+	pt.Spec.Volumes = append(pt.Spec.Volumes, v)
 	return pt
 }

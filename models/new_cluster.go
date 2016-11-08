@@ -87,6 +87,14 @@ type NewClusterConfig struct {
 	 */
 	Name interface{} `json:"name,omitempty"`
 
+	/* The name of a ConfigMap which holds spark configuration files for the master
+	 */
+	SparkMasterConfig interface{} `json:"sparkMasterConfig,omitempty"`
+
+	/* The name of a ConfigMap which holds spark configuration files for the workers
+	 */
+	SparkWorkerConfig interface{} `json:"sparkWorkerConfig,omitempty"`
+
 	/* The count of worker nodes requested in the cluster (must be > 0)
 	 */
 	WorkerCount int64 `json:"workerCount,omitempty"`

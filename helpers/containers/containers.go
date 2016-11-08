@@ -3,6 +3,7 @@ package containers
 import (
 	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/resource"
+	"fmt"
 )
 
 type OContainer struct {
@@ -65,6 +66,17 @@ func (c *OContainer) SetLivenessProbe(probe kapi.Probe) *OContainer {
 
 func (c *OContainer) SetReadinessProbe(probe kapi.Probe) *OContainer {
 	c.ReadinessProbe = &probe
+	return c
+}
+
+func (c *OContainer) SetVolumeMount(name, mountpath string, ro bool) *OContainer {
+	fmt.Println("name, mountpath, ro", name, mountpath, ro)
+	if c.VolumeMounts == nil {
+		fmt.Println("making empty volume mounts")
+		c.VolumeMounts = []kapi.VolumeMount{}
+	}
+	vm := kapi.VolumeMount{Name: name, MountPath: mountpath, ReadOnly: ro}
+	c.VolumeMounts = append(c.VolumeMounts, vm)
 	return c
 }
 

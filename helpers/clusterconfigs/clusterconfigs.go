@@ -11,7 +11,12 @@ import (
 )
 
 
-var defaultConfig models.NewClusterConfig = models.NewClusterConfig{1, "", 1}
+var defaultConfig models.NewClusterConfig = models.NewClusterConfig{
+								MasterCount: 1,
+	                                                        WorkerCount: 1,
+								Name: "",
+								SparkMasterConfig: "",
+								SparkWorkerConfig: ""}
 var configpath, globpath string
 
 const Defaultname = "default"
@@ -51,6 +56,14 @@ func assignConfig(res *models.NewClusterConfig, src models.NewClusterConfig) {
 	if src.WorkerCount != 0 {
 		res.WorkerCount = src.WorkerCount
 	}
+	sparkMasterConfig, _ := src.SparkMasterConfig.(string)
+	if sparkMasterConfig != "" {
+		res.SparkMasterConfig = sparkMasterConfig
+	}
+	sparkWorkerConfig, _ := src.SparkWorkerConfig.(string)
+	if sparkWorkerConfig != "" {
+		res.SparkWorkerConfig = sparkWorkerConfig
+	}
 }
 
 func checkConfiguration(config models.NewClusterConfig) error {
@@ -88,6 +101,7 @@ func process(config *models.NewClusterConfig, nameElements []string, filename st
 	case "workercount":
 		config.WorkerCount, err = getInt(filename)
 	}
+	// TODO (tmckay) have to allow the named configs to set sparkworkerconfig and sparkmasterconfig here
 	return err
 }
 

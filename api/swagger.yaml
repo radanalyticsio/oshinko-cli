@@ -118,6 +118,12 @@ definitions:
               The count of worker nodes requested in the cluster (must be > 0)
             type: integer
             format: int
+          sparkMasterConfig:
+            description: |-
+              The name of a ConfigMap which holds spark configuration files for the master
+          sparkWorkerConfig:
+            description: |-
+              The name of a ConfigMap which holds spark configuration files for the workers
     required:
       - name
     additionalProperties: false

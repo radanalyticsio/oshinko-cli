@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -31,6 +32,8 @@ const lookupMsg = "Error while looking up cluster"
 const clusterConfigMsg = "Cluster configuration error"
 const replMsgMaster = "Cannot find replication controller for spark master"
 const replMsgWorker = "Cannot find replication controller for spark workers"
+const masterConfigMsg = "Error processing spark master configuration value"
+const workerConfigMsg = "Error processing spark worker configuration value"
 
 const typeLabel = "oshinko-type"
 const clusterLabel = "oshinko-cluster"
@@ -43,6 +46,8 @@ const masterPortName = "spark-master"
 const masterPort = 7077
 const webPortName = "spark-webui"
 const webPort = 8080
+
+const sparkconfdir = "/etc/oshinko-spark-configs"
 
 // The suffix to add to the spark master hostname (clustername) for the web service
 const webServiceSuffix = "-ui"
@@ -196,19 +201,23 @@ func singleClusterResponse(clustername string,
 	return cluster, nil
 }
 
-func makeEnvVars(clustername string) []kapi.EnvVar {
+func makeEnvVars(clustername, sparkconfdir string) []kapi.EnvVar {
 	envs := []kapi.EnvVar{}
 
 	envs = append(envs, kapi.EnvVar{Name: "OSHINKO_SPARK_CLUSTER", Value: clustername})
 	envs = append(envs, kapi.EnvVar{Name: "OSHINKO_REST_HOST", Value: os.Getenv("OSHINKO_REST_SERVICE_HOST")})
 	envs = append(envs, kapi.EnvVar{Name: "OSHINKO_REST_PORT", Value: os.Getenv("OSHINKO_REST_SERVICE_PORT")})
+	if sparkconfdir != "" {
+		envs = append(envs, kapi.EnvVar{Name: "SPARK_CONF_DIR", Value: sparkconfdir})
+	}
+
 	return envs
 }
 
-func makeWorkerEnvVars(clustername string) []kapi.EnvVar {
+func makeWorkerEnvVars(clustername, sparkconfdir string) []kapi.EnvVar {
 	envs := []kapi.EnvVar{}
 
-	envs = makeEnvVars(clustername)
+	envs = makeEnvVars(clustername, sparkconfdir)
 	envs = append(envs, kapi.EnvVar{
 		Name:  "SPARK_MASTER_ADDRESS",
 		Value: "spark://" + clustername + ":" + strconv.Itoa(masterPort)})
@@ -220,7 +229,7 @@ func makeWorkerEnvVars(clustername string) []kapi.EnvVar {
 
 func sparkWorker(namespace string,
 	image string,
-	replicas int, clustername string) *odc.ODeploymentConfig {
+	replicas int, clustername, sparkconfdir, sparkworkerconfig string) *odc.ODeploymentConfig {
 
 	// Create the basic deployment config
 	// We will use a label and pod selector based on the cluster name.
@@ -239,14 +248,19 @@ func sparkWorker(namespace string,
 	webp := ocon.ContainerPort(webPortName, webport)
 	cont := ocon.Container(dc.Name, image).
 		Ports(webp).
-		SetLivenessProbe(probes.NewHTTPGetProbe(webport)).EnvVars(makeWorkerEnvVars(clustername))
+		SetLivenessProbe(probes.NewHTTPGetProbe(webport)).EnvVars(makeWorkerEnvVars(clustername, sparkconfdir))
+
+	if sparkworkerconfig != "" {
+		pt = pt.SetConfigMapVolume(sparkworkerconfig)
+		cont = cont.SetVolumeMount(sparkworkerconfig, sparkconfdir, true)
+	}
 
 	// Finally, assign the container to the pod template spec and
 	// assign the pod template spec to the deployment config
 	return dc.PodTemplateSpec(pt.Containers(cont))
 }
 
-func sparkMaster(namespace, image, clustername, masterhost string) *odc.ODeploymentConfig {
+func sparkMaster(namespace, image, clustername, sparkconfdir, sparkmasterconfig string) *odc.ODeploymentConfig {
 
 	// Create the basic deployment config
 	// We will use a label and pod selector based on the cluster name
@@ -268,7 +282,12 @@ func sparkMaster(namespace, image, clustername, masterhost string) *odc.ODeploym
 	cont := ocon.Container(dc.Name, image).
 		Ports(masterp, webp).
 		SetLivenessProbe(httpProbe).
-		SetReadinessProbe(httpProbe).EnvVars(makeEnvVars(clustername))
+		SetReadinessProbe(httpProbe).EnvVars(makeEnvVars(clustername, sparkconfdir))
+
+	if sparkmasterconfig != "" {
+		pt = pt.SetConfigMapVolume(sparkmasterconfig)
+		cont = cont.SetVolumeMount(sparkmasterconfig, sparkconfdir, true)
+	}
 
 	// Finally, assign the container to the pod template spec and
 	// assign the pod template spec to the deployment config
@@ -283,6 +302,14 @@ func service(name string,
 	p := osv.ServicePort(port).TargetPort(port)
 	return osv.Service(name).Label(clusterLabel, clustername).
 		Label(typeLabel, otype).PodSelectors(podselectors).Ports(p), p
+}
+
+func checkForConfigMap(name string, cm kclient.ConfigMapsInterface) error {
+	cmap, err := cm.Get(name)
+	if err == nil && cmap == nil {
+		err = fmt.Errorf("ConfigMap '%s' not found", name)
+	}
+	return err
 }
 
 // CreateClusterResponse create a cluster and return the representation
@@ -309,18 +336,13 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	const masterSrvMsg = "Unable to create spark master service endpoint"
 	const imageMsg = "Cannot determine name of spark image"
 	const respMsg = "Created cluster but failed to construct a response object"
+        var masterconfdir string
+	var workerconfdir string
 
 	clustername := *params.Cluster.Name
 	// pre spark 2, the name the master calls itself must match
 	// the name the workers use and the service name created
 	masterhost := *params.Cluster.Name
-
-	// Copy any named config referenced and update it with any explicit config values
-	finalconfig, err := clusterconfigs.GetClusterConfig(params.Cluster.Config)
-	if err != nil {
-		return reterr(fail(err, clusterConfigMsg, 409))
-	}
-	workercount := int(finalconfig.WorkerCount)
 
 	namespace, err := info.GetNamespace()
 	if namespace == "" || err != nil {
@@ -342,9 +364,38 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 		return reterr(fail(err, clientMsg, 500))
 	}
 
+	// Copy any named config referenced and update it with any explicit config values
+	finalconfig, err := clusterconfigs.GetClusterConfig(params.Cluster.Config)
+	if err != nil {
+		return reterr(fail(err, clusterConfigMsg, 409))
+	}
+	workercount := int(finalconfig.WorkerCount)
+
+	// Check if finalconfig contains the names of ConfigMaps to use for spark
+	// configuration. If so they must exist, and the SPARK_CONF_DIR env must be
+	// set correctly
+	sparkmasterconfig, _ := finalconfig.SparkMasterConfig.(string)
+	if sparkmasterconfig != "" {
+		err := checkForConfigMap(sparkmasterconfig, client.ConfigMaps(namespace))
+		if err != nil {
+			return reterr(fail(err, masterConfigMsg, 409))
+		}
+		masterconfdir = sparkconfdir
+	}
+
+	sparkworkerconfig, _ := finalconfig.SparkWorkerConfig.(string)
+	if sparkworkerconfig != "" {
+		err := checkForConfigMap(sparkworkerconfig, client.ConfigMaps(namespace))
+		if err != nil {
+			return reterr(fail(err, workerConfigMsg, 409))
+		}
+		workerconfdir = sparkconfdir
+	}
+
+
 	// Create the master deployment config
 	dcc := osclient.DeploymentConfigs(namespace)
-	masterdc := sparkMaster(namespace, image, clustername, masterhost)
+	masterdc := sparkMaster(namespace, image, clustername, masterconfdir, sparkmasterconfig)
 
 	// Create the services that will be associated with the master pod
 	// They will be created with selectors based on the pod labels
@@ -359,7 +410,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 		masterdc.GetPodTemplateSpecLabels())
 
 	// Create the worker deployment config
-	workerdc := sparkWorker(namespace, image, workercount, clustername)
+	workerdc := sparkWorker(namespace, image, workercount, clustername, workerconfdir, sparkworkerconfig)
 
 	// Launch all of the objects
 	_, err = dcc.Create(&masterdc.DeploymentConfig)
