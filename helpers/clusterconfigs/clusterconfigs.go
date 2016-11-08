@@ -118,7 +118,7 @@ func loadConfig(name string) (res models.NewClusterConfig, err error) {
 	// work for ConfigMap volumes.
 	res = defaultConfig
 	err = readConfig(defaultname, &res, allowMissing)
-	if err == nil && name != "" {
+	if err == nil && name != "" && name != defaultname {
 		err = readConfig(name, &res, failOnMissing)
 	}
 	return res, err
