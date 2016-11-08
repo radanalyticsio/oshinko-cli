@@ -38,12 +38,29 @@ type OshinkoUnitTestSuite struct{
 
 var _ = check.Suite(&OshinkoUnitTestSuite{})
 
+const defaultmastercount = clusterconfigs.Defaultname + ".mastercount"
+const defaultworkercount = clusterconfigs.Defaultname + ".workercount"
+
 func makeConfig(dir string, name string, val string) {
 	f, err := os.Create(path.Join(dir, name))
 	if err == nil {
 		f.WriteString(val)
 		f.Close()
 	}
+}
+
+func deleteConfig(dir string, name string) {
+	_ = os.Remove(path.Join(dir, name))
+}
+
+func DeleteDefaultConfig(s *OshinkoUnitTestSuite) {
+	deleteConfig(s.UserConfigpath, defaultmastercount)
+	deleteConfig(s.UserConfigpath, defaultworkercount)
+}
+
+func makeDefaultConfig(s *OshinkoUnitTestSuite) {
+	makeConfig(s.UserConfigpath, defaultmastercount, strconv.Itoa(int(s.UserDefault.WorkerCount)))
+	makeConfig(s.UserConfigpath, defaultworkercount, strconv.Itoa(int(s.UserDefault.WorkerCount)))
 }
 
 // SetUpSuite is run once before the entire test suite
@@ -81,10 +98,10 @@ func (s *OshinkoUnitTestSuite) SetUpSuite(c *check.C) {
 	makeConfig(s.Configpath, "cow.mastercount", "cow")
 	makeConfig(s.Configpath, "pig.workercount", "pig")
 
-	// Set up a user defined default at another path
+	// Set up a user defined default
+	// This will be written at the beginning of each test because some tests may
+	// destroy it to change default behavior
 	s.UserDefault = models.NewClusterConfig{Name: "", MasterCount: 3, WorkerCount: 3}
-	makeConfig(s.UserConfigpath, "default.mastercount", strconv.Itoa(int(s.UserDefault.WorkerCount)))
-	makeConfig(s.UserConfigpath, "default.workercount", strconv.Itoa(int(s.UserDefault.WorkerCount)))
 
 	// Also create some troublesome name elements to make sure it doesn't break anything ....
 	makeConfig(s.UserConfigpath, "small", "fish")
@@ -96,6 +113,8 @@ func (s *OshinkoUnitTestSuite) SetUpSuite(c *check.C) {
 // SetUpTest is run once before each test
 func (s *OshinkoUnitTestSuite) SetUpTest(c *check.C) {
 	clusterconfigs.SetConfigPath(clusterconfigs.DefaultConfigPath)
+	makeDefaultConfig(s)
+
 }
 
 // TearDownSuite is run once after all tests have finished

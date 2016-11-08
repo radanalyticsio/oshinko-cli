@@ -14,7 +14,7 @@ import (
 var defaultConfig models.NewClusterConfig = models.NewClusterConfig{1, "", 1}
 var configpath, globpath string
 
-const defaultname = "default"
+const Defaultname = "default"
 const failOnMissing = true
 const allowMissing = false
 const DefaultConfigPath = "/etc/oshinko-cluster-configs/"
@@ -117,8 +117,8 @@ func loadConfig(name string) (res models.NewClusterConfig, err error) {
 	// This can probably be smarter, assuming file timestamps
 	// work for ConfigMap volumes.
 	res = defaultConfig
-	err = readConfig(defaultname, &res, allowMissing)
-	if err == nil && name != "" && name != defaultname {
+	err = readConfig(Defaultname, &res, allowMissing)
+	if err == nil && name != "" && name != Defaultname {
 		err = readConfig(name, &res, failOnMissing)
 	}
 	return res, err
