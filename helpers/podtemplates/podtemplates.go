@@ -3,7 +3,6 @@ package podtemplates
 import (
 	"github.com/radanalyticsio/oshinko-rest/helpers/containers"
 	kapi "k8s.io/kubernetes/pkg/api"
-	"fmt"
 )
 
 type OPodTemplateSpec struct {
