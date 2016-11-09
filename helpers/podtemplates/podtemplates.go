@@ -48,9 +48,7 @@ func (pt *OPodTemplateSpec) Containers(cntnrs ...*containers.OContainer) *OPodTe
 }
 
 func (pt *OPodTemplateSpec) SetConfigMapVolume(configmap string) *OPodTemplateSpec {
-	fmt.Println("configmap is", configmap)
 	if pt.Spec.Volumes == nil {
-		fmt.Println("making an empty volume list")
 		pt.Spec.Volumes = []kapi.Volume{}
 	}
 
