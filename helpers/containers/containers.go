@@ -3,7 +3,6 @@ package containers
 import (
 	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/resource"
-	"fmt"
 )
 
 type OContainer struct {
