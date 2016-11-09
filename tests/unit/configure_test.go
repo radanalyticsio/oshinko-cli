@@ -101,7 +101,11 @@ func (s *OshinkoUnitTestSuite) SetUpSuite(c *check.C) {
 	// Set up a user defined default
 	// This will be written at the beginning of each test because some tests may
 	// destroy it to change default behavior
-	s.UserDefault = models.NewClusterConfig{Name: "", MasterCount: 3, WorkerCount: 3}
+	s.UserDefault = models.NewClusterConfig{Name: "",
+						MasterCount: 3,
+						WorkerCount: 3,
+						SparkMasterConfig: "",
+						SparkWorkerConfig: ""}
 
 	// Also create some troublesome name elements to make sure it doesn't break anything ....
 	makeConfig(s.UserConfigpath, "small", "fish")
