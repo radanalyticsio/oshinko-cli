@@ -337,7 +337,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	const imageMsg = "Cannot determine name of spark image"
 	const respMsg = "Created cluster but failed to construct a response object"
         var masterconfdir string
-	var workerconfdir string
+        var workerconfdir string
 
 	clustername := *params.Cluster.Name
 	// pre spark 2, the name the master calls itself must match

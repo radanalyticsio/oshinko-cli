@@ -70,9 +70,7 @@ func (c *OContainer) SetReadinessProbe(probe kapi.Probe) *OContainer {
 }
 
 func (c *OContainer) SetVolumeMount(name, mountpath string, ro bool) *OContainer {
-	fmt.Println("name, mountpath, ro", name, mountpath, ro)
 	if c.VolumeMounts == nil {
-		fmt.Println("making empty volume mounts")
 		c.VolumeMounts = []kapi.VolumeMount{}
 	}
 	vm := kapi.VolumeMount{Name: name, MountPath: mountpath, ReadOnly: ro}
