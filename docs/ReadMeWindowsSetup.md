@@ -14,6 +14,7 @@ The steps are relatively simple. You need to have a user account on OpenShift.
 4. Then create a service account
 
    $ oc create sa oshinko
+   
    $ oc policy add-role-to-user admin system:serviceaccount:[Your Project Name]:oshinko
 
 5. go into oshinko-rest\tools in the local copy of repo (should already be there)
