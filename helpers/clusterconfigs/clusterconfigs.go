@@ -1,6 +1,7 @@
 package clusterconfigs
 
 import (
+	"io/ioutil"
 	"errors"
 	"fmt"
 	"os"
@@ -87,6 +88,16 @@ func getInt(filename string) (res int64, err error) {
 	}
 	return res, err
 }
+func getStr(filename string) (res string, err error) {
+	buff, err := ioutil.ReadFile(filename)
+	if err != nil {
+		err = errors.New(fmt.Sprintf(ErrorWhileProcessing, filename, err.Error()))
+	} else {
+		// In case there is a carriage return
+		res = strings.Trim(string(buff), "\n")
+	}
+	return res, err
+}
 
 func process(config *models.NewClusterConfig, nameElements []string, filename string) error {
 
@@ -100,8 +111,17 @@ func process(config *models.NewClusterConfig, nameElements []string, filename st
 		config.MasterCount, err = getInt(filename)
 	case "workercount":
 		config.WorkerCount, err = getInt(filename)
+	case "sparkmasterconfig":
+		str, err := getStr(filename)
+		if err == nil {
+			config.SparkMasterConfig = str
+		}
+	case "sparkworkerconfig":
+		str, err := getStr(filename)
+		if err == nil {
+			config.SparkWorkerConfig = str
+		}
 	}
-	// TODO (tmckay) have to allow the named configs to set sparkworkerconfig and sparkmasterconfig here
 	return err
 }
 
