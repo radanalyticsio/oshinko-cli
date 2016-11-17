@@ -405,8 +405,8 @@ func waitForCount(client kclient.ReplicationControllerInterface, name string, co
 	}
 }
 
-func deleteCluster(clustername, namespace string, osclient *oclient.Client, client *kclient.Client) string {
-
+func deleteCluster(clustername, namespace string, osclient *oclient.Client, client *kclient.Client) (string, bool) {
+        var foundSomething bool = false
 	info := []string{}
 	scalerepls := []string{}
 
@@ -418,6 +418,8 @@ func deleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 	deployments, err := dcc.List(selectorlist)
 	if err != nil {
 		info = append(info, "unable to find deployment configs ("+err.Error()+")")
+	} else {
+		foundSomething = len(deployments.Items) > 0
 	}
 	for i := range deployments.Items {
 		name := deployments.Items[i].Name
@@ -433,6 +435,8 @@ func deleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 	repls, err := rcc.List(selectorlist)
 	if err != nil {
 		info = append(info, "unable to find replication controllers ("+err.Error()+")")
+	} else {
+		foundSomething = foundSomething || len(repls.Items) > 0
 	}
 	for i := range repls.Items {
 		name := repls.Items[i].Name
@@ -464,6 +468,8 @@ func deleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 	srvs, err := sc.List(selectorlist)
 	if err != nil {
 		info = append(info, "unable to find services ("+err.Error()+")")
+	} else {
+		foundSomething = foundSomething || len(srvs.Items) > 0
 	}
 	for i := range srvs.Items {
 		name := srvs.Items[i].Name
@@ -472,7 +478,7 @@ func deleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 			info = append(info, "unable to delete service "+name+" ("+err.Error()+")")
 		}
 	}
-	return strings.Join(info, ", ")
+	return strings.Join(info, ", "), foundSomething
 }
 
 // DeleteClusterResponse delete a cluster
@@ -503,9 +509,11 @@ func DeleteClusterResponse(params clusters.DeleteSingleClusterParams) middleware
 		return reterr(fail(err, clientMsg, 500))
 	}
 
-	info := deleteCluster(params.Name, namespace, osclient, client)
+	info, foundSomething := deleteCluster(params.Name, namespace, osclient, client)
 	if info != "" {
 		return reterr(fail(nil, "Deletion may be incomplete: "+info, 500))
+	} else if !foundSomething {
+		return reterr(fail(nil, "Cluster not found", 404))
 	}
 	return clusters.NewDeleteSingleClusterNoContent()
 }
