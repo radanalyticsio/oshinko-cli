@@ -144,7 +144,7 @@ func toint64ptr(val int64) *int64 {
 
 func singleClusterResponse(clustername string,
 	pc kclient.PodInterface,
-	sc kclient.ServiceInterface, config *models.NewClusterConfig) (*models.SingleCluster, error) {
+	sc kclient.ServiceInterface, config models.NewClusterConfig) (*models.SingleCluster, error) {
 
 	addpod := func(p kapi.Pod) *models.ClusterModelPodsItems0 {
 		pod := new(models.ClusterModelPodsItems0)
@@ -196,8 +196,14 @@ func singleClusterResponse(clustername string,
 		cluster.Cluster.Pods = append(cluster.Cluster.Pods, addpod(workers.Items[i]))
 	}
 
-        cluster.Cluster.Config.WorkerCount = (*config).WorkerCount
-        cluster.Cluster.Config.MasterCount = (*config).MasterCount
+        cluster.Cluster.Config.WorkerCount = config.WorkerCount
+        cluster.Cluster.Config.MasterCount = config.MasterCount
+        if config.SparkWorkerConfig != "" {
+                cluster.Cluster.Config.SparkWorkerConfig = config.SparkWorkerConfig
+        }
+        if config.SparkMasterConfig != "" {
+                cluster.Cluster.Config.SparkMasterConfig = config.SparkMasterConfig
+        }
 	return cluster, nil
 }
 
@@ -438,7 +444,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	// TODO ties into cluster status, make a note if the service is missing
 	sc.Create(&websv.Service)
 
-	cluster, err := singleClusterResponse(clustername, client.Pods(namespace), sc, &finalconfig)
+	cluster, err := singleClusterResponse(clustername, client.Pods(namespace), sc, finalconfig)
 	if err != nil {
 		return reterr(responseFailure(err, respMsg, 500))
 	}
@@ -696,8 +702,10 @@ func FindSingleClusterResponse(params clusters.FindSingleClusterParams) middlewa
 	if err != nil || wrepl == nil {
 		return reterr(fail(err, replMsgWorker, 500))
 	}
+        // TODO (tmckay) we should add the spark master and worker configuration values here.
+        // the most likely thing to do is store them in an annotation
 	config := models.NewClusterConfig{MasterCount: int64(mrepl.Spec.Replicas), WorkerCount: int64(wrepl.Spec.Replicas)}
-	cluster, err := singleClusterResponse(clustername, pc, sc, &config)
+	cluster, err := singleClusterResponse(clustername, pc, sc, config)
 	if err != nil {
 		// In this case, the entire purpose of this call is to create this
 		// response object (as opposed to create and update which might fail
@@ -804,7 +812,7 @@ func UpdateSingleClusterResponse(params clusters.UpdateSingleClusterParams) midd
 			return reterr(fail(err, updateReplMsg, 500))
 		}
 	}
-	cluster, err := singleClusterResponse(clustername, client.Pods(namespace), client.Services(namespace), &finalconfig)
+	cluster, err := singleClusterResponse(clustername, client.Pods(namespace), client.Services(namespace), finalconfig)
 	if err != nil {
 		return reterr(responseFailure(err, respMsg, 500))
 	}
