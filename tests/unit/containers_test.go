@@ -123,3 +123,14 @@ func (s *OshinkoUnitTestSuite) TestSetReadinessProbe(c *check.C) {
 	c.Assert(newContainer.ReadinessProbe.Handler.HTTPGet.Port.IntValue(),
 		check.Equals, expectedPort)
 }
+
+func (s *OshinkoUnitTestSuite) TestSetVolumeMount(c *check.C) {
+	newContainer := containers.Container("name", "image")
+	vmounts := []kapi.VolumeMount{
+		{Name: "secrets", MountPath: "/etc/secrets", ReadOnly: true},
+		{Name: "mysteries", MountPath: "/etc/mysteries", ReadOnly: false}}
+	for _, v := range vmounts {
+		newContainer.SetVolumeMount(v.Name, v.MountPath, v.ReadOnly)
+	}
+	c.Assert(newContainer.Container.VolumeMounts, check.DeepEquals, vmounts)
+}
