@@ -40,6 +40,8 @@ var _ = check.Suite(&OshinkoUnitTestSuite{})
 
 const defaultmastercount = clusterconfigs.Defaultname + ".mastercount"
 const defaultworkercount = clusterconfigs.Defaultname + ".workercount"
+const defaultmasterconfig = clusterconfigs.Defaultname + ".sparkmasterconfig"
+const defaultworkerconfig = clusterconfigs.Defaultname + ".sparkworkerconfig"
 
 func makeConfig(dir string, name string, val string) {
 	f, err := os.Create(path.Join(dir, name))
@@ -61,31 +63,42 @@ func DeleteDefaultConfig(s *OshinkoUnitTestSuite) {
 func makeDefaultConfig(s *OshinkoUnitTestSuite) {
 	makeConfig(s.UserConfigpath, defaultmastercount, strconv.Itoa(int(s.UserDefault.WorkerCount)))
 	makeConfig(s.UserConfigpath, defaultworkercount, strconv.Itoa(int(s.UserDefault.WorkerCount)))
+	makeConfig(s.UserConfigpath, defaultmasterconfig, s.UserDefault.SparkMasterConfig)
+	makeConfig(s.UserConfigpath, defaultworkerconfig, s.UserDefault.SparkWorkerConfig)
 }
 
 // SetUpSuite is run once before the entire test suite
 func (s *OshinkoUnitTestSuite) SetUpSuite(c *check.C) {
 	s.Configpath = path.Join(os.TempDir(), "oshinko-cluster-configs/")
+	os.RemoveAll(s.Configpath)
 	os.MkdirAll(s.Configpath, os.ModePerm)
+
+	// we'll put a user defined default in oshinko-cluster-configs-user along
+	// some extra elements that don't map to properties
 	s.UserConfigpath = path.Join(os.TempDir(), "oshinko-cluster-configs-user")
+	os.RemoveAll(s.UserConfigpath)
 	os.MkdirAll(s.UserConfigpath, os.ModePerm)
 
+	// Save configuration values for reference, they will be written to files too
 	s.Tiny = models.NewClusterConfig{MasterCount: 1, WorkerCount: 0, Name: "tiny"}
-	s.Small = models.NewClusterConfig{MasterCount: 1, WorkerCount: 3, Name: "small"}
+	s.Small = models.NewClusterConfig{MasterCount: 1, WorkerCount: 3,
+		SparkMasterConfig: "master-config", SparkWorkerConfig: "worker-config", Name: "small"}
 	s.Large = models.NewClusterConfig{MasterCount: 0, WorkerCount: 10, Name: "large"}
 	s.BrokenMaster = models.NewClusterConfig{MasterCount: 2, WorkerCount: 0, Name: "brokenmaster"}
 	s.BrokenWorker = models.NewClusterConfig{MasterCount: 1, WorkerCount: 0, Name: "brokenworker"}
 	s.NonIntMaster = models.NewClusterConfig{Name: "cow"}
 	s.NonIntWorker = models.NewClusterConfig{Name: "pig"}
 
-	// Inherit worker count from default
+	// Inherit worker count from default but overwrite master
 	makeConfig(s.Configpath, "tiny.mastercount", strconv.Itoa(int(s.Tiny.MasterCount)))
 
 	// Don't inherit either count
 	makeConfig(s.Configpath, "small.mastercount", strconv.Itoa(int(s.Small.MasterCount)))
 	makeConfig(s.Configpath, "small.workercount", strconv.Itoa(int(s.Small.WorkerCount)))
+	makeConfig(s.Configpath, "small.sparkmasterconfig", s.Small.SparkMasterConfig)
+	makeConfig(s.Configpath, "small.sparkworkerconfig", s.Small.SparkWorkerConfig)
 
-	// Inherit master count from default and overwrite worker
+	// Inherit master count from default but overwrite worker
 	makeConfig(s.Configpath, "large.workercount", strconv.Itoa(int(s.Large.WorkerCount)))
 
 	// Set mastercount to something illegal
@@ -104,14 +117,17 @@ func (s *OshinkoUnitTestSuite) SetUpSuite(c *check.C) {
 	s.UserDefault = models.NewClusterConfig{Name: "",
 						MasterCount: 3,
 						WorkerCount: 3,
-						SparkMasterConfig: "",
-						SparkWorkerConfig: ""}
+						SparkMasterConfig: "master-default",
+						SparkWorkerConfig: "worker-default"}
 
-	// Also create some troublesome name elements to make sure it doesn't break anything ....
+	// Also create some troublesome name elements in an alternate configpath
+	// to make sure it doesn't break anything
 	makeConfig(s.UserConfigpath, "small", "fish")
 	makeConfig(s.UserConfigpath, "small.somethingelse", "chicken")
 	makeConfig(s.UserConfigpath, "small.mastercount", strconv.Itoa(int(s.Small.MasterCount)))
 	makeConfig(s.UserConfigpath, "small.workercount", strconv.Itoa(int(s.Small.WorkerCount)))
+	makeConfig(s.UserConfigpath, "small.sparkmasterconfig", s.Small.SparkMasterConfig)
+	makeConfig(s.UserConfigpath, "small.sparkworkerconfig", s.Small.SparkWorkerConfig)
 }
 
 // SetUpTest is run once before each test

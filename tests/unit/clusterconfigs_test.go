@@ -37,6 +37,8 @@ func (s *OshinkoUnitTestSuite) TestDefaultConfig(c *check.C) {
 	myconfig, err := clusterconfigs.GetClusterConfig(nil)
 	c.Assert(myconfig.MasterCount, check.Equals, defconfig.MasterCount)
 	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
+	c.Assert(myconfig.SparkMasterConfig, check.Equals, defconfig.SparkMasterConfig)
+	c.Assert(myconfig.SparkWorkerConfig, check.Equals, defconfig.SparkWorkerConfig)
 	c.Assert(myconfig.Name, check.Equals, "")
 	c.Assert(err, check.IsNil)
 
@@ -45,6 +47,8 @@ func (s *OshinkoUnitTestSuite) TestDefaultConfig(c *check.C) {
 	myconfig, err = clusterconfigs.GetClusterConfig(&configarg)
 	c.Assert(myconfig.MasterCount, check.Equals, defconfig.MasterCount)
 	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
+	c.Assert(myconfig.SparkMasterConfig, check.Equals, defconfig.SparkMasterConfig)
+	c.Assert(myconfig.SparkWorkerConfig, check.Equals, defconfig.SparkWorkerConfig)
 	c.Assert(myconfig.Name, check.Equals, "")
 	c.Assert(err, check.IsNil)
 }
@@ -63,20 +67,26 @@ func (s *OshinkoUnitTestSuite) TestGetClusterConfigNamed(c *check.C) {
 	myconfig, err := clusterconfigs.GetClusterConfig(&configarg)
 	c.Assert(myconfig.MasterCount, check.Equals, s.Tiny.MasterCount)
 	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
+	c.Assert(myconfig.SparkMasterConfig, check.Equals, defconfig.SparkMasterConfig)
+	c.Assert(myconfig.SparkWorkerConfig, check.Equals, defconfig.SparkWorkerConfig)
 	c.Assert(err, check.IsNil)
 
-	// small supplies values for both
+	// small supplies values for everything
 	configarg.Name = s.Small.Name
 	myconfig, err = clusterconfigs.GetClusterConfig(&configarg)
 	c.Assert(myconfig.MasterCount, check.Equals, s.Small.MasterCount)
 	c.Assert(myconfig.WorkerCount, check.Equals, s.Small.WorkerCount)
+	c.Assert(myconfig.SparkMasterConfig, check.Equals, s.Small.SparkMasterConfig)
+	c.Assert(myconfig.SparkWorkerConfig, check.Equals, s.Small.SparkWorkerConfig)
 	c.Assert(err, check.IsNil)
 
-	// large should inherit the master count
+	// large should inherit everything but the workercount
 	configarg.Name = s.Large.Name
 	myconfig, err = clusterconfigs.GetClusterConfig(&configarg)
 	c.Assert(myconfig.MasterCount, check.Equals, defconfig.MasterCount)
 	c.Assert(myconfig.WorkerCount, check.Equals, s.Large.WorkerCount)
+	c.Assert(myconfig.SparkMasterConfig, check.Equals, s.Large.SparkMasterConfig)
+	c.Assert(myconfig.SparkWorkerConfig, check.Equals, s.Large.SparkWorkerConfig)
 	c.Assert(err, check.IsNil)
 }
 
@@ -88,11 +98,14 @@ func (s *OshinkoUnitTestSuite) TestGetClusterConfigArgs(c *check.C) {
 
 	// configarg will represent a config object passed in a REST
 	// request which specifies a named config but leaves counts unset
-	configarg := models.NewClusterConfig{WorkerCount: 7, MasterCount: 0}
+	configarg := models.NewClusterConfig{WorkerCount: 7, MasterCount: 0,
+		SparkMasterConfig: "test-master-config", SparkWorkerConfig: "test-worker-config"}
 
 	myconfig, err := clusterconfigs.GetClusterConfig(&configarg)
 	c.Assert(myconfig.MasterCount, check.Equals, defconfig.MasterCount)
 	c.Assert(myconfig.WorkerCount, check.Equals, int64(7))
+	c.Assert(myconfig.SparkMasterConfig, check.Equals, "test-master-config")
+	c.Assert(myconfig.SparkWorkerConfig, check.Equals, "test-worker-config")
 	c.Assert(err, check.IsNil)
 
 	configarg = models.NewClusterConfig{WorkerCount: 0, MasterCount: 7}
@@ -108,7 +121,7 @@ func (s *OshinkoUnitTestSuite) TestGetClusterConfigArgs(c *check.C) {
 	c.Assert(err, check.NotNil) // master count is illegal ...
 }
 
-func (s *OshinkoUnitTestSuite) TestGetClusterConfigNAmedArgs(c *check.C) {
+func (s *OshinkoUnitTestSuite) TestGetClusterConfigNamedArgs(c *check.C) {
 	// Test that a named config with args will override and inherit
 	// defaults, and that the args will take precedence
 	defconfig := clusterconfigs.GetDefaultConfig()
@@ -128,7 +141,17 @@ func (s *OshinkoUnitTestSuite) TestGetClusterConfigNAmedArgs(c *check.C) {
 	c.Assert(myconfig.MasterCount, check.Equals, int64(5))
 	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
 	c.Assert(s.BrokenMaster.MasterCount, check.Not(check.Equals), defconfig.WorkerCount)
-	c.Assert(err, check.NotNil)
+	c.Assert(err, check.NotNil) // master count is wrong
+
+	configarg = models.NewClusterConfig{Name: s.Small.Name, SparkMasterConfig: "test-master-config", SparkWorkerConfig: "test-worker-config"}
+	myconfig, err = clusterconfigs.GetClusterConfig(&configarg)
+	c.Assert(myconfig.SparkMasterConfig, check.Equals, "test-master-config")
+	c.Assert(myconfig.SparkWorkerConfig, check.Equals, "test-worker-config")
+	c.Assert(s.Small.SparkMasterConfig, check.Not(check.Equals), "test-master-config")
+	c.Assert(s.Small.SparkWorkerConfig, check.Not(check.Equals), "test-worker-config")
+	c.Assert(myconfig.MasterCount, check.Equals, s.Small.MasterCount)
+	c.Assert(myconfig.WorkerCount, check.Equals, s.Small.WorkerCount)
+	c.Assert(err, check.IsNil)
 }
 
 func (s *OshinkoUnitTestSuite) TestGetClusterBadConfig(c *check.C) {
@@ -219,5 +242,7 @@ func (s *OshinkoUnitTestSuite) TestGetClusterBadElements(c *check.C) {
 	myconfig, err := clusterconfigs.GetClusterConfig(&configarg)
 	c.Assert(myconfig.MasterCount, check.Equals, s.Small.MasterCount)
 	c.Assert(myconfig.WorkerCount, check.Equals, s.Small.WorkerCount)
+	c.Assert(myconfig.SparkMasterConfig, check.Equals, s.Small.SparkMasterConfig)
+	c.Assert(myconfig.SparkWorkerConfig, check.Equals, s.Small.SparkWorkerConfig)
 	c.Assert(err, check.IsNil)
 }
