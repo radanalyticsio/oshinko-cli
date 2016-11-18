@@ -182,18 +182,16 @@ func (s *OshinkoUnitTestSuite) TestGetClusterNonInts(c *check.C) {
 	configarg.Name = s.NonIntMaster.Name
 	_, err := clusterconfigs.GetClusterConfig(&configarg)
 	c.Assert(err, check.NotNil)
-	name := configarg.Name.(string)
 	c.Assert(err.Error(), check.Equals,
 		fmt.Sprintf(clusterconfigs.ErrorWhileProcessing,
-			path.Join(s.Configpath, name + ".mastercount"), "expected integer"))
+			path.Join(s.Configpath, configarg.Name + ".mastercount"), "expected integer"))
 
 	configarg.Name = s.NonIntWorker.Name
 	_, err = clusterconfigs.GetClusterConfig(&configarg)
 	c.Assert(err, check.NotNil)
-	name = configarg.Name.(string)
 	c.Assert(err.Error(), check.Equals,
 		fmt.Sprintf(clusterconfigs.ErrorWhileProcessing,
-			path.Join(s.Configpath, name + ".workercount"), "expected integer"))
+			path.Join(s.Configpath, configarg.Name + ".workercount"), "expected integer"))
 }
 
 func (s *OshinkoUnitTestSuite) TestGetClusterUserDefault(c *check.C) {

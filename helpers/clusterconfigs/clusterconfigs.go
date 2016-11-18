@@ -57,13 +57,12 @@ func assignConfig(res *models.NewClusterConfig, src models.NewClusterConfig) {
 	if src.WorkerCount != 0 {
 		res.WorkerCount = src.WorkerCount
 	}
-	sparkMasterConfig, _ := src.SparkMasterConfig.(string)
-	if sparkMasterConfig != "" {
-		res.SparkMasterConfig = sparkMasterConfig
+
+	if src.SparkMasterConfig != "" {
+		res.SparkMasterConfig = src.SparkMasterConfig
 	}
-	sparkWorkerConfig, _ := src.SparkWorkerConfig.(string)
-	if sparkWorkerConfig != "" {
-		res.SparkWorkerConfig = sparkWorkerConfig
+	if src.SparkWorkerConfig != "" {
+		res.SparkWorkerConfig = src.SparkWorkerConfig
 	}
 }
 
@@ -159,11 +158,11 @@ func loadConfig(name string) (res models.NewClusterConfig, err error) {
 }
 
 func GetClusterConfig(config *models.NewClusterConfig) (res models.NewClusterConfig, err error) {
-	var name string = ""
-	if config != nil {
-		name, _ = config.Name.(string)
+	if config == nil {
+		res, err = loadConfig("")
+	} else {
+		res, err = loadConfig(config.Name)
 	}
-	res, err = loadConfig(name)
 	if err == nil && config != nil {
 		assignConfig(&res, *config)
 	}

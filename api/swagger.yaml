@@ -108,6 +108,7 @@ definitions:
           name:
             description: |-
               The name of a stored cluster configuration
+            type: string
           masterCount:
             description: |-
               The count of master nodes requested in the cluster (must be > 0)
@@ -121,9 +122,11 @@ definitions:
           sparkMasterConfig:
             description: |-
               The name of a ConfigMap which holds spark configuration files for the master
+            type: string
           sparkWorkerConfig:
             description: |-
               The name of a ConfigMap which holds spark configuration files for the workers
+            type: string
     required:
       - name
     additionalProperties: false

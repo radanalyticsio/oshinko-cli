@@ -380,18 +380,16 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	// Check if finalconfig contains the names of ConfigMaps to use for spark
 	// configuration. If so they must exist, and the SPARK_CONF_DIR env must be
 	// set correctly
-	sparkmasterconfig, _ := finalconfig.SparkMasterConfig.(string)
-	if sparkmasterconfig != "" {
-		err := checkForConfigMap(sparkmasterconfig, client.ConfigMaps(namespace))
+	if finalconfig.SparkMasterConfig != "" {
+		err := checkForConfigMap(finalconfig.SparkMasterConfig, client.ConfigMaps(namespace))
 		if err != nil {
 			return reterr(fail(err, masterConfigMsg, 409))
 		}
 		masterconfdir = sparkconfdir
 	}
 
-	sparkworkerconfig, _ := finalconfig.SparkWorkerConfig.(string)
-	if sparkworkerconfig != "" {
-		err := checkForConfigMap(sparkworkerconfig, client.ConfigMaps(namespace))
+	if finalconfig.SparkWorkerConfig != "" {
+		err := checkForConfigMap(finalconfig.SparkWorkerConfig, client.ConfigMaps(namespace))
 		if err != nil {
 			return reterr(fail(err, workerConfigMsg, 409))
 		}
@@ -401,7 +399,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 
 	// Create the master deployment config
 	dcc := osclient.DeploymentConfigs(namespace)
-	masterdc := sparkMaster(namespace, image, clustername, masterconfdir, sparkmasterconfig)
+	masterdc := sparkMaster(namespace, image, clustername, masterconfdir, finalconfig.SparkMasterConfig)
 
 	// Create the services that will be associated with the master pod
 	// They will be created with selectors based on the pod labels
@@ -416,7 +414,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 		masterdc.GetPodTemplateSpecLabels())
 
 	// Create the worker deployment config
-	workerdc := sparkWorker(namespace, image, workercount, clustername, workerconfdir, sparkworkerconfig)
+	workerdc := sparkWorker(namespace, image, workercount, clustername, workerconfdir, finalconfig.SparkWorkerConfig)
 
 	// Launch all of the objects
 	_, err = dcc.Create(&masterdc.DeploymentConfig)
