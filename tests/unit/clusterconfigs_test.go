@@ -10,11 +10,13 @@ import (
 
 func (s *OshinkoUnitTestSuite) TestGetConfigPath(c *check.C) {
 	// Test the ability to override the config path
+	clusterconfigs.SetConfigPath(clusterconfigs.DefaultConfigPath)
 	configpath := clusterconfigs.GetConfigPath()
 	c.Assert(configpath, check.Equals, clusterconfigs.DefaultConfigPath)
 	clusterconfigs.SetConfigPath(s.Configpath)
 	newconfigpath := clusterconfigs.GetConfigPath()
 	c.Assert(newconfigpath, check.Equals, s.Configpath)
+	c.Assert(newconfigpath, check.Not(check.Equals), clusterconfigs.DefaultConfigPath)
 }
 
 func (s *OshinkoUnitTestSuite) TestNoLocalDefault(c *check.C) {
@@ -22,10 +24,17 @@ func (s *OshinkoUnitTestSuite) TestNoLocalDefault(c *check.C) {
 	// get an error if there is no local override of default.
 	// For all other named configs, an error is returned if the local
 	// definition is not found.
+
+	// Delete the default config in the user config path
 	DeleteDefaultConfig(s)
+
 	defconfig := clusterconfigs.GetDefaultConfig()
 	configarg := models.NewClusterConfig{Name: clusterconfigs.Defaultname}
 	myconfig, err := clusterconfigs.GetClusterConfig(&configarg)
+
+	// Put this back before any asserts so we don't drop out!
+	MakeDefaultConfig(s)
+
 	c.Assert(err, check.IsNil)
 	c.Assert(myconfig.MasterCount, check.Equals, defconfig.MasterCount)
 	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
@@ -226,6 +235,7 @@ func (s *OshinkoUnitTestSuite) TestGetClusterUserDefault(c *check.C) {
 	c.Assert(defaultconfig, check.Equals, olddefault)
 
 	clusterconfigs.SetConfigPath(s.UserConfigpath)
+	MakeDefaultConfig(s)
 	newdefault, err := clusterconfigs.GetClusterConfig(nil)
 	c.Assert(newdefault, check.Equals, s.UserDefault)
 }

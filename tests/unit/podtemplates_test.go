@@ -40,3 +40,23 @@ func (s *OshinkoUnitTestSuite) TestContainers(c *check.C) {
 		&containers.OContainer{Container: expectedContainers[1]})
 	c.Assert(newPodTemplateSpec.Spec.Containers, check.DeepEquals, expectedContainers)
 }
+
+func makeCmapVS(name string) kapi.VolumeSource {
+	cmapvs := kapi.ConfigMapVolumeSource{}
+	cmapvs.LocalObjectReference.Name = name
+	return kapi.VolumeSource{ConfigMap: &cmapvs}
+}
+
+func (s *OshinkoUnitTestSuite) TestSetConfigMapVolume(c *check.C) {
+	ptspec := podtemplates.PodTemplateSpec()
+	var names []string = []string{"configmap1", "configmap2"}
+	var volumes []kapi.Volume = []kapi.Volume{}
+
+	for _, name :=  range names {
+		vs := makeCmapVS(name)
+		volumes = append(volumes, kapi.Volume{Name: name, VolumeSource: vs})
+		ptspec.SetConfigMapVolume(name)
+	}
+	c.Assert(ptspec.Spec.Volumes, check.DeepEquals, volumes)
+
+}

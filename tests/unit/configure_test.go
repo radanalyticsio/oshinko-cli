@@ -60,7 +60,7 @@ func DeleteDefaultConfig(s *OshinkoUnitTestSuite) {
 	deleteConfig(s.UserConfigpath, defaultworkercount)
 }
 
-func makeDefaultConfig(s *OshinkoUnitTestSuite) {
+func MakeDefaultConfig(s *OshinkoUnitTestSuite) {
 	makeConfig(s.UserConfigpath, defaultmastercount, strconv.Itoa(int(s.UserDefault.WorkerCount)))
 	makeConfig(s.UserConfigpath, defaultworkercount, strconv.Itoa(int(s.UserDefault.WorkerCount)))
 	makeConfig(s.UserConfigpath, defaultmasterconfig, s.UserDefault.SparkMasterConfig)
@@ -132,9 +132,6 @@ func (s *OshinkoUnitTestSuite) SetUpSuite(c *check.C) {
 
 // SetUpTest is run once before each test
 func (s *OshinkoUnitTestSuite) SetUpTest(c *check.C) {
-	clusterconfigs.SetConfigPath(clusterconfigs.DefaultConfigPath)
-	makeDefaultConfig(s)
-
 }
 
 // TearDownSuite is run once after all tests have finished
