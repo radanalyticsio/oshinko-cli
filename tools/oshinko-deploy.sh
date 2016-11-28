@@ -136,7 +136,10 @@ fi
 
 oc login $OS_CLUSTER -u $OS_USER
 
-oc new-project $PROJECT
+if [[ `oc new-project $PROJECT` != 0 ]]
+then
+    oc project $PROJECT
+fi
 
 oc create sa oshinko -n $PROJECT
 oc policy add-role-to-user admin system:serviceaccount:$PROJECT:oshinko -n $PROJECT
