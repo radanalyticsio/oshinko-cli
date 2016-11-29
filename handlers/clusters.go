@@ -371,7 +371,7 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	}
 
 	// Copy any named config referenced and update it with any explicit config values
-	finalconfig, err := clusterconfigs.GetClusterConfig(params.Cluster.Config)
+	finalconfig, err := clusterconfigs.GetClusterConfig(params.Cluster.Config, client.ConfigMaps(namespace))
 	if err != nil {
 		return reterr(fail(err, clusterConfigMsg, 409))
 	}
@@ -774,8 +774,13 @@ func UpdateSingleClusterResponse(params clusters.UpdateSingleClusterParams) midd
 		return reterr(fail(nil, "No such cluster", 404))
 	}
 
+	client, err := osa.GetKubeClient()
+	if err != nil {
+		return reterr(fail(err, clientMsg, 500))
+	}
+
 	// Copy any named config referenced and update it with any explicit config values
-	finalconfig, err := clusterconfigs.GetClusterConfig(params.Cluster.Config)
+	finalconfig, err := clusterconfigs.GetClusterConfig(params.Cluster.Config, client.ConfigMaps(namespace))
 	if err != nil {
 		return reterr(fail(err, clusterConfigMsg, 409))
 	}
@@ -792,10 +797,6 @@ func UpdateSingleClusterResponse(params clusters.UpdateSingleClusterParams) midd
 		return reterr(fail(nil, masterMsg, 409))
 	}
 
-	client, err := osa.GetKubeClient()
-	if err != nil {
-		return reterr(fail(err, clientMsg, 500))
-	}
 	rcc := client.ReplicationControllers(namespace)
         repl, err := getReplController(rcc, clustername, workerType)
 	if err != nil || repl == nil {

@@ -41,13 +41,6 @@ objects:
 - kind: ConfigMap
   apiVersion: v1
   metadata:
-    name: oshinko-cluster-configs
-  data:
-    small.workercount: "3"
-
-- kind: ConfigMap
-  apiVersion: v1
-  metadata:
     name: oshinko-spark-driver-config
 
 - kind: DeploymentConfig
@@ -107,9 +100,6 @@ objects:
               periodSeconds: 10
               successThreshold: 1
               timeoutSeconds: 1
-            volumeMounts:
-              - mountPath: /etc/oshinko-cluster-configs
-                name: oshinko-cluster-configs
           - name: ${OSHINKO_WEB_NAME}
             image: ${OSHINKO_WEB_IMAGE}
             env:
@@ -140,10 +130,6 @@ objects:
               successThreshold: 1
               timeoutSeconds: 1
         serviceAccount: oshinko
-        volumes:
-        - configMap:
-            name: oshinko-cluster-configs
-          name: oshinko-cluster-configs
 
 - kind: Route
   apiVersion: v1
@@ -180,4 +166,3 @@ parameters:
 - name: OSHINKO_DEPLOYMENT_NAME
   description: Name of the oshinko deployment
   value: "oshinko"
-

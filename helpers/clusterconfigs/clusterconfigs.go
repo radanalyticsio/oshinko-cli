@@ -1,24 +1,21 @@
 package clusterconfigs
 
 import (
-	"io/ioutil"
 	"errors"
-	"fmt"
-	"os"
-	"path"
-	"path/filepath"
-	"strings"
+	"strconv"
 	"github.com/radanalyticsio/oshinko-rest/models"
+	kclient "k8s.io/kubernetes/pkg/client/unversioned"
+	"k8s.io/kubernetes/pkg/api"
+	"fmt"
 )
 
 
 var defaultConfig models.NewClusterConfig = models.NewClusterConfig{
 								MasterCount: 1,
 	                                                        WorkerCount: 1,
-								Name: "",
+								Name: "default",
 								SparkMasterConfig: "",
 								SparkWorkerConfig: ""}
-var configpath, globpath string
 
 const Defaultname = "default"
 const failOnMissing = true
@@ -29,21 +26,6 @@ const MasterCountMustBeOne = "Cluster configuration must have a masterCount of 1
 const WorkerCountMustBeAtLeastOne = "Cluster configuration may not have a workerCount less than 1"
 const NamedConfigDoesNotExist = "Named config '%s' does not exist"
 const ErrorWhileProcessing = "Error while processing %s: %s"
-
-func init() {
-	SetConfigPath(DefaultConfigPath)
-}
-
-// This function is meant to supoprt testability
-func SetConfigPath(dir string) {
-	configpath = dir
-	globpath = path.Join(configpath, "%s\\.*")
-}
-
-// This function is meant to support testability
-func GetConfigPath() string {
-	return configpath
-}
 
 // This function is meant to support testability
 func GetDefaultConfig() models.NewClusterConfig {
@@ -76,93 +58,72 @@ func checkConfiguration(config models.NewClusterConfig) error {
 	return err
 }
 
-func getInt(filename string) (res int64, err error) {
-	fd, err := os.Open(filename)
-	if err == nil {
-		_, err = fmt.Fscanf(fd, "%d", &res)
-		fd.Close()
-		if err != nil {
-			err = errors.New(fmt.Sprintf(ErrorWhileProcessing, filename, err.Error()))
-		}
-	}
-	return res, err
-}
-func getStr(filename string) (res string, err error) {
-	buff, err := ioutil.ReadFile(filename)
+
+func getInt64(value, configmapname string) (int64, error) {
+	i, err := strconv.Atoi(value)
 	if err != nil {
-		err = errors.New(fmt.Sprintf(ErrorWhileProcessing, filename, err.Error()))
-	} else {
-		// In case there is a carriage return
-		res = strings.Trim(string(buff), "\n")
+		err = errors.New(fmt.Sprintf(ErrorWhileProcessing, configmapname, errors.New("expected integer")))
 	}
-	return res, err
+	return int64(i), err
 }
 
-func process(config *models.NewClusterConfig, nameElements []string, filename string) error {
+func process(config *models.NewClusterConfig, name, value, configmapname string) error {
 
 	var err error
 
 	// At present we only have a single level of configs, but if/when we have
 	// nested configs then we would descend through the levels beginning here with
 	// the first element in the name
-	switch nameElements[0] {
+	switch name {
 	case "mastercount":
-		config.MasterCount, err = getInt(filename)
+		config.MasterCount, err = getInt64(value, configmapname + ".mastercount")
 	case "workercount":
-		config.WorkerCount, err = getInt(filename)
+		config.WorkerCount, err = getInt64(value, configmapname + ".workercount")
 	case "sparkmasterconfig":
-		str, err := getStr(filename)
-		if err == nil {
-			config.SparkMasterConfig = str
-		}
+                config.SparkMasterConfig = value
 	case "sparkworkerconfig":
-		str, err := getStr(filename)
-		if err == nil {
-			config.SparkWorkerConfig = str
-		}
+                config.SparkWorkerConfig = value
 	}
 	return err
 }
 
+func checkForConfigMap(name string, failOnMissing bool, cm kclient.ConfigMapsInterface) (*api.ConfigMap, error) {
+	cmap, err := cm.Get(name)
+	if (cmap == nil || len(cmap.Data) == 0) && failOnMissing == false {
+		return cmap, nil
+	}
+	return cmap, err
+}
 
-func readConfig(name string, res *models.NewClusterConfig, failOnMissing bool) (err error) {
-
-	filelist, err := filepath.Glob(fmt.Sprintf(globpath, name))
-	if err == nil {
-		if failOnMissing == true && len(filelist) == 0 {
-			return errors.New(fmt.Sprintf(NamedConfigDoesNotExist, name))
-		}
-		for _, v := range (filelist) {
-			// Break up each filename into elements by "."
-			// The first element of every filename will be the config name, dump it
-			elements := strings.Split(filepath.Base(v), ".")[1:]
-			err = process(res, elements, v)
+func readConfig(name string, res *models.NewClusterConfig, failOnMissing bool, cm kclient.ConfigMapsInterface) (err error) {
+        cmap, err := checkForConfigMap(name, failOnMissing, cm)
+	if err == nil && cmap != nil {
+                for n, v := range (cmap.Data) {
+			err = process(res, n, v, name)
 			if err != nil {
 				break
 			}
 		}
 	}
-	return
+	return err
 }
 
-func loadConfig(name string) (res models.NewClusterConfig, err error) {
+func loadConfig(name string, cm kclient.ConfigMapsInterface) (res models.NewClusterConfig, err error) {
 	// If the default config has been modified use those mods.
-	// This can probably be smarter, assuming file timestamps
-	// work for ConfigMap volumes.
 	res = defaultConfig
-	err = readConfig(Defaultname, &res, allowMissing)
+	err = readConfig(Defaultname, &res, allowMissing, cm)
 	if err == nil && name != "" && name != Defaultname {
-		err = readConfig(name, &res, failOnMissing)
+		err = readConfig(name, &res, failOnMissing, cm)
 	}
 	return res, err
 }
 
-func GetClusterConfig(config *models.NewClusterConfig) (res models.NewClusterConfig, err error) {
-	if config == nil {
-		res, err = loadConfig("")
-	} else {
-		res, err = loadConfig(config.Name)
+func GetClusterConfig(config *models.NewClusterConfig, cm kclient.ConfigMapsInterface) (res models.NewClusterConfig, err error) {
+        var name string = ""
+	if config != nil {
+	   name = config.Name
 	}
+	res, err = loadConfig(name, cm)
 	if err == nil && config != nil {
 		assignConfig(&res, *config)
 	}
