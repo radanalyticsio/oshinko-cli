@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"github.com/spf13/cobra"
 	"io"
@@ -21,48 +22,8 @@ import (
 	"github.com/openshift/origin/pkg/cmd/flagtypes"
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
-	"github.com/openshift/origin/pkg/cmd/util/tokencmd"
 	"github.com/openshift/origin/pkg/user/api"
-	//"github.com/docker/docker/cliconfig"
-	"sort"
 )
-
-// RunProjects lists all projects a user belongs to
-func (o *AuthOptions) RunClusters(currentProject string) error {
-	_ = "breakpoint"
-
-	kubeclient, err := kclient.New(o.Config)
-	if err != nil {
-		return err
-	}
-	var msg string
-	clusters, err := getClusters(kubeclient, currentProject)
-	if err == nil {
-		clusterCount := len(clusters)
-		if clusterCount <= 0 {
-			msg += "There are no clusters in any projects. You can create a cluster with the 'new-cluster' command."
-		} else if clusterCount > 0 {
-			asterisk := ""
-			count := 0
-			sort.Sort(SortByClusterName(clusters))
-			//fmt.Println(clusterCount)
-			for _, cluster := range clusters {
-				count = count + 1
-				displayName := *(cluster.Name)
-				workCount := *(cluster.WorkerCount)
-				//fmt.Println(displayName)
-				linebreak := "\n"
-
-				msg += fmt.Sprintf(linebreak+asterisk+"%s \t  %d", displayName, workCount)
-			}
-		}
-
-		fmt.Println(msg)
-		return nil
-	}
-
-	return err
-}
 
 //=====================================
 type AuthOptions struct {
@@ -89,7 +50,8 @@ type AuthOptions struct {
 	CertFile string
 	KeyFile  string
 
-	Token string
+	Token            string
+	SparkClusterName string
 
 	PathOptions *kcmdconfig.PathOptions
 }
@@ -118,16 +80,18 @@ func (o *AuthOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args 
 		o.StartingKubeConfig = kclientcmdapi.NewConfig()
 	}
 
+	argsLength := len(args)
+	switch {
+	case argsLength > 1:
+		return errors.New("Only one argument is supported (cluster name).")
+	case argsLength == 1:
+		o.SparkClusterName = args[0]
+	}
+
 	addr := flagtypes.Addr{Value: "localhost:8443", DefaultScheme: "https", DefaultPort: 8443, AllowPrefix: true}.Default()
 
 	if serverFlag := kcmdutil.GetFlagString(cmd, "server"); len(serverFlag) > 0 {
 		if err := addr.Set(serverFlag); err != nil {
-			return err
-		}
-		o.Server = addr.String()
-
-	} else if len(args) == 1 {
-		if err := addr.Set(args[0]); err != nil {
 			return err
 		}
 		o.Server = addr.String()
@@ -252,7 +216,7 @@ func (o *AuthOptions) getClientConfig() (*restclient.Config, error) {
 			//	clientConfig.Insecure = true
 			//
 			//} else if term.IsTerminal(o.Reader) {
-			//	fmt.Fprintln(o.Out, "The server uses a certificate signed by an unknown authority.")
+			fmt.Fprintln(o.Out, "The server uses a certificate signed by an unknown authority.")
 			//	fmt.Fprintln(o.Out, "You can bypass the certificate check, but any data you send to the server could be intercepted by others.")
 			//
 			//	clientConfig.Insecure = cmdutil.PromptForBool(os.Stdin, o.Out, "Use insecure connections? (y/n): ")
@@ -300,6 +264,30 @@ func (o *AuthOptions) gatherAuthInfo() error {
 				o.Username = me.Name
 				o.Config = clientConfig
 
+				clientConfig.CertData = []byte{}
+				clientConfig.KeyData = []byte{}
+				clientConfig.CertFile = o.CertFile
+				clientConfig.KeyFile = o.KeyFile
+
+				osClient, err := client.New(clientConfig)
+				if err != nil {
+					return err
+				}
+				o.Client = osClient
+
+				kubeclient, err := kclient.New(o.Config)
+				if err != nil {
+					return err
+				}
+				o.KClient = kubeclient
+
+				me, err := whoAmI(osClient)
+				if err != nil {
+					return err
+				}
+				o.Username = me.Name
+				o.Config = clientConfig
+
 				fmt.Fprintf(o.Out, "Logged into %q as %q using the token provided.\n\n", o.Config.Host, o.Username)
 				return nil
 			}
@@ -310,64 +298,10 @@ func (o *AuthOptions) gatherAuthInfo() error {
 
 			return fmt.Errorf("The token provided is invalid or expired.\n\n")
 		}
+	} else {
+		return fmt.Errorf("The token is not provided.\n\n")
 	}
 
-	// if a username was provided try to make use of it, but if a password were provided we force a token
-	// request which will return a proper response code for that given password
-	//if o.usernameProvided() && !o.passwordProvided() {
-	//	// search all valid contexts with matching server stanzas to see if we have a matching user stanza
-	//	kubeconfig := *o.StartingKubeConfig
-	//	matchingClusters := getMatchingClusters(*clientConfig, kubeconfig)
-	//
-	//	for key, context := range o.StartingKubeConfig.Contexts {
-	//		if matchingClusters.Has(context.Cluster) {
-	//			clientcmdConfig := kclientcmd.NewDefaultClientConfig(kubeconfig, &kclientcmd.ConfigOverrides{CurrentContext: key})
-	//			if kubeconfigClientConfig, err := clientcmdConfig.ClientConfig(); err == nil {
-	//				if osClient, err := client.New(kubeconfigClientConfig); err == nil {
-	//					if me, err := whoAmI(osClient); err == nil && (o.Username == me.Name) {
-	//						clientConfig.BearerToken = kubeconfigClientConfig.BearerToken
-	//						clientConfig.CertFile = kubeconfigClientConfig.CertFile
-	//						clientConfig.CertData = kubeconfigClientConfig.CertData
-	//						clientConfig.KeyFile = kubeconfigClientConfig.KeyFile
-	//						clientConfig.KeyData = kubeconfigClientConfig.KeyData
-	//
-	//						o.Config = clientConfig
-	//
-	//						if key == o.StartingKubeConfig.CurrentContext {
-	//							fmt.Fprintf(o.Out, "Logged into %q as %q using existing credentials.\n\n", o.Config.Host, o.Username)
-	//						}
-	//
-	//						return nil
-	//					}
-	//				}
-	//			}
-	//		}
-	//	}
-	//}
-
-	// if kubeconfig doesn't already have a matching user stanza...
-	clientConfig.BearerToken = ""
-	clientConfig.CertData = []byte{}
-	clientConfig.KeyData = []byte{}
-	clientConfig.CertFile = o.CertFile
-	clientConfig.KeyFile = o.KeyFile
-	token, err := tokencmd.RequestToken(o.Config, o.Reader, o.Username, o.Password)
-	if err != nil {
-		return err
-	}
-	clientConfig.BearerToken = token
-
-	osClient, err := client.New(clientConfig)
-	if err != nil {
-		return err
-	}
-
-	me, err := whoAmI(osClient)
-	if err != nil {
-		return err
-	}
-	o.Username = me.Name
-	o.Config = clientConfig
 	fmt.Fprint(o.Out, "Login successful.\n\n")
 
 	return nil
@@ -452,56 +386,4 @@ func (o *AuthOptions) GatherInfo() error {
 		return err
 	}
 	return nil
-}
-
-// RunLogin contains all the necessary functionality for the OpenShift cli login command
-func RunLogin(cmd *cobra.Command, options *AuthOptions) error {
-	if err := options.GatherInfo(); err != nil {
-		return err
-	}
-
-	if err := options.RunClusters(options.Project); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func NewCmdLogin(fullName string, f *osclientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Command {
-	options := &AuthOptions{
-		Reader: reader,
-		Out:    out,
-	}
-
-	cmds := &cobra.Command{
-		Use:   "get ",
-		Short: "get cluster",
-		//Long:    loginLong,
-		//Example: fmt.Sprintf(loginExample, fullName),
-		Run: func(cmd *cobra.Command, args []string) {
-			if err := options.Complete(f, cmd, args); err != nil {
-				kcmdutil.CheckErr(err)
-			}
-
-			err := RunLogin(cmd, options)
-
-			if kapierrors.IsUnauthorized(err) {
-				fmt.Fprintln(out, "Login failed (401 Unauthorized)")
-
-				if err, isStatusErr := err.(*kapierrors.StatusError); isStatusErr {
-					if details := err.Status().Details; details != nil {
-						for _, cause := range details.Causes {
-							fmt.Fprintln(out, cause.Message)
-						}
-					}
-				}
-
-				os.Exit(1)
-
-			} else {
-				kcmdutil.CheckErr(err)
-			}
-		},
-	}
-	return cmds
 }
