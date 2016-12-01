@@ -45,6 +45,11 @@ objects:
   data:
     small.workercount: "3"
 
+- kind: ConfigMap
+  apiVersion: v1
+  metadata:
+    name: oshinko-spark-driver-config
+
 - kind: DeploymentConfig
   apiVersion: v1
   metadata:
