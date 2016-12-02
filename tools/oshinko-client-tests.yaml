@@ -29,7 +29,7 @@ objects:
         WORKDIR /go/src/github.com/radanalyticsio/oshinko-rest
         RUN chmod a+rwX -R .
         RUN go get gopkg.in/check.v1
-        ENTRYPOINT /go/src/github.com/radanalyticsio/oshinko-rest/tools/test.sh client
+        ENTRYPOINT go test -v -ldflags "$(OSHINKO_SERVER_TAG)" "github.com/radanalyticsio/oshinko-rest/tests/client"
     strategy:
       type: Docker
     output:
@@ -49,9 +49,6 @@ objects:
     containers:
       - name: ${CLIENT_TEST_NAME}
         image: ${CLIENT_TEST_IMAGE}
-        command:
-          - /go/src/github.com/radanalyticsio/oshinko-rest/tools/test.sh
-          - client
         env:
           - name: OSHINKO_SERVER_PORT
             value: "8080"

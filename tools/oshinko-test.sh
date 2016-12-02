@@ -149,6 +149,7 @@ case "$REQUESTED_TEST" in
                     EXIT_STATUS=1
                     ;;
                 *)
+                    echo "waiting on test pod, phase = $TEST_STATUS"
                     sleep 10
                     ;;
             esac
