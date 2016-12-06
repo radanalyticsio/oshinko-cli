@@ -40,6 +40,12 @@ func makeConfigMap(cfg models.NewClusterConfig) *api.ConfigMap {
 	return &res
 }
 
+func addLineFeeds(cmap *api.ConfigMap) {
+	for _, v := range cmap.Data {
+		v = "\n" + v + "\n"
+	}
+}
+
 // We need something that implements the kube ConfigMapsInterface since we
 // are not conntected to a real client
 type FakeConfigMapsClient struct {
@@ -153,6 +159,31 @@ func (s *OshinkoUnitTestSuite) TestGetClusterConfigNamed(c *check.C) {
 	c.Assert(myconfig.SparkMasterConfig, check.Equals, large.SparkMasterConfig)
 	c.Assert(myconfig.SparkWorkerConfig, check.Equals, large.SparkWorkerConfig)
 	c.Assert(err, check.IsNil)
+}
+
+func (s *OshinkoUnitTestSuite) TestGetClusterConfigNamedLinefeed(c *check.C) {
+	// Depending on how a configmap is created in openshift, values may
+	// have trailing linefeeds. Add linefeeds to the config values and
+	// verify that ints are read correctly and strings do not contain
+	// linefeeds. For our configs, string values should never legitimately
+	// contain a linefeed.
+	var cm *FakeConfigMapsClient = &FakeConfigMapsClient{}
+
+	// configarg will represent a config object passed in a REST
+	// request which specifies a named config but leaves counts unset
+	sm := makeConfigMap(small)
+	addLineFeeds(sm)
+	cm.Create(sm)
+	configarg := models.NewClusterConfig{WorkerCount: 0, MasterCount: 0}
+	configarg.Name = small.Name
+
+	myconfig, err := clusterconfigs.GetClusterConfig(&configarg, cm)
+	c.Assert(myconfig.MasterCount, check.Equals, small.MasterCount)
+	c.Assert(myconfig.WorkerCount, check.Equals, small.WorkerCount)
+	c.Assert(myconfig.SparkMasterConfig, check.Equals, small.SparkMasterConfig)
+	c.Assert(myconfig.SparkWorkerConfig, check.Equals, small.SparkWorkerConfig)
+	c.Assert(err, check.IsNil)
+
 }
 
 func (s *OshinkoUnitTestSuite) TestGetClusterConfigArgs(c *check.C) {

@@ -2,11 +2,12 @@ package clusterconfigs
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
+	"strings"
 	"github.com/radanalyticsio/oshinko-rest/models"
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/api"
-	"fmt"
 )
 
 
@@ -60,7 +61,7 @@ func checkConfiguration(config models.NewClusterConfig) error {
 
 
 func getInt64(value, configmapname string) (int64, error) {
-	i, err := strconv.Atoi(value)
+	i, err := strconv.Atoi(strings.Trim(value, "\n"))
 	if err != nil {
 		err = errors.New(fmt.Sprintf(ErrorWhileProcessing, configmapname, errors.New("expected integer")))
 	}
@@ -80,9 +81,9 @@ func process(config *models.NewClusterConfig, name, value, configmapname string)
 	case "workercount":
 		config.WorkerCount, err = getInt64(value, configmapname + ".workercount")
 	case "sparkmasterconfig":
-                config.SparkMasterConfig = value
+                config.SparkMasterConfig = strings.Trim(value, "\n")
 	case "sparkworkerconfig":
-                config.SparkWorkerConfig = value
+                config.SparkWorkerConfig = strings.Trim(value, "\n")
 	}
 	return err
 }
