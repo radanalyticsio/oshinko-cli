@@ -85,6 +85,15 @@ case "$REQUESTED_TEST" in
         go test -v -ldflags "$TAG_APPNAME_FLAGS" "github.com/radanalyticsio/oshinko-rest/tests/unit"
         ;;
 
+    client-deployed)
+        # bring in the tag variable
+        . tools/common.sh
+        # this export is needed for the vendor experiment for as long as go
+        # version 1.5 is still in use.
+        export GO15VENDOREXPERIMENT=1
+        go test -v -ldflags "$TAG_APPNAME_FLAGS" "github.com/radanalyticsio/oshinko-rest/tests/client"
+        ;;
+
     client)
         if which oc &> /dev/null
         then :

@@ -29,7 +29,7 @@ objects:
         WORKDIR /go/src/github.com/radanalyticsio/oshinko-rest
         RUN chmod a+rwX -R .
         RUN go get gopkg.in/check.v1
-        ENTRYPOINT go test -v -ldflags "$(OSHINKO_SERVER_TAG)" "github.com/radanalyticsio/oshinko-rest/tests/client"
+        ENTRYPOINT tools/oshinko-test.sh -t client-deployed
     strategy:
       type: Docker
     output:
