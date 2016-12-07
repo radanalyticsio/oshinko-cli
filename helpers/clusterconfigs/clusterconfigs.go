@@ -21,7 +21,6 @@ var defaultConfig models.NewClusterConfig = models.NewClusterConfig{
 const Defaultname = "default"
 const failOnMissing = true
 const allowMissing = false
-const DefaultConfigPath = "/etc/oshinko-cluster-configs/"
 
 const MasterCountMustBeOne = "Cluster configuration must have a masterCount of 1"
 const WorkerCountMustBeAtLeastOne = "Cluster configuration may not have a workerCount less than 1"
