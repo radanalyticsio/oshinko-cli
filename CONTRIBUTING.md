@@ -108,6 +108,11 @@ to the `oc` command *and* that you are authenticated as a user with
 permissions to perform all the admin functions required. Please inspect this
 script for more details.
 
+**Note** the client test script is not idempotent, it is meant to be run in
+a project once. If it is re-rerun in the same project, it will fail with
+errors about objects already existing. A new project should be used for each
+run of the client test suite.
+
 [gocheckurl]: http://labix.org/gocheck
 [ref1]: https://github.com/golang/go/commit/183cc0cd41f06f83cb7a2490a499e3f9101befff
 [ref2]: https://blog.gopheracademy.com/advent-2015/vendor-folder/
