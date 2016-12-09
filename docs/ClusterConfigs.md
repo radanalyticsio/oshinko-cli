@@ -15,23 +15,23 @@ A named cluster configuration can contain the following fields:
 
 A fully populated configmap called `myconfigs` might look like this:
 
-  $ oc export configmap myconfigs
-  apiVersion: v1
-  data:
-    sparkmasterconfig: master-config
-    sparkworkerconfig: worker-config
-    workercount: "4"
-    mastercount: "1"
-  kind: ConfigMap
-  metadata:
-    creationTimestamp: null
-    name: myconfigs
+    $ oc export configmap myconfigs
+    apiVersion: v1
+    data:
+      sparkmasterconfig: master-config
+      sparkworkerconfig: worker-config
+      workercount: "4"
+      mastercount: "1"
+    kind: ConfigMap
+    metadata:
+      creationTimestamp: null
+      name: myconfigs
 
 A simple way to construct a configmap is to create it initially
 empty and then edit it as shown below to add fields (for other methods of
 creating configmaps, refer to the OpenShift documentation):
 
-  $ oc create configmap mynewconfig
+    $ oc create configmap mynewconfig
 
 ## Editing a named configuration
 
@@ -48,7 +48,7 @@ Simply add fields to the data section or modify existing fields and
 exit the editor.
 
 From the OpenShift console configmaps may be edited
-by going to "Resources -> other resources" and selecting `ConfigMap`
+by going to `Resources -> other resources` and selecting `ConfigMap`
 as the resource type.
 
 ## The default configuration
