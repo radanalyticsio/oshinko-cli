@@ -1,78 +1,64 @@
 # Using named cluster configurations
 
-Oshinko uses a ConfigMap to store named cluster configurations.
+Oshinko uses configmaps to store named cluster configurations.
 This document describes how to add or edit named configurations and
 how to use them with oshinko-rest.
 
-## The oshinko-cluster-configs ConfigMap
+## Named cluster configuration fields
 
-The `tools/server-ui-template.yaml` creates a ConfigMap
-named `oshinko-cluster-configs` which is read by oshinko-rest.
-Any named cluster configuration defined in the ConfigMap
-can be used to create or scale a cluster.
+A named cluster configuration can contain the following fields:
 
-The default ConfigMap contains a single configuration named `small`.
-The `small` configuration specifies a cluster that has three worker nodes.
-To see what configurations are defined, use `oc export` in your project
-after launching oshinko:
+* mastercount -- the number of master nodes, currently limited to 1
+* workercount -- the number of worker nodes
+* sparkmasterconfig -- the name of a configmap that holds spark configuration files for the spark master
+* sparkworkerconfig -- the name of a configmap that holds spark configuration files for the spark workers
 
-    $ oc export configmap oshinko-cluster-configs
+A fully populated configmap called `myconfigs` might look like this:
 
-    apiVersion: v1
-    data:
-      small.workercount: "3"
-    kind: ConfigMap
-    metadata:
-      creationTimestamp: null
-      labels:
-        app: oshinko
-      name: oshinko-cluster-configs
+  $ oc export configmap myconfigs
+  apiVersion: v1
+  data:
+    sparkmasterconfig: master-config
+    sparkworkerconfig: worker-config
+    workercount: "4"
+    mastercount: "1"
+  kind: ConfigMap
+  metadata:
+    creationTimestamp: null
+    name: myconfigs
 
-Named configurations are defined in the data section of the
-ConfigMap. Currently `workercount` is the only parameter
-which may be set for a configuration (`mastercount` may actually
-be set but is constrained to a value of "1"). A parameter is set
-using the name of the configuration followed by a dot and the name
-of the parameter.
+A simple way to construct a configmap is to create it initially
+empty and then edit it as shown below to add fields (for other methods of
+creating configmaps, refer to the OpenShift documentation):
 
-To add a configuration called `large` with a `workercount` of
-ten, the ConfigMap would be modified to look like this:
+  $ oc create configmap mynewconfig
 
-    apiVersion: v1
-    data:
-      small.workercount: "3"
-      large.workercount: "10"
-    kind: ConfigMap
-    metadata:
-      creationTimestamp: null
-      labels:
-        app: oshinko
-      name: oshinko-cluster-configs
+## Editing a named configuration
 
-## Editing oshinko-cluster-configs
+To modify a named configuration, simply edit the corresponding
+configmap. A simple way to edit a configmap is to use the CLI:
 
-The simplest way to edit oshinko-cluster-configs for a particular
-project is to use the CLI:
+    $ oc edit configmap mynewconfig
 
-    $ oc edit configmap oshinko-cluster-configs
+This will open an editor showing the contents of the configmap
+as yaml. Note, if the configmap was created empty, the `data` section
+will be missing and must be added to the yaml file.
 
-From the OpenShift console oshinko-cluster-configs may be edited
-by going to "Resources -> other resources" and selecting ConfigMap
+Simply add fields to the data section or modify existing fields and
+exit the editor.
+
+From the OpenShift console configmaps may be edited
+by going to "Resources -> other resources" and selecting `ConfigMap`
 as the resource type.
-
-There may be a short delay before configuration changes are visible
-to the oshinko-rest pod.
 
 ## The default configuration
 
 There is a default configuration named `default` which specifies a cluster
 with one spark master and one spark worker. All cluster configurations
-start with the values from `default` and then optionally update values. So
-the `small` configuration shown above inherits values from `default` and
-then modifies its own `workercount` to be three.
+start with the values from `default` and then optionally update values.
 
 Note, the `default` configuration itself can be modified in a project by
-editing `oshinko-cluster-configs` and adding a definition for `default`.
+creating a configmap named `default`.
 
 ## Where configuration names may be used
 
@@ -85,4 +71,4 @@ The name of a configuration may also be passed in the json object
 used to create or update a cluster through the oshinko-rest endpoint,
 for example:
 
-    $ curl -H "Content-Type: application/json" -X POST -d '{"name": "sam", "config": {"name": "small"}}' http://oshinko-rest-host:8081/clusters
+    $ curl -H "Content-Type: application/json" -X POST -d '{"name": "sam", "config": {"name": "mynewconfig"}}' http://oshinko-rest-host:8081/clusters
