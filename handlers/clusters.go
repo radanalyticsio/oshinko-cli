@@ -428,8 +428,6 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 		return reterr(fail(err, wDepConfigMsg, code(err)))
 	}
 
-	// If we've gotten this far, then likely the cluster naming is not in conflict so
-	// assume at this point that we should use a 500 error code
 	sc := client.Services(namespace)
 	_, err = sc.Create(&mastersv.Service)
 	if err != nil {
@@ -441,6 +439,26 @@ func CreateClusterResponse(params clusters.CreateClusterParams) middleware.Respo
 	// Note, if spark webui service fails for some reason we can live without it
 	// TODO ties into cluster status, make a note if the service is missing
 	sc.Create(&websv.Service)
+
+	// Wait for the replication controllers to exist before building the response.
+	rcc := client.ReplicationControllers(namespace)
+	{
+		var mrepl, wrepl *kapi.ReplicationController
+		mrepl = nil
+		wrepl = nil
+		for i := 0; i < 4; i++ {
+			if mrepl == nil {
+				mrepl, _ = getReplController(rcc, clustername, masterType)
+			}
+			if wrepl == nil {
+				wrepl, _ = getReplController(rcc, clustername, workerType)
+			}
+			if wrepl != nil && mrepl != nil {
+				break
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+	}
 
 	cluster, err := singleClusterResponse(clustername, client.Pods(namespace), sc, finalconfig)
 	if err != nil {
