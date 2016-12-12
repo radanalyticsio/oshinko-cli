@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"errors"
+	//"errors"
 	"fmt"
 	"github.com/spf13/cobra"
 	"io"
@@ -50,8 +50,7 @@ type AuthOptions struct {
 	CertFile string
 	KeyFile  string
 
-	Token            string
-	SparkClusterName string
+	Token string
 
 	PathOptions *kcmdconfig.PathOptions
 }
@@ -78,14 +77,6 @@ func (o *AuthOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args 
 		}
 		// build a valid object to use if we failed on a non-existent file
 		o.StartingKubeConfig = kclientcmdapi.NewConfig()
-	}
-
-	argsLength := len(args)
-	switch {
-	case argsLength > 1:
-		return errors.New("Only one argument is supported (cluster name).")
-	case argsLength == 1:
-		o.SparkClusterName = args[0]
 	}
 
 	addr := flagtypes.Addr{Value: "localhost:8443", DefaultScheme: "https", DefaultPort: 8443, AllowPrefix: true}.Default()
@@ -317,12 +308,7 @@ func (o *AuthOptions) gatherProjectInfo() error {
 		return fmt.Errorf("current user, %v, does not match expected user %v", me.Name, o.Username)
 	}
 
-	oClient, err := client.New(o.Config)
-	if err != nil {
-		return err
-	}
-
-	projects, err := oClient.Projects().List(kapi.ListOptions{})
+	projects, err := o.Client.Projects().List(kapi.ListOptions{})
 	if err != nil {
 		return err
 	}
@@ -357,7 +343,7 @@ func (o *AuthOptions) gatherProjectInfo() error {
 			}
 		}
 
-		current, err := oClient.Projects().Get(namespace)
+		current, err := o.Client.Projects().Get(namespace)
 		if err != nil && !kapierrors.IsNotFound(err) && !clientcmd.IsForbidden(err) {
 			return err
 		}

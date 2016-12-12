@@ -55,8 +55,8 @@ func (dc *ODeploymentConfig) RollingStrategy() *ODeploymentConfig {
 }
 
 func (dc *ODeploymentConfig) RollingStrategyParams(rp *api.RollingDeploymentStrategyParams,
-req kapi.ResourceRequirements,
-lbls, anttns map[string]string) *ODeploymentConfig {
+	req kapi.ResourceRequirements,
+	lbls, anttns map[string]string) *ODeploymentConfig {
 	dc.Spec.Strategy = api.DeploymentStrategy{
 		Type:          api.DeploymentStrategyTypeRolling,
 		RollingParams: rp,
@@ -73,8 +73,8 @@ func (dc *ODeploymentConfig) RecreateStrategy() *ODeploymentConfig {
 }
 
 func (dc *ODeploymentConfig) RecreateStrategyParams(rp *api.RecreateDeploymentStrategyParams,
-req kapi.ResourceRequirements,
-lbls, anttns map[string]string) *ODeploymentConfig {
+	req kapi.ResourceRequirements,
+	lbls, anttns map[string]string) *ODeploymentConfig {
 	dc.Spec.Strategy = api.DeploymentStrategy{
 		Type:           api.DeploymentStrategyTypeRecreate,
 		RecreateParams: rp,
@@ -86,8 +86,8 @@ lbls, anttns map[string]string) *ODeploymentConfig {
 }
 
 func (dc *ODeploymentConfig) CustomStrategyParams(cp *api.CustomDeploymentStrategyParams,
-req kapi.ResourceRequirements,
-lbls, anttns map[string]string) *ODeploymentConfig {
+	req kapi.ResourceRequirements,
+	lbls, anttns map[string]string) *ODeploymentConfig {
 	dc.Spec.Strategy = api.DeploymentStrategy{
 		Type:         api.DeploymentStrategyTypeCustom,
 		CustomParams: cp,
@@ -120,7 +120,7 @@ func (dc *ODeploymentConfig) TriggerOnImageChange(ic *api.DeploymentTriggerImage
 			// If the Name matches, update
 			// TODO Namespace is allowed to be blank, we should probably handle that case at some point
 			if val.ImageChangeParams.From.Name == ic.From.Name &&
-			val.ImageChangeParams.From.Namespace == ic.From.Namespace {
+				val.ImageChangeParams.From.Namespace == ic.From.Namespace {
 				dc.Spec.Triggers[idx].ImageChangeParams = ic
 				return dc
 			}

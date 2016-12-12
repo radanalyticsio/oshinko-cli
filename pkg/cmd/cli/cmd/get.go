@@ -6,26 +6,21 @@ import (
 	"io"
 
 	osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
-	"github.com/radanalyticsio/oshinko-rest/restapi/operations/clusters"
 	kapierrors "k8s.io/kubernetes/pkg/api/errors"
-	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"os"
 	"sort"
 )
 
-func getClusters(kClient *kclient.Client, namespace string) ([]*clusters.ClustersItems0, error) {
+func getClusters(o *CmdOptions) ([]SparkCluster, error) {
 
-	pc := kClient.Pods(namespace)
-	//fmt.Println(pc)
-	sc := kClient.Services(namespace)
-	//fmt.Println(sc)
+	pc := o.KClient.Pods(o.Project)
+	//sc := o.KClient.Services(o.Project)
 
-	payload := clusters.FindClustersOKBodyBody{}
-	payload.Clusters = []*clusters.ClustersItems0{}
+	clusters := []SparkCluster{}
 	// Create a map so that we can track clusters by name while we
 	// find out information about them
-	clist := map[string]*clusters.ClustersItems0{}
+	clist := map[string]SparkCluster{}
 
 	// Get all of the master pods
 	pods, err := pc.List(makeSelector(masterType, ""))
@@ -38,37 +33,36 @@ func getClusters(kClient *kclient.Client, namespace string) ([]*clusters.Cluster
 		// Build the cluster record if we don't already have it
 		// (theoretically with HA we might have more than 1 master)
 		clustername := pods.Items[i].Labels[clusterLabel]
-		if citem, ok := clist[clustername]; !ok {
-			clist[clustername] = new(clusters.ClustersItems0)
-			citem = clist[clustername]
-			citem.Name = tostrptr(clustername)
-			//fmt.Println(clustername)
-			citem.Href = tostrptr("/clusters/" + clustername)
+		if cluster, ok := clist[clustername]; !ok {
+			//For each master
+			clist[clustername] = SparkCluster{Namespace: o.Project,
+				Name: clustername}
+			cluster = clist[clustername]
+			cluster.Href = "/clusters/" + clustername
 
 			// Note, we do not report an error here since we are
 			// reporting on multiple clusters. Instead cnt will be -1.
-			cnt, _, _ := countWorkers(pc, clustername)
+			cnt, _ := cluster.countWorkers(o.KClient)
 			//fmt.Println(cnt)
 			// TODO we only want to count running pods (not terminating)
-			citem.WorkerCount = toint64ptr(cnt)
+			cluster.WorkerCount = cnt
 			// TODO make something real for status
-			citem.Status = tostrptr("Running")
-			citem.MasterURL = tostrptr(retrieveMasterURL(sc, clustername))
-			payload.Clusters = append(payload.Clusters, citem)
+			cluster.Status = "Running"
+			cluster.MasterURL = cluster.retrieveServiceURL(o.KClient, masterType)
+			cluster.MasterWebURL = cluster.retrieveServiceURL(o.KClient, webuiType)
+			clusters = append(clusters, cluster)
 		}
 	}
 
-	return payload.Clusters, nil
+	return clusters, nil
 }
 
 // RunProjects lists all projects a user belongs to
-func (o *AuthOptions) RunClusters(currentProject string) error {
+func (o *CmdOptions) RunClusters() error {
 	_ = "breakpoint"
 
-	kubeclient := o.KClient
-
 	var msg string
-	clusters, err := getClusters(kubeclient, currentProject)
+	clusters, err := getClusters(o)
 	if err == nil {
 		clusterCount := len(clusters)
 		if clusterCount <= 0 {
@@ -77,15 +71,16 @@ func (o *AuthOptions) RunClusters(currentProject string) error {
 			asterisk := ""
 			count := 0
 			sort.Sort(SortByClusterName(clusters))
-			//fmt.Println(clusterCount)
+
 			for _, cluster := range clusters {
 				count = count + 1
-				displayName := *(cluster.Name)
-				workCount := *(cluster.WorkerCount)
-				//fmt.Println(displayName)
+				clustername := cluster.Name
+				workCount := cluster.WorkerCount
+				MasterURL := cluster.MasterURL
+				MasterWebURL := cluster.MasterWebURL
 				linebreak := "\n"
 
-				msg += fmt.Sprintf(linebreak+asterisk+"%s \t  %d", displayName, workCount)
+				msg += fmt.Sprintf(linebreak+asterisk+"%s \t  %d\t  %s\t  %s", clustername, workCount, MasterURL, MasterWebURL)
 			}
 		}
 
@@ -96,23 +91,13 @@ func (o *AuthOptions) RunClusters(currentProject string) error {
 	return err
 }
 
-// RunLogin contains all the necessary functionality for the OpenShift cli login command
-func RunGetCmd(cmd *cobra.Command, options *AuthOptions) error {
-	if err := options.GatherInfo(); err != nil {
-		return err
-	}
-
-	if err := options.RunClusters(options.Project); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func NewCmdGet(fullName string, f *osclientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Command {
-	options := &AuthOptions{
+	authOptions := &AuthOptions{
 		Reader: reader,
 		Out:    out,
+	}
+	options := &CmdOptions{
+		AuthOptions: *authOptions,
 	}
 
 	cmds := &cobra.Command{
@@ -123,7 +108,7 @@ func NewCmdGet(fullName string, f *osclientcmd.Factory, reader io.Reader, out io
 				kcmdutil.CheckErr(err)
 			}
 
-			err := RunGetCmd(cmd, options)
+			err := options.RunClusters()
 
 			if kapierrors.IsUnauthorized(err) {
 				fmt.Fprintln(out, "Login failed (401 Unauthorized)")

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openshift/origin/pkg/client"
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
@@ -20,9 +19,12 @@ func NewCmdDelete(fullName string, f *clientcmd.Factory, in io.Reader, out io.Wr
 }
 
 func CmdDelete(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Command {
-	options := &AuthOptions{
+	authOptions := &AuthOptions{
 		Reader: reader,
 		Out:    out,
+	}
+	options := &CmdOptions{
+		AuthOptions: *authOptions,
 	}
 
 	cmd := &cobra.Command{
@@ -41,28 +43,16 @@ func CmdDelete(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Com
 	return cmd
 }
 
-func (o *AuthOptions) RunDelete(out io.Writer, cmd *cobra.Command, args []string) error {
+func (o *CmdOptions) RunDelete(out io.Writer, cmd *cobra.Command, args []string) error {
 	allErrs := []error{}
-	if err := o.GatherInfo(); err != nil {
-		return err
-	}
 
-	kubeclient := o.KClient
-	oClient := o.Client
-
-	//fmt.Println("Deletion : ", args, o.Project)
-	currentCluster, err := NameFromCommandArgs(cmd, args)
-	if err != nil {
-		return err
-	}
-
-	info, _ := deleteCluster(currentCluster, o.Project, oClient, kubeclient)
+	info, _ := deleteCluster(o)
 	if info != "" {
 		fmt.Println("Deletion may be incomplete:")
 	}
 
 	if _, err := fmt.Fprintf(out, "cluster \"%s\" deleted \n",
-		currentCluster,
+		o.Name,
 	); err != nil {
 		allErrs = append(allErrs, err)
 	}
@@ -80,16 +70,16 @@ func waitForCount(client kclient.ReplicationControllerInterface, name string, co
 	}
 }
 
-func deleteCluster(clustername, namespace string, osclient *client.Client, client *kclient.Client) (string, bool) {
+func deleteCluster(o *CmdOptions) (string, bool) {
 	var foundSomething bool = false
 	info := []string{}
 	scalerepls := []string{}
 
 	// Build a selector list for the "oshinko-cluster" label
-	selectorlist := makeSelector("", clustername)
+	selectorlist := makeSelector("", o.Name)
 
 	// Delete all of the deployment configs
-	dcc := osclient.DeploymentConfigs(namespace)
+	dcc := o.Client.DeploymentConfigs(o.Project)
 	deployments, err := dcc.List(selectorlist)
 	if err != nil {
 		info = append(info, "unable to find deployment configs ("+err.Error()+")")
@@ -106,7 +96,7 @@ func deleteCluster(clustername, namespace string, osclient *client.Client, clien
 
 	// Get a list of all the replication controllers for the cluster
 	// and set all of the replica values to 0
-	rcc := client.ReplicationControllers(namespace)
+	rcc := o.KClient.ReplicationControllers(o.Project)
 	repls, err := rcc.List(selectorlist)
 	if err != nil {
 		info = append(info, "unable to find replication controllers ("+err.Error()+")")
@@ -139,7 +129,7 @@ func deleteCluster(clustername, namespace string, osclient *client.Client, clien
 	}
 
 	// Delete the services
-	sc := client.Services(namespace)
+	sc := o.KClient.Services(o.Project)
 	srvs, err := sc.List(selectorlist)
 	if err != nil {
 		info = append(info, "unable to find services ("+err.Error()+")")
