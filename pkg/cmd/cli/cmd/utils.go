@@ -10,6 +10,13 @@ import (
 
 // NameFromCommandArgs is a utility function for commands that assume the first argument is a resource name
 func NameFromCommandArgs(cmd *cobra.Command, args []string) (string, error) {
+	if(cmd.Name() == "get") {
+		if len(args) == 0 {
+			return "", nil
+		} else {
+			return args[0], nil
+		}
+	}
 	if len(args) == 0 {
 		return "", cmdutil.UsageError(cmd, "NAME is required")
 	}

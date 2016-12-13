@@ -62,28 +62,32 @@ func (o *CmdOptions) RunClusters() error {
 	_ = "breakpoint"
 
 	var msg string
+	clusterExist := false
+	linebreak := "\n"
+	asterisk := ""
 	clusters, err := getClusters(o)
 	if err == nil {
 		clusterCount := len(clusters)
 		if clusterCount <= 0 {
 			msg += "There are no clusters in any projects. You can create a cluster with the 'create' command."
 		} else if clusterCount > 0 {
-			asterisk := ""
 			count := 0
 			sort.Sort(SortByClusterName(clusters))
-
 			for _, cluster := range clusters {
 				count = count + 1
 				clustername := cluster.Name
 				workCount := cluster.WorkerCount
 				MasterURL := cluster.MasterURL
 				MasterWebURL := cluster.MasterWebURL
-				linebreak := "\n"
-
-				msg += fmt.Sprintf(linebreak+asterisk+"%s \t  %d\t  %s\t  %s", clustername, workCount, MasterURL, MasterWebURL)
+				if (o.Name == "" || clustername == o.Name) {
+					clusterExist = true
+					msg += fmt.Sprintf(linebreak+asterisk+"%s \t  %d\t  %s\t  %s", clustername, workCount, MasterURL, MasterWebURL)
+				}
 			}
 		}
-
+		if(!clusterExist){
+			msg += fmt.Sprintf(linebreak+asterisk+"There are no clusters with name %s", o.Name)
+		}
 		fmt.Println(msg)
 		return nil
 	}
