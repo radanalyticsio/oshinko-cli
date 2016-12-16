@@ -12,7 +12,6 @@ import (
 	oshinkomodels "github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/models"
 	kapi "k8s.io/kubernetes/pkg/api"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	utilerrors "k8s.io/kubernetes/pkg/util/errors"
 	"k8s.io/kubernetes/pkg/util/intstr"
 )
 
@@ -66,7 +65,6 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Com
 }
 
 func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string) error {
-	allErrs := []error{}
 	// pre spark 2, the name the master calls itself must match
 	// the name the workers use and the service name created
 	masterhost := o.Name
@@ -94,13 +92,13 @@ func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string)
 	// Launch all of the objects
 	_, err := dcc.Create(&masterdc.DeploymentConfig)
 	if err != nil {
-		return fmt.Errorf(mDepConfigMsg, err)
+		return ErrorString(mDepConfigMsg, err)
 	}
 	_, err = dcc.Create(&workerdc.DeploymentConfig)
 	if err != nil {
 		// Since we created the master deployment config, try to clean up
 		deleteCluster(o)
-		return fmt.Errorf(wDepConfigMsg, err)
+		return ErrorString(wDepConfigMsg, err)
 	}
 
 	// If we've gotten this far, then likely the cluster naming is not in conflict so
@@ -110,19 +108,15 @@ func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string)
 	if err != nil {
 		// Since we create the master and workers, try to clean up
 		deleteCluster(o)
-		return fmt.Errorf(masterSrvMsg, err)
+		return ErrorString(masterSrvMsg, err)
 	}
 
 	// Note, if spark webui service fails for some reason we can live without it
 	// TODO ties into cluster status, make a note if the service is missing
 	sc.Create(&websv.Service)
 
-	if _, err := fmt.Fprintf(out, "cluster \"%s\" created \n",
-		o.Name,
-	); err != nil {
-		allErrs = append(allErrs, err)
-	}
-	return utilerrors.NewAggregate(allErrs)
+	fmt.Fprintf(out, "cluster \"%s\" created \n", o.Name)
+	return nil
 }
 
 func makeEnvVars(clustername, sparkconfdir string) []kapi.EnvVar {
