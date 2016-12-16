@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/util/intstr"
+	"fmt"
 )
 
 // NameFromCommandArgs is a utility function for commands that assume the first argument is a resource name
@@ -35,4 +36,8 @@ func getIntValue(intString string) (int, error) {
 		newIntStr = intstr.FromInt(integer)
 	}
 	return newIntStr.IntValue(), nil
+}
+
+func ErrorString(msg string, err error)  error {
+	return fmt.Errorf(msg + ", %s", err)
 }
