@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 	"strconv"
-
+	"github.com/openshift/origin/pkg/client"
 	kapi "k8s.io/kubernetes/pkg/api"
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/labels"
@@ -115,4 +115,24 @@ func getReplController(client kclient.ReplicationControllerInterface, clusternam
 		}
 	}
 	return &newestRepl, err
+}
+
+func checkForDeploymentConfigs(client client.DeploymentConfigInterface, clustername string) (bool, error) {
+	selectorlist := makeSelector(masterType, clustername)
+	dcs, err := client.List(selectorlist)
+	if err != nil {
+		return false, err
+	}
+	if len(dcs.Items) == 0 {
+		return false, nil
+	}
+	selectorlist = makeSelector(workerType, clustername)
+	dcs, err = client.List(selectorlist)
+	if err != nil {
+		return false, err
+	}
+	if len(dcs.Items) == 0 {
+		return false, nil
+	}
+	return true, nil
 }

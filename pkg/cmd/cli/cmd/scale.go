@@ -46,6 +46,14 @@ func CmdScale(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Comm
 func (o *CmdOptions) RunScale() error {
 	allErrs := []error{}
 
+	ok, err := checkForDeploymentConfigs(o.Client.DeploymentConfigs(o.Project), o.Name)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("No such cluster " + o.Name)
+	}
+
 	rcc := o.KClient.ReplicationControllers(o.Project)
 	wrepl, err := getReplController(rcc, o.Name, workerType)
 	if err != nil || wrepl == nil {
