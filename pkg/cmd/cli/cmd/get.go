@@ -6,6 +6,7 @@ import (
 	"io"
 
 	osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	kapierrors "k8s.io/kubernetes/pkg/api/errors"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"os"
@@ -66,26 +67,33 @@ func (o *CmdOptions) RunClusters() error {
 	linebreak := "\n"
 	asterisk := ""
 	clusters, err := getClusters(o)
+	var namedCluster SparkCluster
 	if err == nil {
 		clusterCount := len(clusters)
+		tmpClusters := clusters
 		if clusterCount <= 0 {
 			msg += "There are no clusters in any projects. You can create a cluster with the 'create' command."
 		} else if clusterCount > 0 {
-			count := 0
-			sort.Sort(SortByClusterName(clusters))
-			for _, cluster := range clusters {
-				count = count + 1
-				clustername := cluster.Name
-				workCount := cluster.WorkerCount
-				MasterURL := cluster.MasterURL
-				MasterWebURL := cluster.MasterWebURL
-				if (o.Name == "" || clustername == o.Name) {
+			sort.Sort(SortByClusterName(tmpClusters))
+			for _, cluster := range tmpClusters {
+				if o.Name == "" || cluster.Name == o.Name {
 					clusterExist = true
-					msg += fmt.Sprintf(linebreak+asterisk+"%s \t  %d\t  %s\t  %s", clustername, workCount, MasterURL, MasterWebURL)
+					namedCluster = cluster
+					if o.Output == "" {
+						msg += fmt.Sprintf(linebreak+asterisk+"%s \t  %d\t  %s\t  %s\t  %s", cluster.Name,
+							cluster.WorkerCount, cluster.MasterURL, cluster.MasterWebURL, cluster.Status)
+					}
+				}
+			}
+			if o.Output != "" {
+				if o.Name == "" {
+					PrintOutput(o.Output, clusters)
+				} else if clusterExist {
+					PrintOutput(o.Output, []SparkCluster{namedCluster})
 				}
 			}
 		}
-		if(!clusterExist){
+		if !clusterExist {
 			msg += fmt.Sprintf(linebreak+asterisk+"There are no clusters with name %s", o.Name)
 		}
 		fmt.Println(msg)
@@ -96,16 +104,17 @@ func (o *CmdOptions) RunClusters() error {
 }
 
 func NewCmdGet(fullName string, f *osclientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Command {
-	authOptions := &AuthOptions{
+	authOptions := &auth.AuthOptions{
 		Reader: reader,
 		Out:    out,
 	}
 	options := &CmdOptions{
 		AuthOptions: *authOptions,
+		Verbose:     false,
 	}
 
 	cmds := &cobra.Command{
-		Use:   "get <NAME>",
+		Use:   "get",
 		Short: "Get running spark clusters",
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Complete(f, cmd, args); err != nil {
@@ -132,5 +141,6 @@ func NewCmdGet(fullName string, f *osclientcmd.Factory, reader io.Reader, out io
 			}
 		},
 	}
+	cmds.Flags().StringP("output", "o", "", "Output format. One of: json|yaml")
 	return cmds
 }

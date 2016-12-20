@@ -9,6 +9,7 @@ import (
 	utilerrors "k8s.io/kubernetes/pkg/util/errors"
 
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 )
 
 func NewCmdScale(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) *cobra.Command {
@@ -17,7 +18,7 @@ func NewCmdScale(fullName string, f *clientcmd.Factory, in io.Reader, out io.Wri
 }
 
 func CmdScale(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Command {
-	authOptions := &AuthOptions{
+	authOptions := &auth.AuthOptions{
 		Reader: reader,
 		Out:    out,
 	}

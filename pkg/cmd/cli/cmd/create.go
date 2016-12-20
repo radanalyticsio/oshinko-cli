@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	oshinkomodels "github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/models"
 	kapi "k8s.io/kubernetes/pkg/api"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
@@ -30,7 +31,7 @@ func NewCmdCreate(fullName string, f *clientcmd.Factory, in io.Reader, out io.Wr
 }
 
 func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Command {
-	authOptions := &AuthOptions{
+	authOptions := &auth.AuthOptions{
 		Reader: reader,
 		Out:    out,
 	}
@@ -59,6 +60,7 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Com
 	cmd.Flags().String("workerconfigdir", defaultsparkconfdir, "Config folder for spark worker")
 	cmd.Flags().String("masterconfig", "", "ConfigMap name for spark master")
 	cmd.Flags().String("workerconfig", "", "ConfigMap name for spark worker")
+	cmd.Flags().String("storedconfig", "", "ConfigMap name for spark cluster")
 	cmd.Flags().String("image", defaultImage, "spark image to be used.Default value is radanalyticsio/openshift-spark.")
 	//cmd.MarkFlagRequired("workers")
 	return cmd

@@ -1,4 +1,4 @@
-package cmd
+package auth
 
 import (
 	//"errors"
@@ -20,9 +20,9 @@ import (
 	"github.com/openshift/origin/pkg/client"
 	"github.com/openshift/origin/pkg/cmd/cli/config"
 	"github.com/openshift/origin/pkg/cmd/flagtypes"
-	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	"github.com/openshift/origin/pkg/user/api"
+
 )
 
 //=====================================
@@ -197,7 +197,7 @@ func (o *AuthOptions) getClientConfig() (*restclient.Config, error) {
 			clientConfig.CAData = nil
 
 		// certificate issue, prompt user for insecure connection
-		case clientcmd.IsCertificateAuthorityUnknown(result.Error()):
+		case osclientcmd.IsCertificateAuthorityUnknown(result.Error()):
 			// check to see if we already have a cluster stanza that tells us to use --insecure for this particular server.  If we don't, then prompt
 			//clientConfigToTest := *clientConfig
 			//clientConfigToTest.Insecure = true
@@ -236,10 +236,11 @@ func (o *AuthOptions) getClientConfig() (*restclient.Config, error) {
 	return o.Config, nil
 }
 
-func (o *AuthOptions) gatherAuthInfo() error {
+func (o *AuthOptions) GatherAuthInfo() (string, error) {
+	var msg string
 	directClientConfig, err := o.getClientConfig()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// make a copy and use it to avoid mutating the original
@@ -262,62 +263,63 @@ func (o *AuthOptions) gatherAuthInfo() error {
 
 				osClient, err := client.New(clientConfig)
 				if err != nil {
-					return err
+					return "", err
 				}
 				o.Client = osClient
 
 				kubeclient, err := kclient.New(o.Config)
 				if err != nil {
-					return err
+					return "", err
 				}
 				o.KClient = kubeclient
 
 				me, err := whoAmI(osClient)
 				if err != nil {
-					return err
+					return "", err
 				}
 				o.Username = me.Name
 				o.Config = clientConfig
 
-				fmt.Fprintf(o.Out, "Logged into %q as %q using the token provided.\n\n", o.Config.Host, o.Username)
-				return nil
+				msg+=fmt.Sprintf("Logged into %q as %q using the token provided.\n\n", o.Config.Host, o.Username)
+				return msg, nil
 			}
 
 			if !kapierrors.IsUnauthorized(err) {
-				return err
+				return "", err
 			}
 
-			return fmt.Errorf("The token provided is invalid or expired.\n\n")
+			return "", fmt.Errorf("The token provided is invalid or expired.\n\n")
 		}
 	} else {
-		return fmt.Errorf("The token is not provided.\n\n")
+		return "", fmt.Errorf("The token is not provided.\n\n")
 	}
 
-	fmt.Fprint(o.Out, "Login successful.\n\n")
+	msg+=fmt.Sprintf("Login successful.\n\n")
 
-	return nil
+	return msg, nil
 }
 
-func (o *AuthOptions) gatherProjectInfo() error {
+func (o *AuthOptions) GatherProjectInfo() (string,error) {
+	var msg string
 	me, err := o.whoAmI()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if o.Username != me.Name {
-		return fmt.Errorf("current user, %v, does not match expected user %v", me.Name, o.Username)
+		return "", fmt.Errorf("current user, %v, does not match expected user %v", me.Name, o.Username)
 	}
 
 	projects, err := o.Client.Projects().List(kapi.ListOptions{})
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	projectsItems := projects.Items
 
 	switch len(projectsItems) {
 	case 0:
-		fmt.Fprintf(o.Out, `You don't have any projects. You can try to create a new project, by running
+		msg+=fmt.Sprintf(`You don't have any projects. You can try to create a new project, by running
 
     $ oc new-project <projectname>
 
@@ -326,7 +328,7 @@ func (o *AuthOptions) gatherProjectInfo() error {
 
 	case 1:
 		o.Project = projectsItems[0].Name
-		fmt.Fprintf(o.Out, "Using project %q.\n", o.Project)
+		msg+=fmt.Sprintf("Using project %q.\n", o.Project)
 
 	default:
 		projects := sets.String{}
@@ -344,12 +346,12 @@ func (o *AuthOptions) gatherProjectInfo() error {
 		}
 
 		current, err := o.Client.Projects().Get(namespace)
-		if err != nil && !kapierrors.IsNotFound(err) && !clientcmd.IsForbidden(err) {
-			return err
+		if err != nil && !kapierrors.IsNotFound(err) && !osclientcmd.IsForbidden(err) {
+			return "", err
 		}
 		o.Project = current.Name
 
-		fmt.Fprintf(o.Out, "You have access to the following projects and can switch between them with 'oc project <projectname>':\n\n")
+		msg+=fmt.Sprintf( "You have access to the following projects and can switch between them with 'oc project <projectname>':\n\n")
 		for _, p := range projects.List() {
 			if o.Project == p {
 				fmt.Fprintf(o.Out, "  * %s (current)\n", p)
@@ -357,19 +359,12 @@ func (o *AuthOptions) gatherProjectInfo() error {
 				fmt.Fprintf(o.Out, "  * %s\n", p)
 			}
 		}
-		fmt.Fprintln(o.Out)
-		fmt.Fprintf(o.Out, "Using project %q.\n", o.Project)
+		msg+=fmt.Sprintf("\n")
+		msg+=fmt.Sprintf("Using project %q.\n", o.Project)
 	}
 
-	return nil
+	return msg, nil
 }
 
-func (o *AuthOptions) GatherInfo() error {
-	if err := o.gatherAuthInfo(); err != nil {
-		return err
-	}
-	if err := o.gatherProjectInfo(); err != nil {
-		return err
-	}
-	return nil
-}
+
+

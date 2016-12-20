@@ -3,6 +3,7 @@ set -ex
 
 go get github.com/renstrom/dedent
 go get github.com/docker/go-connections/nat
+go get github.com/ghodss/yaml
 
 PROJECT='github.com/redhatanalytics/oshinko-cli'
 TAG=`git describe --tags --abbrev=0 2> /dev/null | head -n1`

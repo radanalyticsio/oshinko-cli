@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"github.com/openshift/origin/pkg/cmd/cli/cmd"
 	"github.com/openshift/origin/pkg/cmd/flagtypes"
 	"github.com/openshift/origin/pkg/cmd/templates"
 	cmdutil "github.com/openshift/origin/pkg/cmd/util"
@@ -58,6 +57,7 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 		},
 	}
 	groups.Add(cmds)
+	changeSharedFlagDefaults(cmds)
 
 	filters := []string{
 		"options",
@@ -67,7 +67,7 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 		ExposeFlags(getCmd, "server", "client-certificate",
 			"client-key", "certificate-authority", "insecure-skip-tls-verify", "token")
 
-	cmds.AddCommand(cmd.NewCmdOptions(out))
+	cmds.AddCommand(NewCmdOptions(out))
 	return cmds
 }
 
@@ -76,6 +76,31 @@ func moved(fullName, to string, parent, cmd *cobra.Command) string {
 	cmd.Short = fmt.Sprintf("DEPRECATED: %s", to)
 	parent.AddCommand(cmd)
 	return cmd.Name()
+}
+
+func NewCmdOptions(out io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use: "options",
+		Run: func(cmd *cobra.Command, args []string) {
+			cmd.Usage()
+		},
+	}
+
+	templates.UseOptionsTemplates(cmd)
+
+	return cmd
+}
+
+// changeSharedFlagDefaults changes values of shared flags that we disagree with.  This can't be done in godep code because
+// that would change behavior in our `kubectl` symlink. Defend each change.
+// 1. show-all - the most interesting pods are terminated/failed pods.  We don't want to exclude them from printing
+func changeSharedFlagDefaults(rootCmd *cobra.Command) {
+	cmds := []*cobra.Command{rootCmd}
+
+	for i := 0; i < len(cmds); i++ {
+		currCmd := cmds[i]
+		cmds = append(cmds, currCmd.Commands()...)
+	}
 }
 
 // CommandFor returns the appropriate command for this base name,

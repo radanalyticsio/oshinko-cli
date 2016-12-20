@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	utilerrors "k8s.io/kubernetes/pkg/util/errors"
@@ -19,7 +20,7 @@ func NewCmdDelete(fullName string, f *clientcmd.Factory, in io.Reader, out io.Wr
 }
 
 func CmdDelete(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Command {
-	authOptions := &AuthOptions{
+	authOptions := &auth.AuthOptions{
 		Reader: reader,
 		Out:    out,
 	}
