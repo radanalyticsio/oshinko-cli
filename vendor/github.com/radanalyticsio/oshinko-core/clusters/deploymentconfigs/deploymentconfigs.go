@@ -1,7 +1,8 @@
-package models
+package deploymentconfigs
 
 import (
 	"github.com/openshift/origin/pkg/deploy/api"
+	"github.com/radanalyticsio/oshinko-core/clusters/podtemplates"
 	kapi "k8s.io/kubernetes/pkg/api"
 )
 
@@ -133,7 +134,7 @@ func (dc *ODeploymentConfig) TriggerOnImageChange(ic *api.DeploymentTriggerImage
 	return dc
 }
 
-func (dc *ODeploymentConfig) PodTemplateSpec(pt *OPodTemplateSpec) *ODeploymentConfig {
+func (dc *ODeploymentConfig) PodTemplateSpec(pt *podtemplates.OPodTemplateSpec) *ODeploymentConfig {
 	dc.Spec.Template = &pt.PodTemplateSpec
 	return dc
 }

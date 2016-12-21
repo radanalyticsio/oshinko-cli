@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/spf13/cobra"
 	"io"
-
+	"github.com/radanalyticsio/oshinko-core/clusters"
 	osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	kapierrors "k8s.io/kubernetes/pkg/api/errors"
@@ -13,94 +13,64 @@ import (
 	"sort"
 )
 
-func getClusters(o *CmdOptions) ([]SparkCluster, error) {
+type SortByClusterName []clusters.SparkCluster
 
-	pc := o.KClient.Pods(o.Project)
-	//sc := o.KClient.Services(o.Project)
-
-	clusters := []SparkCluster{}
-	// Create a map so that we can track clusters by name while we
-	// find out information about them
-	clist := map[string]SparkCluster{}
-
-	// Get all of the master pods
-	pods, err := pc.List(makeSelector(masterType, ""))
-	if err != nil {
-		return nil, err
-	}
-
-	for i := range pods.Items {
-
-		// Build the cluster record if we don't already have it
-		// (theoretically with HA we might have more than 1 master)
-		clustername := pods.Items[i].Labels[clusterLabel]
-		if cluster, ok := clist[clustername]; !ok {
-			//For each master
-			clist[clustername] = SparkCluster{Namespace: o.Project,
-				Name: clustername}
-			cluster = clist[clustername]
-			cluster.Href = "/clusters/" + clustername
-
-			// Note, we do not report an error here since we are
-			// reporting on multiple clusters. Instead cnt will be -1.
-			cnt, _ := cluster.countWorkers(o.KClient)
-			//fmt.Println(cnt)
-			// TODO we only want to count running pods (not terminating)
-			cluster.WorkerCount = cnt
-			// TODO make something real for status
-			cluster.Status = "Running"
-			cluster.MasterURL = cluster.retrieveServiceURL(o.KClient, masterType)
-			cluster.MasterWebURL = cluster.retrieveServiceURL(o.KClient, webuiType)
-			clusters = append(clusters, cluster)
-		}
-	}
-
-	return clusters, nil
+func (p SortByClusterName) Len() int {
+	return len(p)
 }
+
+func (p SortByClusterName) Swap(i, j int) {
+	p[i], p[j] = p[j], p[i]
+}
+
+func (p SortByClusterName) Less(i, j int) bool {
+	return p[i].Name < p[j].Name
+}
+
 
 // RunProjects lists all projects a user belongs to
 func (o *CmdOptions) RunClusters() error {
-	_ = "breakpoint"
 
 	var msg string
-	clusterExist := false
+	var clist []clusters.SparkCluster
+	var err error
+
 	linebreak := "\n"
 	asterisk := ""
-	clusters, err := getClusters(o)
-	var namedCluster SparkCluster
-	if err == nil {
-		clusterCount := len(clusters)
-		tmpClusters := clusters
-		if clusterCount <= 0 {
-			msg += "There are no clusters in any projects. You can create a cluster with the 'create' command."
-		} else if clusterCount > 0 {
-			sort.Sort(SortByClusterName(tmpClusters))
-			for _, cluster := range tmpClusters {
-				if o.Name == "" || cluster.Name == o.Name {
-					clusterExist = true
-					namedCluster = cluster
-					if o.Output == "" {
-						msg += fmt.Sprintf(linebreak+asterisk+"%s \t  %d\t  %s\t  %s\t  %s", cluster.Name,
-							cluster.WorkerCount, cluster.MasterURL, cluster.MasterWebURL, cluster.Status)
-					}
-				}
-			}
-			if o.Output != "" {
-				if o.Name == "" {
-					PrintOutput(o.Output, clusters)
-				} else if clusterExist {
-					PrintOutput(o.Output, []SparkCluster{namedCluster})
-				}
-			}
+
+	if o.Name != "" {
+		c, err := clusters.FindSingleCluster(o.Name, o.Project, o.Client, o.KClient)
+		if err != nil {
+			return err
 		}
-		if !clusterExist {
-			msg += fmt.Sprintf(linebreak+asterisk+"There are no clusters with name %s", o.Name)
+		clist = []clusters.SparkCluster{c}
+	} else {
+		clist, err = clusters.FindClusters(o.Project, o.KClient)
+		if err != nil {
+			return err
 		}
-		fmt.Println(msg)
-		return nil
 	}
 
-	return err
+	clusterCount := len(clist)
+	tmpClusters := clist
+	if clusterCount <= 0 {
+		msg += "There are no clusters in any projects. You can create a cluster with the 'create' command."
+	} else if clusterCount > 0 {
+		sort.Sort(SortByClusterName(tmpClusters))
+		for _, cluster := range tmpClusters {
+			if o.Name == "" || cluster.Name == o.Name {
+				if o.Output == "" {
+					msg += fmt.Sprintf(linebreak+asterisk+"%s \t  %d\t  %s\t  %s\t  %s", cluster.Name,
+						cluster.WorkerCount, cluster.MasterURL, cluster.MasterWebURL, cluster.Status)
+				}
+			}
+		}
+		if o.Output != "" {
+			PrintOutput(o.Output, clist)
+		}
+	}
+	fmt.Println(msg)
+	return nil
 }
 
 func NewCmdGet(fullName string, f *osclientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Command {

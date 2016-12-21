@@ -1,4 +1,4 @@
-package models
+package containers
 
 import (
 	kapi "k8s.io/kubernetes/pkg/api"

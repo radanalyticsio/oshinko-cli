@@ -1,15 +1,15 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"github.com/spf13/cobra"
 	"io"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	utilerrors "k8s.io/kubernetes/pkg/util/errors"
 
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
+	"github.com/radanalyticsio/oshinko-core/clusters"
+	"github.com/radanalyticsio/oshinko-core/clusterconfigs"
 )
 
 func NewCmdScale(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) *cobra.Command {
@@ -45,43 +45,12 @@ func CmdScale(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Comm
 }
 
 func (o *CmdOptions) RunScale() error {
-	allErrs := []error{}
-
-	rcc := o.KClient.ReplicationControllers(o.Project)
-	wrepl, err := getReplController(rcc, o.Name, workerType)
-	if err != nil || wrepl == nil {
+	config := clusterconfigs.ClusterConfig{}
+	config.WorkerCount = o.WorkerCount
+	_, err := clusters.UpdateCluster(o.Name, o.Project, &config, o.Client, o.KClient)
+	if err != nil {
 		return err
 	}
-
-	//mrepl, err := getReplController(rcc, o.Name, masterType)
-	//if err != nil || mrepl == nil {
-	//	return err
-	//}
-
-	// If the current replica count does not match the request, update the replication controller
-	if o.WorkerCount >= 0 && o.WorkerCount <= maxWorkers &&
-		wrepl.Spec.Replicas != o.WorkerCount {
-		wrepl.Spec.Replicas = o.WorkerCount
-		_, err = rcc.Update(wrepl)
-		if err != nil {
-			return err
-		}
-	} else {
-		return errors.New("Cannot Scale Cluster \n")
-	}
-
-	//if o.MasterCount != "" && mrepl.Spec.Replicas != o.MasterCount {
-	//	mrepl.Spec.Replicas = o.MasterCount
-	//	_, err = rcc.Update(mrepl)
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
-
-	if _, err := fmt.Fprintf(o.Out, "cluster \"%s\" scaled \n",
-		o.Name,
-	); err != nil {
-		allErrs = append(allErrs, err)
-	}
-	return utilerrors.NewAggregate(allErrs)
+	fmt.Fprintf(o.Out, "cluster \"%s\" scaled \n", o.Name)
+	return nil
 }

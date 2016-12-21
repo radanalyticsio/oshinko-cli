@@ -65,21 +65,6 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	if cmd.Flags().Lookup("workerconfigdir") != nil {
 		o.WorkerConfigDir = kcmdutil.GetFlagString(cmd, "workerconfigdir")
 	}
-	if cmd.Flags().Lookup("masterconfig") != nil && kcmdutil.GetFlagString(cmd, "masterconfig") != "" {
-		o.MasterConfig = kcmdutil.GetFlagString(cmd, "masterconfig")
-
-		err = checkForConfigMap(o.MasterConfig, o.KClient.ConfigMaps(o.Project))
-		if err != nil {
-			return err
-		}
-	}
-	if cmd.Flags().Lookup("workerconfig") != nil && kcmdutil.GetFlagString(cmd, "workerconfig") != "" {
-		o.WorkerConfig = kcmdutil.GetFlagString(cmd, "workerconfig")
-		err = checkForConfigMap(o.WorkerConfig, o.KClient.ConfigMaps(o.Project))
-		if err != nil {
-			return err
-		}
-	}
 	return nil
 }
 

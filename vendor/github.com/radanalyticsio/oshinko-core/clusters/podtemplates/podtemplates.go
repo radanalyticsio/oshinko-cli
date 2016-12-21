@@ -1,6 +1,7 @@
-package models
+package podtemplates
 
 import (
+	"github.com/radanalyticsio/oshinko-core/clusters/containers"
 	kapi "k8s.io/kubernetes/pkg/api"
 )
 
@@ -36,7 +37,7 @@ func (pt *OPodTemplateSpec) Label(name, value string) *OPodTemplateSpec {
 	return pt
 }
 
-func (pt *OPodTemplateSpec) Containers(cntnrs ...*OContainer) *OPodTemplateSpec {
+func (pt *OPodTemplateSpec) Containers(cntnrs ...*containers.OContainer) *OPodTemplateSpec {
 	kcntnrs := make([]kapi.Container, len(cntnrs))
 	for idx, c := range cntnrs {
 		kcntnrs[idx] = c.Container
