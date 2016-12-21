@@ -3,7 +3,7 @@ package unittest
 import (
 	"gopkg.in/check.v1"
 
-	"github.com/radanalyticsio/oshinko-rest/helpers/probes"
+	"github.com/radanalyticsio/oshinko-core/clusters/probes"
 )
 
 func (s *OshinkoUnitTestSuite) TestNewHTTPGetProbe(c *check.C) {

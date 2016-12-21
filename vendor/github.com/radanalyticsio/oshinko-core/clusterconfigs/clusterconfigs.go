@@ -5,13 +5,21 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"github.com/radanalyticsio/oshinko-rest/models"
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/api"
 )
 
+type ClusterConfig struct {
 
-var defaultConfig models.NewClusterConfig = models.NewClusterConfig{
+	MasterCount int
+	WorkerCount int
+	Name string
+	SparkMasterConfig string
+	SparkWorkerConfig string
+}
+
+
+var defaultConfig ClusterConfig = ClusterConfig{
 								MasterCount: 1,
 	                                                        WorkerCount: 1,
 								Name: "default",
@@ -22,17 +30,17 @@ const Defaultname = "default"
 const failOnMissing = true
 const allowMissing = false
 
-const MasterCountMustBeOne = "Cluster configuration must have a masterCount of 1"
-const WorkerCountMustBeAtLeastOne = "Cluster configuration may not have a workerCount less than 1"
-const NamedConfigDoesNotExist = "Named config '%s' does not exist"
-const ErrorWhileProcessing = "Error while processing %s: %s"
+const MasterCountMustBeOne = "cluster configuration must have a masterCount of 1"
+const WorkerCountMustBeAtLeastOne = "cluster configuration may not have a workerCount less than 1"
+const NamedConfigDoesNotExist = "camed config \"%s\" does not exist"
+const ErrorWhileProcessing = "error while processing %s: %s"
 
 // This function is meant to support testability
-func GetDefaultConfig() models.NewClusterConfig {
+func GetDefaultConfig() ClusterConfig {
 	return defaultConfig
 }
 
-func assignConfig(res *models.NewClusterConfig, src models.NewClusterConfig) {
+func assignConfig(res *ClusterConfig, src ClusterConfig) {
 	if src.MasterCount != 0 {
 		res.MasterCount = src.MasterCount
 	}
@@ -48,7 +56,7 @@ func assignConfig(res *models.NewClusterConfig, src models.NewClusterConfig) {
 	}
 }
 
-func checkConfiguration(config models.NewClusterConfig) error {
+func checkConfiguration(config ClusterConfig) error {
 	var err error
 	if config.MasterCount != 1 {
 		err = errors.New(MasterCountMustBeOne)
@@ -59,15 +67,15 @@ func checkConfiguration(config models.NewClusterConfig) error {
 }
 
 
-func getInt64(value, configmapname string) (int64, error) {
+func getInt(value, configmapname string) (int, error) {
 	i, err := strconv.Atoi(strings.Trim(value, "\n"))
 	if err != nil {
 		err = errors.New(fmt.Sprintf(ErrorWhileProcessing, configmapname, errors.New("expected integer")))
 	}
-	return int64(i), err
+	return i, err
 }
 
-func process(config *models.NewClusterConfig, name, value, configmapname string) error {
+func process(config *ClusterConfig, name, value, configmapname string) error {
 
 	var err error
 
@@ -76,9 +84,9 @@ func process(config *models.NewClusterConfig, name, value, configmapname string)
 	// the first element in the name
 	switch name {
 	case "mastercount":
-		config.MasterCount, err = getInt64(value, configmapname + ".mastercount")
+		config.MasterCount, err = getInt(value, configmapname + ".mastercount")
 	case "workercount":
-		config.WorkerCount, err = getInt64(value, configmapname + ".workercount")
+		config.WorkerCount, err = getInt(value, configmapname + ".workercount")
 	case "sparkmasterconfig":
                 config.SparkMasterConfig = strings.Trim(value, "\n")
 	case "sparkworkerconfig":
@@ -95,7 +103,7 @@ func checkForConfigMap(name string, failOnMissing bool, cm kclient.ConfigMapsInt
 	return cmap, err
 }
 
-func readConfig(name string, res *models.NewClusterConfig, failOnMissing bool, cm kclient.ConfigMapsInterface) (err error) {
+func readConfig(name string, res *ClusterConfig, failOnMissing bool, cm kclient.ConfigMapsInterface) (err error) {
         cmap, err := checkForConfigMap(name, failOnMissing, cm)
 	if err == nil && cmap != nil {
                 for n, v := range (cmap.Data) {
@@ -108,7 +116,7 @@ func readConfig(name string, res *models.NewClusterConfig, failOnMissing bool, c
 	return err
 }
 
-func loadConfig(name string, cm kclient.ConfigMapsInterface) (res models.NewClusterConfig, err error) {
+func loadConfig(name string, cm kclient.ConfigMapsInterface) (res ClusterConfig, err error) {
 	// If the default config has been modified use those mods.
 	res = defaultConfig
 	err = readConfig(Defaultname, &res, allowMissing, cm)
@@ -118,7 +126,7 @@ func loadConfig(name string, cm kclient.ConfigMapsInterface) (res models.NewClus
 	return res, err
 }
 
-func GetClusterConfig(config *models.NewClusterConfig, cm kclient.ConfigMapsInterface) (res models.NewClusterConfig, err error) {
+func GetClusterConfig(config *ClusterConfig, cm kclient.ConfigMapsInterface) (res ClusterConfig, err error) {
         var name string = ""
 	if config != nil {
 	   name = config.Name

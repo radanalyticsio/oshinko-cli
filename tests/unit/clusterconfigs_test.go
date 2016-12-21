@@ -4,25 +4,25 @@ import (
 	"errors"
 	"strconv"
 	"gopkg.in/check.v1"
-	"github.com/radanalyticsio/oshinko-rest/helpers/clusterconfigs"
-	"github.com/radanalyticsio/oshinko-rest/models"
+	"github.com/radanalyticsio/oshinko-core/clusterconfigs"
+	//"github.com/radanalyticsio/oshinko-rest/models"
 	"fmt"
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/watch"
 )
 
-var tiny models.NewClusterConfig = models.NewClusterConfig{MasterCount: 1, WorkerCount: 0, Name: "tiny"}
-var small models.NewClusterConfig = models.NewClusterConfig{MasterCount: 1, WorkerCount: 3,
+var tiny clusterconfigs.ClusterConfig = clusterconfigs.ClusterConfig{MasterCount: 1, WorkerCount: 0, Name: "tiny"}
+var small clusterconfigs.ClusterConfig = clusterconfigs.ClusterConfig{MasterCount: 1, WorkerCount: 3,
 	SparkMasterConfig: "master-config", SparkWorkerConfig: "worker-config", Name: "small"}
-var large models.NewClusterConfig = models.NewClusterConfig{MasterCount: 0, WorkerCount: 10, Name: "large"}
-var brokenMaster models.NewClusterConfig = models.NewClusterConfig{MasterCount: 2, WorkerCount: 0, Name: "brokenmaster"}
-var brokenWorker models.NewClusterConfig = models.NewClusterConfig{MasterCount: 1, WorkerCount: -1, Name: "brokenworker"}
-var nonIntMaster models.NewClusterConfig = models.NewClusterConfig{Name: "cow"}
-var nonIntWorker models.NewClusterConfig = models.NewClusterConfig{Name: "pig"}
-var userDefault = models.NewClusterConfig{MasterCount: 3, WorkerCount: 3,
+var large clusterconfigs.ClusterConfig = clusterconfigs.ClusterConfig{MasterCount: 0, WorkerCount: 10, Name: "large"}
+var brokenMaster clusterconfigs.ClusterConfig = clusterconfigs.ClusterConfig{MasterCount: 2, WorkerCount: 0, Name: "brokenmaster"}
+var brokenWorker clusterconfigs.ClusterConfig = clusterconfigs.ClusterConfig{MasterCount: 1, WorkerCount: -1, Name: "brokenworker"}
+var nonIntMaster clusterconfigs.ClusterConfig = clusterconfigs.ClusterConfig{Name: "cow"}
+var nonIntWorker clusterconfigs.ClusterConfig = clusterconfigs.ClusterConfig{Name: "pig"}
+var userDefault = clusterconfigs.ClusterConfig{MasterCount: 3, WorkerCount: 3,
 	SparkMasterConfig: "master-default", SparkWorkerConfig: "worker-default", Name: "default"}
 
-func makeConfigMap(cfg models.NewClusterConfig) *api.ConfigMap {
+func makeConfigMap(cfg clusterconfigs.ClusterConfig) *api.ConfigMap {
 	var res api.ConfigMap = api.ConfigMap{Data: map[string]string{}}
 	if cfg.SparkMasterConfig != "" {
 		res.Data["sparkmasterconfig"] = cfg.SparkMasterConfig
@@ -31,10 +31,10 @@ func makeConfigMap(cfg models.NewClusterConfig) *api.ConfigMap {
 		res.Data["sparkworkerconfig"] = cfg.SparkWorkerConfig
 	}
 	if cfg.MasterCount != 0 {
-		res.Data["mastercount"] = strconv.FormatInt(cfg.MasterCount, 10)
+		res.Data["mastercount"] = strconv.Itoa(cfg.MasterCount)
 	}
 	if cfg.WorkerCount != 0 {
-		res.Data["workercount"] = strconv.FormatInt(cfg.WorkerCount, 10)
+		res.Data["workercount"] = strconv.Itoa(cfg.WorkerCount)
 	}
 	res.Name = cfg.Name
 	return &res
@@ -90,7 +90,7 @@ func (s *OshinkoUnitTestSuite) TestNoLocalDefault(c *check.C) {
         var cm *FakeConfigMapsClient = &FakeConfigMapsClient{}
 
 	defconfig := clusterconfigs.GetDefaultConfig()
-	configarg := models.NewClusterConfig{Name: clusterconfigs.Defaultname}
+	configarg := clusterconfigs.ClusterConfig{Name: clusterconfigs.Defaultname}
 	myconfig, err := clusterconfigs.GetClusterConfig(&configarg, cm)
 
 	c.Assert(err, check.IsNil)
@@ -111,7 +111,7 @@ func (s *OshinkoUnitTestSuite) TestDefaultConfig(c *check.C) {
 	c.Assert(err, check.IsNil)
 
 	// Test that with a config object containing zeroes, we get the default config
-	configarg := models.NewClusterConfig{WorkerCount: 0, MasterCount: 0}
+	configarg := clusterconfigs.ClusterConfig{WorkerCount: 0, MasterCount: 0}
 	myconfig, err = clusterconfigs.GetClusterConfig(&configarg, cm)
 	c.Assert(myconfig.MasterCount, check.Equals, defconfig.MasterCount)
 	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
@@ -128,7 +128,7 @@ func (s *OshinkoUnitTestSuite) TestGetClusterConfigNamed(c *check.C) {
 
 	// configarg will represent a config object passed in a REST
 	// request which specifies a named config but leaves counts unset
-	configarg := models.NewClusterConfig{WorkerCount: 0, MasterCount: 0}
+	configarg := clusterconfigs.ClusterConfig{WorkerCount: 0, MasterCount: 0}
 
 	// tiny should inherit the default worker count
 	cm.Create(makeConfigMap(tiny))
@@ -174,7 +174,7 @@ func (s *OshinkoUnitTestSuite) TestGetClusterConfigNamedLinefeed(c *check.C) {
 	sm := makeConfigMap(small)
 	addLineFeeds(sm)
 	cm.Create(sm)
-	configarg := models.NewClusterConfig{WorkerCount: 0, MasterCount: 0}
+	configarg := clusterconfigs.ClusterConfig{WorkerCount: 0, MasterCount: 0}
 	configarg.Name = small.Name
 
 	myconfig, err := clusterconfigs.GetClusterConfig(&configarg, cm)
@@ -193,26 +193,26 @@ func (s *OshinkoUnitTestSuite) TestGetClusterConfigArgs(c *check.C) {
 
 	defconfig := clusterconfigs.GetDefaultConfig()
 
-	configarg := models.NewClusterConfig{WorkerCount: 7, MasterCount: 0,
+	configarg := clusterconfigs.ClusterConfig{WorkerCount: 7, MasterCount: 0,
 		SparkMasterConfig: "test-master-config", SparkWorkerConfig: "test-worker-config"}
 
 	myconfig, err := clusterconfigs.GetClusterConfig(&configarg, cm)
 	c.Assert(myconfig.MasterCount, check.Equals, defconfig.MasterCount)
-	c.Assert(myconfig.WorkerCount, check.Equals, int64(7))
+	c.Assert(myconfig.WorkerCount, check.Equals, 7)
 	c.Assert(myconfig.SparkMasterConfig, check.Equals, "test-master-config")
 	c.Assert(myconfig.SparkWorkerConfig, check.Equals, "test-worker-config")
 	c.Assert(err, check.IsNil)
 
-	configarg = models.NewClusterConfig{WorkerCount: 0, MasterCount: 7}
+	configarg = clusterconfigs.ClusterConfig{WorkerCount: 0, MasterCount: 7}
 	myconfig, err = clusterconfigs.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, int64(7))
+	c.Assert(myconfig.MasterCount, check.Equals, 7)
 	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
 	c.Assert(err, check.NotNil) // master count is illegal ...
 
-	configarg = models.NewClusterConfig{WorkerCount: 7, MasterCount: 7}
+	configarg = clusterconfigs.ClusterConfig{WorkerCount: 7, MasterCount: 7}
 	myconfig, err = clusterconfigs.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, int64(7))
-	c.Assert(myconfig.WorkerCount, check.Equals, int64(7))
+	c.Assert(myconfig.MasterCount, check.Equals, 7)
+	c.Assert(myconfig.WorkerCount, check.Equals, 7)
 	c.Assert(err, check.NotNil) // master count is illegal ...
 }
 
@@ -224,22 +224,22 @@ func (s *OshinkoUnitTestSuite) TestGetClusterConfigNamedArgs(c *check.C) {
 	defconfig := clusterconfigs.GetDefaultConfig()
 
 	cm.Create(makeConfigMap(brokenMaster))
-	configarg := models.NewClusterConfig{Name: brokenMaster.Name, WorkerCount: 7, MasterCount: 1}
+	configarg := clusterconfigs.ClusterConfig{Name: brokenMaster.Name, WorkerCount: 7, MasterCount: 1}
 	myconfig, err := clusterconfigs.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, int64(1))
-	c.Assert(myconfig.WorkerCount, check.Equals, int64(7))
+	c.Assert(myconfig.MasterCount, check.Equals, 1)
+	c.Assert(myconfig.WorkerCount, check.Equals, 7)
 	c.Assert(brokenMaster.MasterCount, check.Not(check.Equals), int64(1))
 	c.Assert(err, check.IsNil)
 
-	configarg = models.NewClusterConfig{Name: brokenMaster.Name, WorkerCount: 0, MasterCount: 5}
+	configarg = clusterconfigs.ClusterConfig{Name: brokenMaster.Name, WorkerCount: 0, MasterCount: 5}
 	myconfig, err = clusterconfigs.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, int64(5))
+	c.Assert(myconfig.MasterCount, check.Equals, 5)
 	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
 	c.Assert(brokenMaster.MasterCount, check.Not(check.Equals), defconfig.WorkerCount)
 	c.Assert(err, check.NotNil) // master count is wrong
 
 	cm.Create(makeConfigMap(small))
-	configarg = models.NewClusterConfig{Name: small.Name, SparkMasterConfig: "test-master-config", SparkWorkerConfig: "test-worker-config"}
+	configarg = clusterconfigs.ClusterConfig{Name: small.Name, SparkMasterConfig: "test-master-config", SparkWorkerConfig: "test-worker-config"}
 	myconfig, err = clusterconfigs.GetClusterConfig(&configarg, cm)
 	c.Assert(myconfig.SparkMasterConfig, check.Equals, "test-master-config")
 	c.Assert(myconfig.SparkWorkerConfig, check.Equals, "test-worker-config")
@@ -258,7 +258,7 @@ func (s *OshinkoUnitTestSuite) TestGetClusterBadConfig(c *check.C) {
 
 	// configarg will represent a config object passed in a REST
 	// request which specifies a named config but leaves counts unset
-	configarg := models.NewClusterConfig{WorkerCount: 0, MasterCount: 0}
+	configarg := clusterconfigs.ClusterConfig{WorkerCount: 0, MasterCount: 0}
 
 	// brokenmaster should result in an error because the mastercount is != 1
 	cm.Create(makeConfigMap(brokenMaster))
@@ -287,7 +287,7 @@ func (s *OshinkoUnitTestSuite) TestGetClusterNoConfig(c *check.C) {
 	var cm *FakeConfigMapsClient = &FakeConfigMapsClient{}
 
 	defconfig := clusterconfigs.GetDefaultConfig()
-	configarg := models.NewClusterConfig{WorkerCount: 0, MasterCount: 0, Name: "notthere"}
+	configarg := clusterconfigs.ClusterConfig{WorkerCount: 0, MasterCount: 0, Name: "notthere"}
 
 	myconfig, err := clusterconfigs.GetClusterConfig(&configarg, cm)
 	c.Assert(myconfig.MasterCount, check.Equals, defconfig.MasterCount)
@@ -302,7 +302,7 @@ func (s *OshinkoUnitTestSuite) TestGetClusterNonInts(c *check.C) {
 
 	// configarg will represent a config object passed in a REST
 	// request which specifies a named config but leaves counts unset
-	configarg := models.NewClusterConfig{WorkerCount: 0, MasterCount: 0}
+	configarg := clusterconfigs.ClusterConfig{WorkerCount: 0, MasterCount: 0}
 
 	m := makeConfigMap(nonIntMaster)
 	m.Data["mastercount"] = "fish"
@@ -344,7 +344,7 @@ func (s *OshinkoUnitTestSuite) TestGetClusterBadElements(c *check.C) {
 	// Test that bogus config elements don't break anything
 	var cm *FakeConfigMapsClient = &FakeConfigMapsClient{}
 
-	configarg := models.NewClusterConfig{Name: small.Name, WorkerCount: 0, MasterCount: 0}
+	configarg := clusterconfigs.ClusterConfig{Name: small.Name, WorkerCount: 0, MasterCount: 0}
 
 	sm := makeConfigMap(small)
 	sm.Data["somethingelse"] = "chicken"
