@@ -7,8 +7,7 @@ import (
 	"github.com/ghodss/yaml"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/kubernetes/pkg/util/intstr"
-	"strconv"
+	"github.com/radanalyticsio/oshinko-core/clusters"
 )
 
 // NameFromCommandArgs is a utility function for commands that assume the first argument is a resource name
@@ -33,31 +32,13 @@ func prettyprint(b []byte) ([]byte, error) {
 	return out.Bytes(), err
 }
 
-func getIntValue(intString string) (int, error) {
-	if len(intString) == 0 {
-		return 0, nil
-	}
-	var newIntStr intstr.IntOrString
-	integer, err := strconv.Atoi(intString)
-	if err != nil {
-		newIntStr = intstr.FromString(intString)
-	} else {
-		newIntStr = intstr.FromInt(integer)
-	}
-	return newIntStr.IntValue(), nil
-}
-
-func ErrorString(msg string, err error) error {
-	return fmt.Errorf(msg+", %s", err)
-}
-
-func PrintOutput(format string, clusters []SparkCluster) (string, error) {
+func PrintOutput(format string, clusters []clusters.SparkCluster) error {
 	var msg string
 	tmpCluster := clusters
 	if format == "yaml" {
 		y, err := yaml.Marshal(tmpCluster)
 		if err != nil {
-			return "", err
+			return err
 		}
 		msg += string(y)
 		fmt.Printf(msg)
@@ -65,14 +46,14 @@ func PrintOutput(format string, clusters []SparkCluster) (string, error) {
 		y, err := json.Marshal(tmpCluster)
 
 		if err != nil {
-			return "", err
+			return err
 		}
 		pmsg, err := prettyprint(y)
 		if err != nil {
-			return "", err
+			return err
 		}
 		msg += string(pmsg)
 		fmt.Printf(msg)
 	}
-	return msg, nil
+	return nil
 }
