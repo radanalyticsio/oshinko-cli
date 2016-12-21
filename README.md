@@ -11,6 +11,6 @@ commands to get a list of running spark clusters
 ```bash
 
 make build
-./_output/oshinko-cli  --insecure-skip-tls-verify=true --token=$(oc whoami -t) -o json
+./_output/oshinko-cli get --insecure-skip-tls-verify=true --token=$(oc whoami -t) -o json
 
 ```
