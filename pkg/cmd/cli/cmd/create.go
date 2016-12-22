@@ -52,8 +52,8 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Com
 		},
 	}
 
-	cmd.Flags().Int("masters", 1, "Numbers of workers in spark cluster")
-	cmd.Flags().Int("workers", 1, "Numbers of workers in spark cluster")
+	cmd.Flags().Int("masters", 0, "Numbers of workers in spark cluster")
+	cmd.Flags().Int("workers", 0, "Numbers of workers in spark cluster")
 	cmd.Flags().String("masterconfigdir", defaultsparkconfdir, "Config folder for spark master")
 	cmd.Flags().String("workerconfigdir", defaultsparkconfdir, "Config folder for spark worker")
 	cmd.Flags().String("masterconfig", "", "ConfigMap name for spark master")
@@ -70,7 +70,8 @@ func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string)
 	config.MasterCount = o.MasterCount
 	config.SparkWorkerConfig = o.WorkerConfig
 	config.SparkMasterConfig = o.MasterConfig
-	cl, err := clusters.CreateCluster(o.Name, o.Project, o.Image, &config, o.Client, o.KClient)
+        config.Name = o.StoredConfig
+	_, err := clusters.CreateCluster(o.Name, o.Project, o.Image, &config, o.Client, o.KClient)
 	if err != nil {
 		return err
 	}
