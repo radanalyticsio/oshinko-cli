@@ -15,9 +15,7 @@ type CmdOptions struct {
 	WorkerCount     int    `json:"workerCount"`
 	MasterCount     int    `json:"masterCount,omitempty"`
 	MasterConfig    string `json:"sparkMasterConfig,omitempty"`
-	MasterConfigDir string `json:"masterConfigDir,omitempty"`
 	WorkerConfig    string `json:"workerConfig,omitempty"`
-	WorkerConfigDir string `json:"workerConfigDir,omitempty"`
 	StoredConfig    string `json:"storedConfig,omitempty"`
 	Verbose         bool
 	Output          string
@@ -33,8 +31,6 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	o.WorkerCount = 0
 	o.MasterCount = 0
 
-	o.MasterConfigDir = defaultsparkconfdir
-	o.WorkerConfigDir = defaultsparkconfdir
 	currentCluster, err := NameFromCommandArgs(cmd, args)
 	if err != nil {
 		return err
@@ -63,12 +59,6 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	}
 	if cmd.Flags().Lookup("image") != nil {
 		o.Image = kcmdutil.GetFlagString(cmd, "image")
-	}
-	if cmd.Flags().Lookup("masterconfigdir") != nil {
-		o.MasterConfigDir = kcmdutil.GetFlagString(cmd, "masterconfigdir")
-	}
-	if cmd.Flags().Lookup("workerconfigdir") != nil {
-		o.WorkerConfigDir = kcmdutil.GetFlagString(cmd, "workerconfigdir")
 	}
         if cmd.Flags().Lookup("storedconfig") != nil {
 		o.StoredConfig = kcmdutil.GetFlagString(cmd, "storedconfig")

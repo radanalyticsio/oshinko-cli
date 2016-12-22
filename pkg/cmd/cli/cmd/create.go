@@ -54,8 +54,6 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Com
 
 	cmd.Flags().Int("masters", 0, "Numbers of workers in spark cluster")
 	cmd.Flags().Int("workers", 0, "Numbers of workers in spark cluster")
-	cmd.Flags().String("masterconfigdir", defaultsparkconfdir, "Config folder for spark master")
-	cmd.Flags().String("workerconfigdir", defaultsparkconfdir, "Config folder for spark worker")
 	cmd.Flags().String("masterconfig", "", "ConfigMap name for spark master")
 	cmd.Flags().String("workerconfig", "", "ConfigMap name for spark worker")
 	cmd.Flags().String("storedconfig", "", "ConfigMap name for spark cluster")
