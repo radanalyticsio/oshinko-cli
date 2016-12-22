@@ -18,6 +18,7 @@ type CmdOptions struct {
 	MasterConfigDir string `json:"masterConfigDir,omitempty"`
 	WorkerConfig    string `json:"workerConfig,omitempty"`
 	WorkerConfigDir string `json:"workerConfigDir,omitempty"`
+	StoredConfig    string `json:"storedConfig,omitempty"`
 	Verbose         bool
 	Output          string
 
@@ -26,8 +27,12 @@ type CmdOptions struct {
 
 func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args []string) error {
 	o.Image = defaultImage
-	o.WorkerCount = 1
-	o.MasterCount = 1
+
+	// Pod counts will be assigned by the default config in oshinko-core,
+	// here values should be defaulted to 0
+	o.WorkerCount = 0
+	o.MasterCount = 0
+
 	o.MasterConfigDir = defaultsparkconfdir
 	o.WorkerConfigDir = defaultsparkconfdir
 	currentCluster, err := NameFromCommandArgs(cmd, args)
@@ -64,6 +69,9 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	}
 	if cmd.Flags().Lookup("workerconfigdir") != nil {
 		o.WorkerConfigDir = kcmdutil.GetFlagString(cmd, "workerconfigdir")
+	}
+        if cmd.Flags().Lookup("storedconfig") != nil {
+		o.StoredConfig = kcmdutil.GetFlagString(cmd, "storedconfig")
 	}
 	return nil
 }
