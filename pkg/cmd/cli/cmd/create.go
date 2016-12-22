@@ -11,6 +11,7 @@ import (
 	"github.com/radanalyticsio/oshinko-core/clusters"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+	"github.com/radanalyticsio/oshinko-core/clusterconfigs"
 )
 
 var (
@@ -64,8 +65,12 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Com
 }
 
 func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string) error {
-
-	_, err := clusters.CreateCluster(o.Name, o.Project, o.Image, nil, o.Client, o.KClient)
+	config := clusterconfigs.ClusterConfig{}
+	config.WorkerCount = o.WorkerCount
+	config.MasterCount = o.MasterCount
+	config.SparkWorkerConfig = o.WorkerConfig
+	config.SparkMasterConfig = o.MasterConfig
+	cl, err := clusters.CreateCluster(o.Name, o.Project, o.Image, &config, o.Client, o.KClient)
 	if err != nil {
 		return err
 	}
