@@ -9,6 +9,7 @@ import (
 	"github.com/radanalyticsio/oshinko-core/clusterconfigs"
 	"github.com/radanalyticsio/oshinko-rest/models"
 	apiclusters "github.com/radanalyticsio/oshinko-rest/restapi/operations/clusters"
+	"strings"
 )
 
 const nameSpaceMsg = "cannot determine target openshift namespace"
@@ -153,7 +154,9 @@ func DeleteClusterResponse(params apiclusters.DeleteSingleClusterParams) middlew
 	}
 
 	info, err := coreclusters.DeleteCluster(params.Name, namespace, osclient, client)
-	if err != nil {
+	if err != nil && strings.Index(err.Error(), "no such cluster") != -1 {
+		return reterr(fail(err, "No such cluster", 404))
+	} else if err != nil {
 		return reterr(fail(err, "", 409))
 	}
 	if info != "" {
@@ -238,7 +241,9 @@ func FindSingleClusterResponse(params apiclusters.FindSingleClusterParams) middl
 	}
 
 	sc, err := coreclusters.FindSingleCluster(clustername, namespace, osclient, client)
-	if err != nil {
+	if err != nil && strings.Index(err.Error(), "no such cluster") != -1 {
+		return reterr(fail(err, "No such cluster", 404))
+	} else if err != nil {
 		return reterr(fail(err, "", 409))
 	}
 
@@ -289,7 +294,9 @@ func UpdateSingleClusterResponse(params apiclusters.UpdateSingleClusterParams) m
 
 	config := assignConfig(params.Cluster.Config)
 	sc, err := coreclusters.UpdateCluster(clustername, namespace, config, osclient, client)
-	if err != nil {
+	if err != nil && strings.Index(err.Error(), "no such cluster") != -1 {
+		return reterr(fail(err, "No such cluster", 404))
+	} else if err != nil {
 		return reterr(fail(err, "", 409))
 	}
 	return apiclusters.NewUpdateSingleClusterAccepted().WithPayload(singleClusterResponse(sc))
