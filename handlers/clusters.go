@@ -17,7 +17,10 @@ const clientMsg = "unable to create an openshift client"
 
 func generalErr(err error, title, msg string, code int32) *models.ErrorResponse {
 	if err != nil {
-		msg = msg + ", err: " + err.Error()
+		if len(msg) > 0 {
+			msg = msg + ", "
+		}
+		msg = msg + "err: " + err.Error()
 	}
 	return oe.NewSingleErrorResponse(code, title, msg)
 }
@@ -155,7 +158,7 @@ func DeleteClusterResponse(params apiclusters.DeleteSingleClusterParams) middlew
 
 	info, err := coreclusters.DeleteCluster(params.Name, namespace, osclient, client)
 	if err != nil && strings.Index(err.Error(), "no such cluster") != -1 {
-		return reterr(fail(err, "No such cluster", 404))
+		return reterr(fail(err, "", 404))
 	} else if err != nil {
 		return reterr(fail(err, "", 409))
 	}
@@ -242,7 +245,7 @@ func FindSingleClusterResponse(params apiclusters.FindSingleClusterParams) middl
 
 	sc, err := coreclusters.FindSingleCluster(clustername, namespace, osclient, client)
 	if err != nil && strings.Index(err.Error(), "no such cluster") != -1 {
-		return reterr(fail(err, "No such cluster", 404))
+		return reterr(fail(err, "", 404))
 	} else if err != nil {
 		return reterr(fail(err, "", 409))
 	}
@@ -295,7 +298,7 @@ func UpdateSingleClusterResponse(params apiclusters.UpdateSingleClusterParams) m
 	config := assignConfig(params.Cluster.Config)
 	sc, err := coreclusters.UpdateCluster(clustername, namespace, config, osclient, client)
 	if err != nil && strings.Index(err.Error(), "no such cluster") != -1 {
-		return reterr(fail(err, "No such cluster", 404))
+		return reterr(fail(err, "", 404))
 	} else if err != nil {
 		return reterr(fail(err, "", 409))
 	}
