@@ -354,9 +354,9 @@ func (o *AuthOptions) GatherProjectInfo() (string,error) {
 		msg+=fmt.Sprintf( "You have access to the following projects and can switch between them with 'oc project <projectname>':\n\n")
 		for _, p := range projects.List() {
 			if o.Project == p {
-				fmt.Fprintf(o.Out, "  * %s (current)\n", p)
+				msg+=fmt.Sprintf("  * %s (current)\n", p)
 			} else {
-				fmt.Fprintf(o.Out, "  * %s\n", p)
+				msg+=fmt.Sprintf("  * %s\n", p)
 			}
 		}
 		msg+=fmt.Sprintf("\n")
