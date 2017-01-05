@@ -6,7 +6,6 @@ import (
 	osa "github.com/radanalyticsio/oshinko-rest/helpers/authentication"
 	oe "github.com/radanalyticsio/oshinko-rest/helpers/errors"
 	"github.com/radanalyticsio/oshinko-rest/helpers/info"
-	"github.com/radanalyticsio/oshinko-core/clusterconfigs"
 	"github.com/radanalyticsio/oshinko-rest/models"
 	apiclusters "github.com/radanalyticsio/oshinko-rest/restapi/operations/clusters"
 	"strings"
@@ -15,12 +14,21 @@ import (
 const nameSpaceMsg = "cannot determine target openshift namespace"
 const clientMsg = "unable to create an openshift client"
 
+var codes map[int]int32 = map[int]int32{
+	coreclusters.NoCodeAvailable: 500,
+	coreclusters.ClusterConfigCode: 409,
+	coreclusters.ClientOperationCode: 500,
+	coreclusters.ClusterIncompleteCode: 409,
+	coreclusters.NoSuchClusterCode: 404,
+	coreclusters.ComponentExistsCode: 409,
+}
+
 func generalErr(err error, title, msg string, code int32) *models.ErrorResponse {
 	if err != nil {
-		if len(msg) > 0 {
-			msg = msg + ", "
+		if msg != "" {
+			msg += ", reason: "
 		}
-		msg = msg + "err: " + err.Error()
+		msg += err.Error()
 	}
 	return oe.NewSingleErrorResponse(code, title, msg)
 }
@@ -28,6 +36,16 @@ func generalErr(err error, title, msg string, code int32) *models.ErrorResponse 
 func tostrptr(val string) *string {
 	v := val
 	return &v
+}
+
+func getErrorCode(err error) int32 {
+
+	code := coreclusters.ErrorCode(err)
+	if httpcode, ok := codes[code]; ok {
+		return httpcode
+	}
+	return 500
+
 }
 
 func singleClusterResponse(sc coreclusters.SparkCluster) *models.SingleCluster {
@@ -63,11 +81,11 @@ func singleClusterResponse(sc coreclusters.SparkCluster) *models.SingleCluster {
 	return cluster
 }
 
-func assignConfig(config *models.NewClusterConfig) *clusterconfigs.ClusterConfig {
+func assignConfig(config *models.NewClusterConfig) *coreclusters.ClusterConfig {
 	if config == nil {
 		return nil
 	}
-	result := &clusterconfigs.ClusterConfig{
+	result := &coreclusters.ClusterConfig{
 		Name: config.Name,
 		MasterCount: int(config.MasterCount),
 		WorkerCount: int(config.WorkerCount),
@@ -90,12 +108,6 @@ func CreateClusterResponse(params apiclusters.CreateClusterParams) middleware.Re
 		return generalErr(err, "cannot create cluster", msg, code)
 	}
 
-	//code := func(err error) int32 {
-	//	if strings.Index(err.Error(), "already exists") != -1 {
-	//		return 409
-	//	}
-	//	return 500
-	//}
 	const imageMsg = "cannot determine name of spark image"
 
 	clustername := *params.Cluster.Name
@@ -123,7 +135,7 @@ func CreateClusterResponse(params apiclusters.CreateClusterParams) middleware.Re
 	config := assignConfig(params.Cluster.Config)
 	sc, err := coreclusters.CreateCluster(clustername, namespace, image, config, osclient, client)
 	if err != nil {
-		return reterr(fail(err, "", 409))
+		return reterr(fail(err, "", getErrorCode(err)))
 	}
 	return apiclusters.NewCreateClusterCreated().WithLocation(sc.Href).WithPayload(singleClusterResponse(sc))
 }
@@ -157,10 +169,8 @@ func DeleteClusterResponse(params apiclusters.DeleteSingleClusterParams) middlew
 	}
 
 	info, err := coreclusters.DeleteCluster(params.Name, namespace, osclient, client)
-	if err != nil && strings.Index(err.Error(), "no such cluster") != -1 {
-		return reterr(fail(err, "", 404))
-	} else if err != nil {
-		return reterr(fail(err, "", 409))
+	if err != nil {
+		return reterr(fail(err, "", getErrorCode(err)))
 	}
 	if info != "" {
 		return reterr(fail(nil, "deletion may be incomplete: " + info, 500))
@@ -192,7 +202,7 @@ func FindClustersResponse(params apiclusters.FindClustersParams) middleware.Resp
 	}
 	scs, err := coreclusters.FindClusters(namespace, client)
 	if err != nil {
-		return reterr(fail(err, "", 409))
+		return reterr(fail(err, "", getErrorCode(err)))
 	}
 
 	// Create the payload that we're going to write into for the response
@@ -225,7 +235,7 @@ func FindSingleClusterResponse(params apiclusters.FindSingleClusterParams) middl
 
 	// Convenience wrapper for get failure
 	fail := func(err error, msg string, code int32) *models.ErrorResponse {
-		return generalErr(err, "Cannot get cluster", msg, code)
+		return generalErr(err, "cannot get cluster", msg, code)
 	}
 
 	namespace, err := info.GetNamespace()
@@ -244,10 +254,8 @@ func FindSingleClusterResponse(params apiclusters.FindSingleClusterParams) middl
 	}
 
 	sc, err := coreclusters.FindSingleCluster(clustername, namespace, osclient, client)
-	if err != nil && strings.Index(err.Error(), "no such cluster") != -1 {
-		return reterr(fail(err, "", 404))
-	} else if err != nil {
-		return reterr(fail(err, "", 409))
+	if err != nil {
+		return reterr(fail(err, "", getErrorCode(err)))
 	}
 
 	return apiclusters.NewFindSingleClusterOK().WithPayload(singleClusterResponse(sc))
@@ -297,10 +305,8 @@ func UpdateSingleClusterResponse(params apiclusters.UpdateSingleClusterParams) m
 
 	config := assignConfig(params.Cluster.Config)
 	sc, err := coreclusters.UpdateCluster(clustername, namespace, config, osclient, client)
-	if err != nil && strings.Index(err.Error(), "no such cluster") != -1 {
-		return reterr(fail(err, "", 404))
-	} else if err != nil {
-		return reterr(fail(err, "", 409))
+	if err != nil {
+		return reterr(fail(err, "", getErrorCode(err)))
 	}
 	return apiclusters.NewUpdateSingleClusterAccepted().WithPayload(singleClusterResponse(sc))
 }

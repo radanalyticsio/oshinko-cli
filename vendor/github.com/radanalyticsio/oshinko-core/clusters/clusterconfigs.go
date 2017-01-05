@@ -1,12 +1,10 @@
-package clusterconfigs
+package clusters
 
 import (
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
-	"k8s.io/kubernetes/pkg/api"
 )
 
 type ClusterConfig struct {
@@ -32,8 +30,9 @@ const allowMissing = false
 
 const MasterCountMustBeOne = "cluster configuration must have a masterCount of 1"
 const WorkerCountMustBeAtLeastOne = "cluster configuration may not have a workerCount less than 1"
-const NamedConfigDoesNotExist = "camed config \"%s\" does not exist"
-const ErrorWhileProcessing = "error while processing %s: %s"
+const ErrorWhileProcessing = "'%s', %s"
+const NamedConfigDoesNotExist = "named config '%s' does not exist"
+
 
 // This function is meant to support testability
 func GetDefaultConfig() ClusterConfig {
@@ -59,9 +58,9 @@ func assignConfig(res *ClusterConfig, src ClusterConfig) {
 func checkConfiguration(config ClusterConfig) error {
 	var err error
 	if config.MasterCount != 1 {
-		err = errors.New(MasterCountMustBeOne)
+		err = NewClusterError(MasterCountMustBeOne, ClusterConfigCode)
 	} else if config.WorkerCount < 1 {
-		err = errors.New(WorkerCountMustBeAtLeastOne)
+		err = NewClusterError(WorkerCountMustBeAtLeastOne, ClusterConfigCode)
 	}
 	return err
 }
@@ -70,7 +69,7 @@ func checkConfiguration(config ClusterConfig) error {
 func getInt(value, configmapname string) (int, error) {
 	i, err := strconv.Atoi(strings.Trim(value, "\n"))
 	if err != nil {
-		err = errors.New(fmt.Sprintf(ErrorWhileProcessing, configmapname, errors.New("expected integer")))
+		err = NewClusterError(fmt.Sprintf(ErrorWhileProcessing, configmapname, "expected integer"), ClusterConfigCode)
 	}
 	return i, err
 }
@@ -95,18 +94,22 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 	return err
 }
 
-func checkForConfigMap(name string, failOnMissing bool, cm kclient.ConfigMapsInterface) (*api.ConfigMap, error) {
-	cmap, err := cm.Get(name)
-	if (cmap == nil || len(cmap.Data) == 0) && failOnMissing == false {
-		return cmap, nil
-	}
-	return cmap, err
-}
-
 func readConfig(name string, res *ClusterConfig, failOnMissing bool, cm kclient.ConfigMapsInterface) (err error) {
-        cmap, err := checkForConfigMap(name, failOnMissing, cm)
+
+	cmap, err := cm.Get(name)
+	if err != nil {
+		if strings.Index(err.Error(), "not found") != -1 {
+			if !failOnMissing {
+				err = nil
+			} else {
+				err = NewClusterError(fmt.Sprintf(NamedConfigDoesNotExist, name), ClusterConfigCode)
+			}
+		} else {
+			err = NewClusterError(err.Error(), ClientOperationCode)
+		}
+	}
 	if err == nil && cmap != nil {
-                for n, v := range (cmap.Data) {
+		for n, v := range (cmap.Data) {
 			err = process(res, n, v, name)
 			if err != nil {
 				break
