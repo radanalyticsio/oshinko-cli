@@ -6,10 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"errors"
 
 	oclient "github.com/openshift/origin/pkg/client"
-	"github.com/radanalyticsio/oshinko-core/clusterconfigs"
 	ocon "github.com/radanalyticsio/oshinko-core/clusters/containers"
 	odc "github.com/radanalyticsio/oshinko-core/clusters/deploymentconfigs"
 	opt "github.com/radanalyticsio/oshinko-core/clusters/podtemplates"
@@ -21,12 +19,17 @@ import (
 	"k8s.io/kubernetes/pkg/util/sets"
 )
 
-const clusterConfigMsg = "cluster configuration error"
-const masterConfigMsg = "error processing spark master configuration value"
-const workerConfigMsg = "error processing spark worker configuration value"
-const lookupMsg = "error while looking up cluster"
-const replMsgWorker = "cannot find replication controller for spark workers"
-const replMsgMaster = "cannot find replication controller for spark master"
+const clusterConfigMsg = "invalid cluster configuration"
+const missingConfigMsg = "unable to find spark configuration '%s'"
+const findDepConfigMsg = "unable to find deployment configs"
+const createDepConfigMsg = "unable to create deployment config '%s'"
+const replMsgWorker = "unable to find replication controller for spark workers"
+const replMsgMaster = "unable to find replication controller for spark master"
+const masterSrvMsg = "unable to create spark master service endpoint"
+const mastermsg = "unable to find spark masters"
+const updateReplMsg = "unable to update replication controller for spark workers"
+const noSuchClusterMsg = "no such cluster '%s'"
+const podListMsg = "unable to retrive pod list"
 
 const typeLabel = "oshinko-type"
 const clusterLabel = "oshinko-cluster"
@@ -45,7 +48,6 @@ const sparkconfdir = "/etc/oshinko-spark-configs"
 // The suffix to add to the spark master hostname (clustername) for the web service
 const webServiceSuffix = "-ui"
 
-
 type SparkPod struct {
 	IP string
 	Status string
@@ -62,15 +64,19 @@ type SparkCluster struct {
 	Status          string `json:"status"`
 	WorkerCount     int    `json:"workerCount"`
 	MasterCount     int    `json:"masterCount,omitempty"`
-	Config          clusterconfigs.ClusterConfig
+	Config          ClusterConfig
 	Pods		[]SparkPod
 }
 
-func generalErr(err error, msg string) error {
+func generalErr(err error, msg string, code int) ClusterError {
 	if err != nil {
-		msg = msg + ", error: " + err.Error()
+		if msg == "" {
+			msg = "error: " + err.Error()
+		} else {
+			msg = msg + ", error: " + err.Error()
+		}
 	}
-	return errors.New(msg)
+	return NewClusterError(msg, code)
 }
 
 func makeSelector(otype string, clustername string) kapi.ListOptions {
@@ -226,11 +232,14 @@ func service(name string,
 }
 
 func checkForConfigMap(name string, cm kclient.ConfigMapsInterface) error {
-	cmap, err := cm.Get(name)
-	if err == nil && cmap == nil {
-		err = fmt.Errorf("ConfigMap '%s' not found", name)
+	_, err := cm.Get(name)
+	if err != nil {
+		if strings.Index(err.Error(), "not found") != -1 {
+			return generalErr(err, fmt.Sprintf(missingConfigMsg, name), ClusterConfigCode)
+		}
+		return generalErr(nil, fmt.Sprintf(missingConfigMsg, name), ClientOperationCode)
 	}
-	return err
+	return nil
 }
 
 func countWorkers(client kclient.PodInterface, clustername string) (int, *kapi.PodList, error) {
@@ -247,46 +256,49 @@ func countWorkers(client kclient.PodInterface, clustername string) (int, *kapi.P
 }
 
 // CreateClusterResponse create a cluster and return the representation
-func CreateCluster(clustername, namespace, sparkimage string, config *clusterconfigs.ClusterConfig, osclient *oclient.Client, client *kclient.Client) (SparkCluster, error) {
+func CreateCluster(clustername, namespace, sparkimage string, config *ClusterConfig, osclient *oclient.Client, client *kclient.Client) (SparkCluster, error) {
 
-	const mDepConfigMsg = "unable to create master deployment configuration"
-	const wDepConfigMsg = "unable to create worker deployment configuration"
-	const masterSrvMsg = "unable to create spark master service endpoint"
 	var masterconfdir string
 	var workerconfdir string
 	var result SparkCluster = SparkCluster{}
 
+	createCode := func(err error) int {
+		if err != nil && strings.Index(err.Error(), "already exists") != -1 {
+			return ComponentExistsCode
+		}
+		return ClientOperationCode
+	}
+
 	masterhost := clustername
 
 	// Copy any named config referenced and update it with any explicit config values
-	finalconfig, err := clusterconfigs.GetClusterConfig(config, client.ConfigMaps(namespace))
+	finalconfig, err := GetClusterConfig(config, client.ConfigMaps(namespace))
 	if err != nil {
-		return result, generalErr(err, clusterConfigMsg)
+		return result, generalErr(err, clusterConfigMsg, ErrorCode(err))
 	}
 	workercount := int(finalconfig.WorkerCount)
 
 	// Check if finalconfig contains the names of ConfigMaps to use for spark
 	// configuration. If so they must exist, and the SPARK_CONF_DIR env must be
 	// set correctly
+	cm := client.ConfigMaps(namespace)
 	if finalconfig.SparkMasterConfig != "" {
-		err := checkForConfigMap(finalconfig.SparkMasterConfig, client.ConfigMaps(namespace))
+		err := checkForConfigMap(finalconfig.SparkMasterConfig, cm)
 		if err != nil {
-			return result, generalErr(err, masterConfigMsg)
+			return result, err
 		}
 		masterconfdir = sparkconfdir
 	}
 
 	if finalconfig.SparkWorkerConfig != "" {
-		err := checkForConfigMap(finalconfig.SparkWorkerConfig, client.ConfigMaps(namespace))
+		err := checkForConfigMap(finalconfig.SparkWorkerConfig, cm)
 		if err != nil {
-			return result, generalErr(err, workerConfigMsg)
+			return result, err
 		}
 		workerconfdir = sparkconfdir
 	}
 
-
 	// Create the master deployment config
-	dcc := osclient.DeploymentConfigs(namespace)
 	masterdc := sparkMaster(namespace, sparkimage, clustername, masterconfdir, finalconfig.SparkMasterConfig)
 
 	// Create the services that will be associated with the master pod
@@ -305,15 +317,16 @@ func CreateCluster(clustername, namespace, sparkimage string, config *clustercon
 	workerdc := sparkWorker(namespace, sparkimage, workercount, clustername, workerconfdir, finalconfig.SparkWorkerConfig)
 
 	// Launch all of the objects
+	dcc := osclient.DeploymentConfigs(namespace)
 	_, err = dcc.Create(&masterdc.DeploymentConfig)
 	if err != nil {
-		return result, generalErr(err, mDepConfigMsg)
+		return result, generalErr(err, fmt.Sprintf(createDepConfigMsg, masterdc.Name), createCode(err))
 	}
 	_, err = dcc.Create(&workerdc.DeploymentConfig)
 	if err != nil {
 		// Since we created the master deployment config, try to clean up
 		DeleteCluster(clustername, namespace, osclient, client)
-		return result, generalErr(err, wDepConfigMsg)
+		return result, generalErr(err, fmt.Sprintf(createDepConfigMsg, workerdc.Name), createCode(err))
 	}
 
 	sc := client.Services(namespace)
@@ -321,7 +334,7 @@ func CreateCluster(clustername, namespace, sparkimage string, config *clustercon
 	if err != nil {
 		// Since we create the master and workers, try to clean up
 		DeleteCluster(clustername, namespace, osclient, client)
-		return result, generalErr(err, masterSrvMsg)
+		return result, generalErr(err, masterSrvMsg, createCode(err))
 	}
 
 	// Note, if spark webui service fails for some reason we can live without it
@@ -457,7 +470,7 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 	// even though the cluster may not have been fully complete.
 	// If we didn't find any trace of a cluster, then call it an error
 	if !foundSomething {
-		return "", generalErr(nil, fmt.Sprintf("no such cluster \"%s\"", clustername))
+		return "", generalErr(nil, fmt.Sprintf(noSuchClusterMsg, clustername), NoSuchClusterCode)
 	}
 	return strings.Join(info, ", "), nil
 }
@@ -484,10 +497,10 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 	// we use to create a cluster
 	ok, err := checkForDeploymentConfigs(osclient.DeploymentConfigs(namespace), clustername)
 	if err != nil {
-		return result, generalErr(err, lookupMsg)
+		return result, generalErr(err, findDepConfigMsg, ClientOperationCode)
 	}
 	if !ok {
-		return result, generalErr(nil, fmt.Sprintf("no such cluster \"%s\"", clustername))
+		return result, generalErr(nil, fmt.Sprintf(noSuchClusterMsg, clustername), NoSuchClusterCode)
 	}
 
 	pc := client.Pods(namespace)
@@ -495,12 +508,16 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 
 	rcc := client.ReplicationControllers(namespace)
 	mrepl, err := getReplController(rcc, clustername, masterType)
-	if err != nil || mrepl == nil {
-		return result, generalErr(err, replMsgMaster)
+	if err != nil {
+		return result, generalErr(err, replMsgMaster, ClientOperationCode)
+	} else if mrepl == nil {
+		return result, generalErr(err, replMsgMaster, ClusterIncompleteCode)
 	}
 	wrepl, err := getReplController(rcc, clustername, workerType)
-	if err != nil || wrepl == nil {
-		return result, generalErr(err, replMsgWorker)
+	if err != nil {
+		return result, generalErr(err, replMsgWorker, ClientOperationCode)
+	} else if wrepl == nil {
+		return result, generalErr(err, replMsgWorker, ClusterIncompleteCode)
 	}
 	// TODO (tmckay) we should add the spark master and worker configuration values here.
 	// the most likely thing to do is store them in an annotation
@@ -525,7 +542,7 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 	selectorlist := makeSelector(masterType, clustername)
 	pods, err := pc.List(selectorlist)
 	if err != nil {
-		return result, err
+		return result, generalErr(err, podListMsg, ClientOperationCode)
 	}
 	for i := range pods.Items {
 		result.Pods = append(result.Pods, addpod(pods.Items[i]))
@@ -533,7 +550,7 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 
 	_, workers, err := countWorkers(pc, clustername)
 	if err != nil {
-		return result, err
+		return result, generalErr(err, podListMsg, ClientOperationCode)
 	}
 	for i := range workers.Items {
 		result.Pods = append(result.Pods, addpod(workers.Items[i]))
@@ -542,10 +559,10 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 	return result, nil
 }
 
-// FindClustersResponse find a cluster and return its representation
+// FindClusters find a cluster and return its representation
 func FindClusters(namespace string, client *kclient.Client) ([]SparkCluster, error) {
 
-	const mastermsg = "unable to find spark masters"
+
 	var result []SparkCluster = []SparkCluster{}
 
 	pc := client.Pods(namespace)
@@ -558,7 +575,7 @@ func FindClusters(namespace string, client *kclient.Client) ([]SparkCluster, err
 	// Get all of the master pods
 	pods, err := pc.List(makeSelector(masterType, ""))
 	if err != nil {
-		return result, generalErr(err, mastermsg)
+		return result, generalErr(err, mastermsg, ClientOperationCode)
 	}
 
 	// TODO should we do something else to find the clusters, like count deployment configs?
@@ -576,7 +593,7 @@ func FindClusters(namespace string, client *kclient.Client) ([]SparkCluster, err
 			citem.Href = "/clusters/" + clustername
 
 			// Note, we do not report an error here since we are
-			// reporting on multiple clusters. Instead cnt will be -1.
+			// reporting on multiple clusterconfigs. Instead cnt will be -1.
 			cnt, _, _ := countWorkers(pc, clustername)
 
 			// TODO we only want to count running pods (not terminating)
@@ -612,13 +629,12 @@ func getReplController(client kclient.ReplicationControllerInterface, clusternam
 			newestRepl = repls.Items[i]
 		}
 	}
-	return &newestRepl, err
+	return &newestRepl, nil
 }
 
 // UpdateSingleClusterResponse update a cluster and return the new representation
-func UpdateCluster(name, namespace string, config *clusterconfigs.ClusterConfig, osclient *oclient.Client, client *kclient.Client) (SparkCluster, error) {
+func UpdateCluster(name, namespace string, config *ClusterConfig, osclient *oclient.Client, client *kclient.Client) (SparkCluster, error) {
 
-	const updateReplMsg = "unable to update replication controller for spark workers"
 	var result SparkCluster = SparkCluster{}
 	clustername := name
 
@@ -628,16 +644,16 @@ func UpdateCluster(name, namespace string, config *clusterconfigs.ClusterConfig,
 	// we use to create a cluster
 	ok, err := checkForDeploymentConfigs(osclient.DeploymentConfigs(namespace), clustername)
 	if err != nil {
-		return result, generalErr(err, lookupMsg)
+		return result, generalErr(err, findDepConfigMsg, ClientOperationCode)
 	}
 	if !ok {
-		return result, generalErr(nil, fmt.Sprintf("no such cluster \"%s\"", clustername))
+		return result, generalErr(nil, fmt.Sprintf(noSuchClusterMsg, clustername), NoSuchClusterCode)
 	}
 
 	// Copy any named config referenced and update it with any explicit config values
-	finalconfig, err := clusterconfigs.GetClusterConfig(config, client.ConfigMaps(namespace))
+	finalconfig, err := GetClusterConfig(config, client.ConfigMaps(namespace))
 	if err != nil {
-		return result, generalErr(err, clusterConfigMsg)
+		return result, generalErr(err, clusterConfigMsg, ErrorCode(err))
 	}
 	workercount := int(finalconfig.WorkerCount)
 
@@ -648,8 +664,10 @@ func UpdateCluster(name, namespace string, config *clusterconfigs.ClusterConfig,
 
 	rcc := client.ReplicationControllers(namespace)
 	repl, err := getReplController(rcc, clustername, workerType)
-	if err != nil || repl == nil {
-		return result, generalErr(err, replMsgWorker)
+	if err != nil {
+		return result, generalErr(err, replMsgWorker, ClientOperationCode)
+	} else if repl == nil {
+		return result, generalErr(err, replMsgWorker, ClusterIncompleteCode)
 	}
 
 	// If the current replica count does not match the request, update the replication controller
@@ -657,7 +675,7 @@ func UpdateCluster(name, namespace string, config *clusterconfigs.ClusterConfig,
 		repl.Spec.Replicas = workercount
 		_, err = rcc.Update(repl)
 		if err != nil {
-			return result, generalErr(err, updateReplMsg)
+			return result, generalErr(err, updateReplMsg, ClientOperationCode)
 		}
 	}
 
