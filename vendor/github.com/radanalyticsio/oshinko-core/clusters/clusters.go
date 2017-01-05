@@ -593,7 +593,7 @@ func FindClusters(namespace string, client *kclient.Client) ([]SparkCluster, err
 			citem.Href = "/clusters/" + clustername
 
 			// Note, we do not report an error here since we are
-			// reporting on multiple clusterconfigs. Instead cnt will be -1.
+			// reporting on multiple clusters. Instead cnt will be -1.
 			cnt, _, _ := countWorkers(pc, clustername)
 
 			// TODO we only want to count running pods (not terminating)
