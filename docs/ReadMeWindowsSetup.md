@@ -31,4 +31,4 @@ The steps are relatively simple. You need to have a user account on OpenShift.
 
     $ oc new-app --template oshinko -p OSHINKO_SERVER_IMAGE=radanalyticsio/oshinko-rest -p OSHINKO_CLUSTER_IMAGE=radanalyticsio/openshift-spark -p OSHINKO_WEB_IMAGE=radanalyticsio/oshinko-webui
 
-8. Now if you go into the web interface, go ahead and click on the URL for the Oshinko Web-UI. This brings you to the Oshinko web interface. Go ahead click deploy, pick a name for the cluster, and then set the number of workers you want in addition to the master.
+8. Now if you go into the web interface, go ahead and click on the URL for the Oshinko Web-UI. This brings you to the Oshinko web interface. Click deploy, pick a name for the cluster, and then set the number of workers you want in addition to the master.
