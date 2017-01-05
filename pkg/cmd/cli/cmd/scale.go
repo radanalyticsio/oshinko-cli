@@ -9,7 +9,6 @@ import (
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	"github.com/radanalyticsio/oshinko-core/clusters"
-	"github.com/radanalyticsio/oshinko-core/clusterconfigs"
 )
 
 func NewCmdScale(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) *cobra.Command {
@@ -45,7 +44,7 @@ func CmdScale(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Comm
 }
 
 func (o *CmdOptions) RunScale() error {
-	config := clusterconfigs.ClusterConfig{}
+	config := clusters.ClusterConfig{}
 	config.WorkerCount = o.WorkerCount
 	_, err := clusters.UpdateCluster(o.Name, o.Project, &config, o.Client, o.KClient)
 	if err != nil {
