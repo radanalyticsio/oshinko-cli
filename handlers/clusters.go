@@ -8,7 +8,6 @@ import (
 	"github.com/radanalyticsio/oshinko-rest/helpers/info"
 	"github.com/radanalyticsio/oshinko-rest/models"
 	apiclusters "github.com/radanalyticsio/oshinko-rest/restapi/operations/clusters"
-	"strings"
 )
 
 const nameSpaceMsg = "cannot determine target openshift namespace"
