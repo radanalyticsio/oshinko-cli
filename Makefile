@@ -5,6 +5,9 @@ LOCAL_IMAGE=project/oshinko-cli
 build:
 	scripts/build.sh build
 
+build-extended:
+	scripts/build.sh build-extended
+
 image:
 	sudo docker build -t $(LOCAL_IMAGE) .
 

@@ -1,4 +1,4 @@
-package cmd
+package common
 
 import (
 	"bytes"
@@ -7,7 +7,7 @@ import (
 	"github.com/ghodss/yaml"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"github.com/radanalyticsio/oshinko-core/clusters"
+	//"github.com/radanalyticsio/oshinko-core/clusters"
 )
 
 // NameFromCommandArgs is a utility function for commands that assume the first argument is a resource name
@@ -32,7 +32,7 @@ func prettyprint(b []byte) ([]byte, error) {
 	return out.Bytes(), err
 }
 
-func PrintOutput(format string, clusters []clusters.SparkCluster) error {
+func PrintOutput(format string, clusters interface {}) error {
 	var msg string
 	tmpCluster := clusters
 	if format == "yaml" {

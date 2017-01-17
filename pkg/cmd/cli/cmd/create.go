@@ -1,26 +1,17 @@
-package cmd
+package cli
 
 import (
 	"fmt"
 	"io"
 
-	"github.com/renstrom/dedent"
 	"github.com/spf13/cobra"
 
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-core/clusters"
-	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
+	"github.com/radanalyticsio/oshinko-cli/pkg/auth"
+	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/common"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"github.com/radanalyticsio/oshinko-core/clusterconfigs"
-)
-
-var (
-	sparkClusterLong = dedent.Dedent(`
-		Create a spark cluster with the specified name.`)
-
-	sparkClusterExample = dedent.Dedent(`
-		  # Create a new spark cluster named my-spark-cluster
-		  $ oshinko create cluster my-spark-cluster`)
 )
 
 func NewCmdCreate(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) *cobra.Command {
@@ -34,7 +25,7 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Com
 		Out:    out,
 	}
 	options := &CmdOptions{
-		AuthOptions: *authOptions,
+		CommonOptions: common.CommonOptions{AuthOptions: *authOptions},
 	}
 
 	cmd := &cobra.Command{

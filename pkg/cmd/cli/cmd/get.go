@@ -1,4 +1,4 @@
-package cmd
+package cli
 
 import (
 	"fmt"
@@ -6,7 +6,8 @@ import (
 	"io"
 	"github.com/radanalyticsio/oshinko-core/clusters"
 	osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
-	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
+	"github.com/radanalyticsio/oshinko-cli/pkg/auth"
+	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/common"
 	kapierrors "k8s.io/kubernetes/pkg/api/errors"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"os"
@@ -66,7 +67,7 @@ func (o *CmdOptions) RunClusters() error {
 			}
 		}
 		if o.Output != "" {
-			PrintOutput(o.Output, clist)
+			common.PrintOutput(o.Output, clist)
 		}
 	}
 	fmt.Println(msg)
@@ -79,8 +80,10 @@ func NewCmdGet(fullName string, f *osclientcmd.Factory, reader io.Reader, out io
 		Out:    out,
 	}
 	options := &CmdOptions{
-		AuthOptions: *authOptions,
-		Verbose:     false,
+		CommonOptions: common.CommonOptions{
+			AuthOptions: *authOptions,
+			Verbose: false,
+		},
 	}
 
 	cmds := &cobra.Command{

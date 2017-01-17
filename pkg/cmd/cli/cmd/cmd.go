@@ -1,29 +1,31 @@
-package cmd
+package cli
 
 import (
-	"fmt"
 	osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
-	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
+	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/common"
 	"github.com/spf13/cobra"
-	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 )
 
 type CmdOptions struct {
-	Name            string `json:"name,omitempty"`
+
 	Image           string `json:"image"`
 	WorkerCount     int    `json:"workerCount"`
 	MasterCount     int    `json:"masterCount,omitempty"`
 	MasterConfig    string `json:"sparkMasterConfig,omitempty"`
 	WorkerConfig    string `json:"workerConfig,omitempty"`
 	StoredConfig    string `json:"storedConfig,omitempty"`
-	Verbose         bool
-	Output          string
 
-	auth.AuthOptions
+	common.CommonOptions
+
 }
 
 func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args []string) error {
+
+	if err := o.CommonOptions.Complete(f, cmd, args); err != nil {
+		kcmdutil.CheckErr(kcmdutil.UsageError(cmd, err.Error()))
+	}
+
 	o.Image = defaultImage
 
 	// Pod counts will be assigned by the default config in oshinko-core,
@@ -31,26 +33,6 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	o.WorkerCount = 0
 	o.MasterCount = 0
 
-	currentCluster, err := NameFromCommandArgs(cmd, args)
-	if err != nil {
-		return err
-	}
-	o.Name = currentCluster
-	if err := o.AuthOptions.Complete(f, cmd, args); err != nil {
-		kcmdutil.CheckErr(kcmdutil.UsageError(cmd, err.Error()))
-	}
-	if err := o.GatherInfo(); err != nil {
-		return err
-	}
-	if cmd.Flags().Lookup("verbose") != nil {
-		o.Verbose = kcmdutil.GetFlagBool(cmd, "verbose")
-	}
-	if cmd.Flags().Lookup("output") != nil {
-		o.Output = kcmdutil.GetFlagString(cmd, "output")
-		if o.Output != "yaml" || o.Output != "json" {
-			cmdutil.UsageError(cmd, "INVALID output format only yaml|json allowed")
-		}
-	}
 	if cmd.Flags().Lookup("workers") != nil {
 		o.WorkerCount = kcmdutil.GetFlagInt(cmd, "workers")
 	}
@@ -62,24 +44,6 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	}
         if cmd.Flags().Lookup("storedconfig") != nil {
 		o.StoredConfig = kcmdutil.GetFlagString(cmd, "storedconfig")
-	}
-	return nil
-}
-
-func (o *CmdOptions) GatherInfo() error {
-	var msg string
-	var err error
-	if msg, err = o.AuthOptions.GatherAuthInfo(); err != nil {
-		return err
-	}
-	if o.Verbose {
-		fmt.Printf(msg)
-	}
-	if msg, err = o.AuthOptions.GatherProjectInfo(); err != nil {
-		return err
-	}
-	if o.Verbose {
-		fmt.Printf(msg)
 	}
 	return nil
 }
