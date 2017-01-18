@@ -6,6 +6,7 @@ import (
 	"runtime"
 
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli"
+	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/common"
 	// install all APIs
 	_ "github.com/openshift/origin/pkg/api/install"
 	_ "k8s.io/kubernetes/pkg/api/install"
@@ -20,7 +21,7 @@ func main() {
 	}
 
 	basename := filepath.Base(os.Args[0])
-	command := cli.CommandFor(basename)
+	command := common.CommandFor(basename, cli.NewCommandCLI)
 	if err := command.Execute(); err != nil {
 		os.Exit(1)
 	}
