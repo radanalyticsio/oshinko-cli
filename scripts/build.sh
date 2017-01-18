@@ -16,11 +16,19 @@ TAG="${GIT_TAG}-${GIT_COMMIT}"
 
 APP=oshinko-cli
 
-if [ $1 = build ]; then
+CMD=$1
+if [ $CMD = build ]; then
+   TAGS="-tags standard"
+elif [ $CMD = extended ]; then
+   TAGS="-tags extended"
+   CMD="build"
+fi
+
+if [ $CMD = build ]; then
     OUTPUT_FLAG="-o _output/oshinko-cli"
 fi
 
-if [ $1 = test ]; then
+if [ $CMD = test ]; then
     TARGET=./tests
     GO_OPTIONS=-v
 else
@@ -28,7 +36,7 @@ else
 fi
 
 #-instrument "$PROJECT/pkg/cmd/cli/cmd,$PROJECT/pkg/cmd/cli/cluster,$PROJECT/pkg/cmd/cli"
-if [ $1 = debug ]; then
+if [ $CMD = debug ]; then
     godebug build  -o _output/oshinko-cli ./cmd/oshinko
 fi
 
@@ -36,8 +44,8 @@ fi
 # 1.5 is still in use.
 export GO15VENDOREXPERIMENT=1
 
-if [ $1 = build ]; then
-    go $1 $GO_OPTIONS -ldflags \
+if [ $CMD = build ]; then
+    go $CMD $GO_OPTIONS $TAGS -ldflags \
     "-X $PROJECT/version.tag=$TAG -X $PROJECT/version.appName=$APP" \
     $OUTPUT_FLAG $TARGET
 fi
