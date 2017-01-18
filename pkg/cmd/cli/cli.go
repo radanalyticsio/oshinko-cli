@@ -41,7 +41,7 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 	}
 
 	f := clientcmd.New(cmds.PersistentFlags())
-	groups := GetCommandGroups(fullName, f, in, out)
+	groups, firstcmd := GetCommandGroups(fullName, f, in, out)
 	groups.Add(cmds)
 	changeSharedFlagDefaults(cmds)
 
@@ -50,7 +50,7 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 	}
 
 	templates.ActsAsRootCommand(cmds, filters, groups...).
-		ExposeFlags(groups[0].Commands[0], "server", "client-certificate",
+		ExposeFlags(firstcmd, "server", "client-certificate",
 		"client-key", "certificate-authority", "insecure-skip-tls-verify", "token")
 
 	cmds.AddCommand(NewCmdOptions(out))
