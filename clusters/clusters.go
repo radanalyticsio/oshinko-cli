@@ -135,7 +135,7 @@ func makeEnvVars(clustername, sparkconfdir string) []kapi.EnvVar {
 	envs = append(envs, kapi.EnvVar{Name: "OSHINKO_REST_HOST", Value: os.Getenv("OSHINKO_REST_SERVICE_HOST")})
 	envs = append(envs, kapi.EnvVar{Name: "OSHINKO_REST_PORT", Value: os.Getenv("OSHINKO_REST_SERVICE_PORT")})
 	if sparkconfdir != "" {
-		envs = append(envs, kapi.EnvVar{Name: "SPARK_CONF_DIR", Value: sparkconfdir})
+		envs = append(envs, kapi.EnvVar{Name: "UPDATE_SPARK_CONF_DIR", Value: sparkconfdir})
 	}
 
 	return envs
@@ -279,8 +279,9 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 	workercount := int(finalconfig.WorkerCount)
 
 	// Check if finalconfig contains the names of ConfigMaps to use for spark
-	// configuration. If so they must exist, and the SPARK_CONF_DIR env must be
-	// set correctly
+	// configuration. If so they must exist. The ConfigMaps will be mounted
+	// as volumes on spark pods and the path stored in the environment
+	// variable UPDATE_SPARK_CONF_DIR
 	cm := client.ConfigMaps(namespace)
 	if finalconfig.SparkMasterConfig != "" {
 		err := checkForConfigMap(finalconfig.SparkMasterConfig, cm)
