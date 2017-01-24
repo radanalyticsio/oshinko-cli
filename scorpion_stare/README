@@ -8,13 +8,13 @@ $ oc new-project mynewproject
 
 # Create the oshinko service account
 
-oc create sa oshinko
+$ oc create sa oshinko
 
 # Set permissions
 
 $ oc policy add-role-to-user admin system:serviceaccount:mynewproject:oshinko
 
-# Deploy oshinko-rest in the project (to server scorpion stare)
+# Deploy oshinko-rest in the project (only to serve scorpion stare)
 
 $ oc process -f oshinko.yaml | oc create -f -
 
@@ -22,6 +22,6 @@ $ oc process -f oshinko.yaml | oc create -f -
 
 $ ./make_stare_configs.sh
 
-# Create a cluster (assuming the oshinko-cli binary is in the same dir):
+# Create a cluster (assuming the oshinko-cli binary has been built and is in the same dir):
 
 $ ./cluster.sh mynewcluster
