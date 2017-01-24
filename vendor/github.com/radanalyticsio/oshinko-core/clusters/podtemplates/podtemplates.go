@@ -46,19 +46,27 @@ func (pt *OPodTemplateSpec) Containers(cntnrs ...*containers.OContainer) *OPodTe
 	return pt
 }
 
-func (pt *OPodTemplateSpec) SetConfigMapVolume(configmap string) *OPodTemplateSpec {
+func (pt *OPodTemplateSpec) setVolume(name string, vsource kapi.VolumeSource) *OPodTemplateSpec {
 	if pt.Spec.Volumes == nil {
 		pt.Spec.Volumes = []kapi.Volume{}
 	}
-
-	cm := kapi.ConfigMapVolumeSource{}
-	cm.LocalObjectReference.Name = configmap
-
-	// This is the source for the volume, there are lots of different kinds.
-	// We just need a pointer to the configmap source
-	vsource := kapi.VolumeSource{ConfigMap: &cm}
-
-	v := kapi.Volume{Name: configmap, VolumeSource: vsource}
-	pt.Spec.Volumes = append(pt.Spec.Volumes, v)
+	pt.Spec.Volumes = append(pt.Spec.Volumes, kapi.Volume{Name: name, VolumeSource: vsource})
 	return pt
+}
+
+func (pt *OPodTemplateSpec) SetConfigMapVolume(configmap string) *OPodTemplateSpec {
+
+	cm := kapi.ConfigMapVolumeSource{
+		LocalObjectReference: kapi.LocalObjectReference{Name: configmap},
+		Items: []kapi.KeyToPath{},
+	}
+	vsource := kapi.VolumeSource{ConfigMap: &cm}
+	return pt.setVolume(configmap, vsource)
+}
+
+func (pt *OPodTemplateSpec) SetEmptyDirVolume(name string) *OPodTemplateSpec {
+
+	vm := kapi.EmptyDirVolumeSource{Medium: kapi.StorageMediumDefault}
+	vsource := kapi.VolumeSource{EmptyDir: &vm}
+	return pt.setVolume(name, vsource)
 }

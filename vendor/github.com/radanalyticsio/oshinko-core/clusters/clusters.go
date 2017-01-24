@@ -37,6 +37,7 @@ const clusterLabel = "oshinko-cluster"
 const workerType = "worker"
 const masterType = "master"
 const webuiType = "webui"
+const metricsType = "metrics"
 
 const masterPortName = "spark-master"
 const masterPort = 7077
@@ -47,6 +48,7 @@ const sparkconfdir = "/etc/oshinko-spark-configs"
 
 // The suffix to add to the spark master hostname (clustername) for the web service
 const webServiceSuffix = "-ui"
+const metricsServiceSuffix = "-metrics"
 
 type SparkPod struct {
 	IP string
@@ -187,7 +189,74 @@ func sparkWorker(namespace string,
 	return dc.PodTemplateSpec(pt.Containers(cont))
 }
 
-func sparkMaster(namespace, image, clustername, sparkconfdir, sparkmasterconfig string) *odc.ODeploymentConfig {
+func metricsEnabled(config MetricsConfig) bool {
+	enabled, _ := strconv.ParseBool(config.Enable)
+	if enabled && (config.Carbon == "" || config.Graphite == "") {
+		fmt.Println("**** images for carbon and/or graphite missing ***")
+	}
+	return enabled && config.Carbon != "" && config.Graphite != ""
+}
+
+func scorpionStareEnabled(config ScorpionStareConfig) bool {
+	enabled, _ := strconv.ParseBool(config.Enable)
+	if enabled && config.Image == "" {
+		fmt.Println("**** image for scorpionstare missing ***")
+	}
+	return enabled && config.Image != ""
+
+}
+
+func addMetrics(containers []*ocon.OContainer, metrics MetricsConfig, pt *opt.OPodTemplateSpec, basename string) []*ocon.OContainer  {
+
+	if metricsEnabled(metrics) {
+
+		pt = pt.SetEmptyDirVolume("whisper")
+
+		grcon := ocon.Container(basename + "-graphite", metrics.Graphite).
+			Ports(ocon.ContainerPort("", 8000)).SetVolumeMount("whisper", "/var/lib/carbon/whisper", true)
+
+		carbon := ocon.Container(basename + "-carbon", metrics.Carbon).
+			Ports(ocon.ContainerPort("", 2003)).SetVolumeMount("whisper", "/var/lib/carbon/whisper", false)
+
+		// add graphite container
+		// - name: ${MASTER_NAME}-graphite
+		//   image: ${GRAPHITE_IMAGE}
+		//   ports:
+		//     - containerPort: 8000
+		//       protocol: TCP
+		//   volumeMounts:
+		//     - name: whisper
+		//       mountPath: /var/lib/carbon/whisper
+
+		// add carbon container
+		// - name: ${MASTER_NAME}-carbon
+		//   image: ${CARBON_IMAGE}
+		//   ports:
+		//     - containerPort: 2003
+		//       protocol: TCP
+		//   volumeMounts:
+		//     - name: whisper
+		//       mountPath: /var/lib/carbon/whisper
+
+		// need a configmap to hold spark metrics configs,
+		// how are we going to handle that? For now we're going to
+		// have to do it manually with an external configmap
+		containers = append(containers, grcon, carbon)
+	}
+	return containers
+
+}
+
+func addScorpionStare(containers []*ocon.OContainer, stare ScorpionStareConfig, basename, clustername string) []*ocon.OContainer {
+	if scorpionStareEnabled(stare) {
+		scon := ocon.Container(basename + "-stare", stare.Image).EnvVars(makeEnvVars(clustername, ""))
+		containers = append(containers, scon)
+
+	}
+	return containers
+}
+
+func sparkMaster(namespace, image, clustername, sparkconfdir, sparkmasterconfig string, metrics MetricsConfig, scorpionstare ScorpionStareConfig) *odc.ODeploymentConfig {
 
 	// Create the basic deployment config
 	// We will use a label and pod selector based on the cluster name
@@ -216,9 +285,13 @@ func sparkMaster(namespace, image, clustername, sparkconfdir, sparkmasterconfig 
 		cont = cont.SetVolumeMount(sparkmasterconfig, sparkconfdir, true)
 	}
 
+	containers := []*ocon.OContainer{cont}
+	containers = addMetrics(containers, metrics, pt, dc.Name)
+	containers = addScorpionStare(containers, scorpionstare, dc.Name, clustername)
+
 	// Finally, assign the container to the pod template spec and
 	// assign the pod template spec to the deployment config
-	return dc.PodTemplateSpec(pt.Containers(cont))
+	return dc.PodTemplateSpec(pt.Containers(containers...))
 }
 
 func service(name string,
@@ -300,7 +373,8 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 	}
 
 	// Create the master deployment config
-	masterdc := sparkMaster(namespace, sparkimage, clustername, masterconfdir, finalconfig.SparkMasterConfig)
+	masterdc := sparkMaster(namespace, sparkimage, clustername, masterconfdir, finalconfig.SparkMasterConfig, finalconfig.Metrics, finalconfig.ScorpionStare)
+
 
 	// Create the services that will be associated with the master pod
 	// They will be created with selectors based on the pod labels
@@ -341,6 +415,24 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 	// Note, if spark webui service fails for some reason we can live without it
 	// TODO ties into cluster status, make a note if the service is missing
 	sc.Create(&websv.Service)
+
+	if metricsEnabled(finalconfig.Metrics) {
+		metricsv, _ := service(masterhost+metricsServiceSuffix, 8000, clustername, metricsType, masterdc.GetPodTemplateSpecLabels())
+		sc.Create(&metricsv.Service)
+		//- kind: Service
+		//apiVersion: v1
+		//metadata:
+		//name: ${MASTER_NAME}-metrics
+		//labels:
+		//name: ${MASTER_NAME}
+		//spec:
+		//ports:
+		//- protocol: TCP
+		//port: 8000
+		//targetPort: 8000
+		//selector:
+		//name: ${MASTER_NAME}
+	}
 
 	// Wait for the replication controllers to exist before building the response.
 	rcc := client.ReplicationControllers(namespace)

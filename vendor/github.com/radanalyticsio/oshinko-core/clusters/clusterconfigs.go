@@ -7,6 +7,17 @@ import (
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 )
 
+type MetricsConfig struct {
+	Enable string
+	Carbon string
+	Graphite string
+}
+
+type ScorpionStareConfig struct {
+	Enable string
+	Image string
+}
+
 type ClusterConfig struct {
 
 	MasterCount int
@@ -14,15 +25,20 @@ type ClusterConfig struct {
 	Name string
 	SparkMasterConfig string
 	SparkWorkerConfig string
+	Metrics MetricsConfig
+	ScorpionStare ScorpionStareConfig
 }
 
 
 var defaultConfig ClusterConfig = ClusterConfig{
-								MasterCount: 1,
-	                                                        WorkerCount: 1,
-								Name: "default",
-								SparkMasterConfig: "",
-								SparkWorkerConfig: ""}
+	MasterCount: 1,
+	WorkerCount: 1,
+	Name: "default",
+	SparkMasterConfig: "",
+	SparkWorkerConfig: "",
+	Metrics: MetricsConfig{"","docker.io/tmckay/carbon","docker.io/tmckay/graphite"},
+	ScorpionStare: ScorpionStareConfig{"","docker.io/tmckay/scorpionstare"},
+}
 
 const Defaultname = "default"
 const failOnMissing = true
@@ -53,6 +69,22 @@ func assignConfig(res *ClusterConfig, src ClusterConfig) {
 	if src.SparkWorkerConfig != "" {
 		res.SparkWorkerConfig = src.SparkWorkerConfig
 	}
+	if src.Metrics.Enable != "" {
+		res.Metrics.Enable = src.Metrics.Enable
+	}
+	if src.Metrics.Carbon != "" {
+		res.Metrics.Carbon = src.Metrics.Carbon
+	}
+	if src.Metrics.Graphite != "" {
+		res.Metrics.Graphite = src.Metrics.Graphite
+	}
+	if src.ScorpionStare.Enable != "" {
+		res.ScorpionStare.Enable = src.ScorpionStare.Enable
+	}
+	if src.ScorpionStare.Image != "" {
+		res.ScorpionStare.Image = src.ScorpionStare.Image
+	}
+
 }
 
 func checkConfiguration(config ClusterConfig) error {
@@ -90,6 +122,16 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
                 config.SparkMasterConfig = strings.Trim(value, "\n")
 	case "sparkworkerconfig":
                 config.SparkWorkerConfig = strings.Trim(value, "\n")
+	case "metrics.enable":
+		config.Metrics.Enable = strings.Trim(value, "\n")
+	case "metrics.carbon":
+		config.Metrics.Carbon = strings.Trim(value, "\n")
+	case "metrics.graphite":
+		config.Metrics.Graphite = strings.Trim(value, "\n")
+	case "scorpionstare.enable":
+		config.ScorpionStare.Enable = strings.Trim(value, "\n")
+	case "scorpionstare.image":
+		config.ScorpionStare.Image = strings.Trim(value, "\n")
 	}
 	return err
 }
