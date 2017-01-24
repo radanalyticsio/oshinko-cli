@@ -1,0 +1,94 @@
+kind: Template
+apiVersion: v1
+template: oshinko
+metadata:
+  name: oshinko
+objects:
+
+- kind: Service
+  apiVersion: v1
+  metadata:
+    name: ${OSHINKO_SERVER_NAME}
+    labels:
+      name: ${OSHINKO_SERVER_NAME}
+  spec:
+    ports:
+      - name: o-rest-port
+        protocol: TCP
+        port: 8081
+        targetPort: 8081
+    selector:
+      name: ${OSHINKO_SERVER_NAME}
+
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    name: ${OSHINKO_DEPLOYMENT_NAME}
+  spec:
+    strategy:
+      type: Rolling
+    triggers:
+      - type: ConfigChange
+    replicas: 1
+    selector:
+      name: ${OSHINKO_SERVER_NAME}
+    template:
+      metadata:
+        labels:
+          name: ${OSHINKO_SERVER_NAME}
+      spec:
+        containers:
+          - name: ${OSHINKO_SERVER_NAME}
+            image: ${OSHINKO_SERVER_IMAGE}
+            env:
+              - name: OSHINKO_SERVER_PORT
+                value: "8081"
+              - name: OSHINKO_REST_POD_NAME
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.name
+              - name: OSHINKO_CLUSTER_NAMESPACE
+                valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+              - name: OSHINKO_CLUSTER_IMAGE
+                value: ${OSHINKO_CLUSTER_IMAGE}
+            ports:
+              - name: o-rest-port
+                containerPort: 8081
+                protocol: TCP
+            readinessProbe:
+              failureThreshold: 3
+              httpGet:
+                path: /
+                port: 8081
+                scheme: HTTP
+              periodSeconds: 10
+              successThreshold: 1
+              timeoutSeconds: 1
+            livenessProbe:
+              failureThreshold: 3
+              httpGet:
+                path: /
+                port: 8081
+                scheme: HTTP
+              periodSeconds: 10
+              successThreshold: 1
+              timeoutSeconds: 1
+        serviceAccount: oshinko
+
+parameters:
+- name: OSHINKO_SERVER_IMAGE
+  description: Full name of the oshinko server image
+  required: true
+  value: radanalyticsio/oshinko-rest
+- name: OSHINKO_SERVER_NAME
+  description: Name of the oshinko server service
+  value: "oshinko-rest"
+- name: OSHINKO_CLUSTER_IMAGE
+  description: Full name of the spark image to use when creating clusters
+  required: true
+  value: radanalyticsio/openshift-spark
+- name: OSHINKO_DEPLOYMENT_NAME
+  description: Name of the oshinko deployment
+  value: "oshinko"

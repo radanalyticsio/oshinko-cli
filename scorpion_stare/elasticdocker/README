@@ -1,0 +1,2 @@
+This the docker file for the scorpion stare daemon.
+A built version of it can be found at docker.io/tmckay/scorpionstare

@@ -1,0 +1,27 @@
+# Login to openshift first of course
+
+$ oc login
+
+# Make a new project
+
+$ oc new-project mynewproject
+
+# Create the oshinko service account
+
+oc create sa oshinko
+
+# Set permissions
+
+$ oc policy add-role-to-user admin system:serviceaccount:mynewproject:oshinko
+
+# Deploy oshinko-rest in the project (to server scorpion stare)
+
+$ oc process -f oshinko.yaml | oc create -f -
+
+# To create the configmaps necessary for a cluster with scorpionstare:
+
+$ ./make_stare_configs.sh
+
+# Create a cluster (assuming the oshinko-cli binary is in the same dir):
+
+$ ./cluster.sh mynewcluster
