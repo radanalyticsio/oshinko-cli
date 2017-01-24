@@ -1,7 +1,10 @@
 #/bin/bash
 
-oc create configmap metricsconfig --from-file=metrics.properties
+oc create configmap masterconfig --from-file=masterconfig
+
+oc create configmap workerconfig --from-file=workerconfig
 
 oc create configmap clusterconfig --from-literal=metrics.enable=true \
                                   --from-literal=scorpionstare.enable=true \
-                                  --from-literal=sparkmasterconfig=metricsconfig
+                                  --from-literal=sparkmasterconfig=masterconfig \
+                                  --from-literal=sparkworkerconfig=workerconfig
