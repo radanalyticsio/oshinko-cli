@@ -60,6 +60,12 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	if cmd.Flags().Lookup("image") != nil {
 		o.Image = kcmdutil.GetFlagString(cmd, "image")
 	}
+	if cmd.Flags().Lookup("masterconfig") != nil {
+		o.MasterConfig = kcmdutil.GetFlagString(cmd, "masterconfig")
+	}
+	if cmd.Flags().Lookup("workerconfig") != nil {
+		o.WorkerConfig = kcmdutil.GetFlagString(cmd, "workerconfig")
+	}
         if cmd.Flags().Lookup("storedconfig") != nil {
 		o.StoredConfig = kcmdutil.GetFlagString(cmd, "storedconfig")
 	}
