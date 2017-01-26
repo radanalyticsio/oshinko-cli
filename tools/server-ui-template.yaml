@@ -38,11 +38,6 @@ objects:
     selector:
       name: ${OSHINKO_SERVER_NAME}
 
-- kind: ConfigMap
-  apiVersion: v1
-  metadata:
-    name: oshinko-spark-driver-config
-
 - kind: DeploymentConfig
   apiVersion: v1
   metadata:
