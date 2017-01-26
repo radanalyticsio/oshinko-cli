@@ -11,8 +11,6 @@ import (
 	"os"
 	"runtime"
 	"strings"
-
-	oshinkocmd "github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/cmd"
 )
 
 const productName = `Oshinko`
@@ -43,19 +41,7 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 	}
 
 	f := clientcmd.New(cmds.PersistentFlags())
-
-	getCmd := oshinkocmd.NewCmdGet(fullName, f, in, out)
-	groups := templates.CommandGroups{
-		{
-			Message: "Basic Commands:",
-			Commands: []*cobra.Command{
-				getCmd,
-				oshinkocmd.NewCmdDelete(fullName, f, in, out),
-				oshinkocmd.NewCmdCreate(fullName, f, in, out),
-				oshinkocmd.NewCmdScale(fullName, f, in, out),
-			},
-		},
-	}
+	groups, firstcmd := GetCommandGroups(fullName, f, in, out)
 	groups.Add(cmds)
 	changeSharedFlagDefaults(cmds)
 
@@ -64,8 +50,8 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 	}
 
 	templates.ActsAsRootCommand(cmds, filters, groups...).
-		ExposeFlags(getCmd, "server", "client-certificate",
-			"client-key", "certificate-authority", "insecure-skip-tls-verify", "token")
+		ExposeFlags(firstcmd, "server", "client-certificate",
+		"client-key", "certificate-authority", "insecure-skip-tls-verify", "token")
 
 	cmds.AddCommand(NewCmdOptions(out))
 	return cmds
