@@ -44,6 +44,9 @@ def oshinko_query_vars():
     return (host, port, clust)
 
 def oshinko_scale_request(num_workers):
+    if num_workers == 0:
+        sys.stderr.write("Skipping scale to 0 ...\n")
+        return
     host, port, clust = oshinko_query_vars()
     endpoint = "http://%s:%s/clusters/%s" % (host, port, clust)
     #sys.stderr.write("endpoint= %s\n" % (endpoint))
@@ -75,9 +78,14 @@ while True:
     cluster = oshinko_cluster_json()
     if cluster is None:
         continue
-    available = cluster['config']['workerCount']
+    available = 0
+    if cluster.has_key('config') and cluster['config'].has_key('workerCount'):
+        available = cluster['config']['workerCount']
     target = sum([x[1] for x in kv_by_regex(".*\.numberTargetExecutors$")])
-    target = max(1, target)
+    target = max(0, target)
     sys.stderr.write("available= %d   target= %d\n" % (available, target))
-    if (available != target):
+    # scale up "immediately", scale down "exponential decay"
+    if (target > available):
         oshinko_scale_request(target)
+    elif (target < available):
+        oshinko_scale_request((target + available) / 2)
