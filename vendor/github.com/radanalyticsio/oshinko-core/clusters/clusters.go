@@ -38,6 +38,7 @@ const workerType = "worker"
 const masterType = "master"
 const webuiType = "webui"
 const metricsType = "metrics"
+const carbonType = "carbon"
 
 const masterPortName = "spark-master"
 const masterPort = 7077
@@ -49,6 +50,7 @@ const sparkconfdir = "/etc/oshinko-spark-configs"
 // The suffix to add to the spark master hostname (clustername) for the web service
 const webServiceSuffix = "-ui"
 const metricsServiceSuffix = "-metrics"
+const carbonServiceSuffix = "-carbon"
 
 type SparkPod struct {
 	IP string
@@ -419,19 +421,9 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 	if metricsEnabled(finalconfig.Metrics) {
 		metricsv, _ := service(masterhost+metricsServiceSuffix, 8000, clustername, metricsType, masterdc.GetPodTemplateSpecLabels())
 		sc.Create(&metricsv.Service)
-		//- kind: Service
-		//apiVersion: v1
-		//metadata:
-		//name: ${MASTER_NAME}-metrics
-		//labels:
-		//name: ${MASTER_NAME}
-		//spec:
-		//ports:
-		//- protocol: TCP
-		//port: 8000
-		//targetPort: 8000
-		//selector:
-		//name: ${MASTER_NAME}
+
+		carbonsv, _ := service(masterhost+carbonServiceSuffix, 2003, clustername, carbonType, masterdc.GetPodTemplateSpecLabels())
+		sc.Create(&carbonsv.Service)
 	}
 
 	// Wait for the replication controllers to exist before building the response.
