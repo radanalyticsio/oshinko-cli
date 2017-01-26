@@ -13,7 +13,7 @@ graphite_port = 8000
 
 def latest_metric_value(metric):
     recent_query = "http://%s:%d/render" % (graphite_host, graphite_port)
-    qr = requests.get(recent_query, params={"target": metric, "format": "json", "from": "-3min"})
+    qr = requests.get(recent_query, params={"target": metric, "format": "json"})
     if qr.status_code != 200:
         sys.stderr.write("query code error: %d\n" % (qr.status_code))
         return None
@@ -30,7 +30,7 @@ def latest_by_regex(regex):
 
 def kv_by_regex(regex):
     available_query = "http://%s:%d/metrics/index.json" % (graphite_host, graphite_port)
-    avqr = requests.get(available_query, params={"from": "-1min"})
+    avqr = requests.get(available_query)
     metrics = avqr.json()
     matching = [e for e in metrics if (re.match(regex, e) is not None)]
     kv = [(e, latest_metric_value(e)) for e in matching]
@@ -82,7 +82,7 @@ while True:
     if cluster.has_key('config') and cluster['config'].has_key('workerCount'):
         available = cluster['config']['workerCount']
     target = sum([x[1] for x in kv_by_regex(".*\.numberTargetExecutors$")])
-    target = max(0, target)
+    target = max(1, target)
     sys.stderr.write("available= %d   target= %d\n" % (available, target))
     # scale up "immediately", scale down "exponential decay"
     if (target > available):
