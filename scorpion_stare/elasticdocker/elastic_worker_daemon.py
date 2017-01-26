@@ -47,7 +47,7 @@ def oshinko_scale_request(num_workers):
     host, port, clust = oshinko_query_vars()
     endpoint = "http://%s:%s/clusters/%s" % (host, port, clust)
     #sys.stderr.write("endpoint= %s\n" % (endpoint))
-    body = { "name": clust, "masterCount": 1, "workerCount": int(num_workers) }
+    body = { "name": clust, "config": {"workerCount": int(num_workers)}}
     res = requests.put(endpoint, json = body)
     sys.stderr.write("    scale request status= %d\n" % (res.status_code))
 
