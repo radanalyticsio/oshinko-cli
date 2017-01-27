@@ -13,16 +13,16 @@ import (
 	"strings"
 )
 
-const productName = `Oshinko`
+const (
+	productName = `Oshinko`
+	cliLong     = productName + ` Client
 
-const cliLong = productName + ` Client
-
-The Oshinko client.
+This client helps you deploy, scale and run your spark applications on Openshift
 `
-
-const cliExplain = `
+	cliExplain = `
 To see the full list of commands supported, run '%[1]s help'.
 `
+)
 
 func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *cobra.Command {
 	// Main command
@@ -36,7 +36,7 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 			fmt.Fprint(out, cliLong)
 			fmt.Fprintf(out, cliExplain, fullName)
 		},
-		//TODO ; do this later
+		//TODO ; add bash completion
 		//BashCompletionFunction: bashCompletionFunc,
 	}
 
@@ -56,14 +56,7 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 	cmds.AddCommand(NewCmdOptions(out))
 	return cmds
 }
-
-func moved(fullName, to string, parent, cmd *cobra.Command) string {
-	cmd.Long = fmt.Sprintf("DEPRECATED: This command has been moved to \"%s %s\"", fullName, to)
-	cmd.Short = fmt.Sprintf("DEPRECATED: %s", to)
-	parent.AddCommand(cmd)
-	return cmd.Name()
-}
-
+//TODO ensure we can limit the number of options
 func NewCmdOptions(out io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "options",

@@ -6,8 +6,8 @@ import (
 	"io"
 
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
-	"github.com/radanalyticsio/oshinko-core/clusters"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
+	"github.com/radanalyticsio/oshinko-core/clusters"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 )
 

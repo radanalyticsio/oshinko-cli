@@ -8,8 +8,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
-	"github.com/radanalyticsio/oshinko-core/clusters"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
+	"github.com/radanalyticsio/oshinko-core/clusters"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 )
 
@@ -67,7 +67,7 @@ func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string)
 	config.MasterCount = o.MasterCount
 	config.SparkWorkerConfig = o.WorkerConfig
 	config.SparkMasterConfig = o.MasterConfig
-        config.Name = o.StoredConfig
+	config.Name = o.StoredConfig
 	_, err := clusters.CreateCluster(o.Name, o.Project, o.Image, &config, o.Client, o.KClient)
 	if err != nil {
 		return err

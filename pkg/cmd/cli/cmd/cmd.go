@@ -10,15 +10,15 @@ import (
 )
 
 type CmdOptions struct {
-	Name            string `json:"name,omitempty"`
-	Image           string `json:"image"`
-	WorkerCount     int    `json:"workerCount"`
-	MasterCount     int    `json:"masterCount,omitempty"`
-	MasterConfig    string `json:"sparkMasterConfig,omitempty"`
-	WorkerConfig    string `json:"workerConfig,omitempty"`
-	StoredConfig    string `json:"storedConfig,omitempty"`
-	Verbose         bool
-	Output          string
+	Name         string `json:"name,omitempty"`
+	Image        string `json:"image"`
+	WorkerCount  int    `json:"workerCount"`
+	MasterCount  int    `json:"masterCount,omitempty"`
+	MasterConfig string `json:"sparkMasterConfig,omitempty"`
+	WorkerConfig string `json:"workerConfig,omitempty"`
+	StoredConfig string `json:"storedConfig,omitempty"`
+	Verbose      bool
+	Output       string
 
 	auth.AuthOptions
 }
@@ -66,7 +66,7 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	if cmd.Flags().Lookup("workerconfig") != nil {
 		o.WorkerConfig = kcmdutil.GetFlagString(cmd, "workerconfig")
 	}
-        if cmd.Flags().Lookup("storedconfig") != nil {
+	if cmd.Flags().Lookup("storedconfig") != nil {
 		o.StoredConfig = kcmdutil.GetFlagString(cmd, "storedconfig")
 	}
 	return nil
@@ -79,13 +79,13 @@ func (o *CmdOptions) GatherInfo() error {
 		return err
 	}
 	if o.Verbose {
-		fmt.Printf(msg)
+		fmt.Fprintf(o.Out, msg)
 	}
 	if msg, err = o.AuthOptions.GatherProjectInfo(); err != nil {
 		return err
 	}
 	if o.Verbose {
-		fmt.Printf(msg)
+		fmt.Fprintf(o.Out, msg)
 	}
 	return nil
 }

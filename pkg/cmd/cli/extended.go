@@ -3,17 +3,17 @@
 package cli
 
 import (
-	"github.com/spf13/cobra"
 	"github.com/openshift/origin/pkg/cmd/templates"
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	"github.com/spf13/cobra"
 	"io"
 
 	oshinkocmd "github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/cmd"
 )
 
 func GetCommandGroups(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) (
-											templates.CommandGroups,
-											*cobra.Command) {
+	templates.CommandGroups,
+	*cobra.Command) {
 	first := oshinkocmd.NewCmdGet(fullName, f, in, out)
 	return templates.CommandGroups{
 		{
