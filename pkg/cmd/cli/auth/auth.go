@@ -365,6 +365,3 @@ func (o *AuthOptions) GatherProjectInfo() (string,error) {
 
 	return msg, nil
 }
-
-
-

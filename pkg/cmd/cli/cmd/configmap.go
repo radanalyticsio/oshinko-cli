@@ -3,8 +3,8 @@
 package cmd
 
 import (
-	"io"
 	"github.com/spf13/cobra"
+	"io"
 
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
@@ -26,7 +26,7 @@ func CmdConfigMap(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.
 	}
 
 	cmd := &cobra.Command{
-		Use: "configmap <NAME> ",
+		Use:   "configmap <NAME> ",
 		Short: "Return a configmap in json",
 		Long:  "Lookup a configmap by name and print as json if it exists",
 		Run: func(cmd *cobra.Command, args []string) {

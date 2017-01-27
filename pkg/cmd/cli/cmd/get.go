@@ -2,11 +2,11 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
-	"io"
-	"github.com/radanalyticsio/oshinko-core/clusters"
 	osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
+	"github.com/radanalyticsio/oshinko-core/clusters"
+	"github.com/spf13/cobra"
+	"io"
 	kapierrors "k8s.io/kubernetes/pkg/api/errors"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"os"
@@ -26,7 +26,6 @@ func (p SortByClusterName) Swap(i, j int) {
 func (p SortByClusterName) Less(i, j int) bool {
 	return p[i].Name < p[j].Name
 }
-
 
 // RunProjects lists all projects a user belongs to
 func (o *CmdOptions) RunClusters() error {
@@ -112,5 +111,6 @@ func NewCmdGet(fullName string, f *osclientcmd.Factory, reader io.Reader, out io
 		},
 	}
 	cmds.Flags().StringP("output", "o", "", "Output format. One of: json|yaml")
+	cmds.Flags().BoolVarP(&options.Verbose, "verbose", "v", options.Verbose, "See details for resolving issues.")
 	return cmds
 }

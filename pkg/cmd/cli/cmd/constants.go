@@ -5,9 +5,9 @@ const (
 	ScaleCmdShort   = "Scale spark cluster by name."
 	clustersExample = `  # Display the spark cluster %[1]s`
 
-	defaultImage   = "radanalyticsio/openshift-spark"
+	defaultImage = "radanalyticsio/openshift-spark"
 
-	clustersLong     = `
+	clustersLong = `
 
 Display information about the spark clusters on the server.`
 	createLong = `Create a resource by filename or stdin
