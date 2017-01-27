@@ -37,7 +37,7 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	}
 	o.Name = currentCluster
 	if err := o.AuthOptions.Complete(f, cmd, args); err != nil {
-		kcmdutil.CheckErr(kcmdutil.UsageError(cmd, err.Error()))
+		return err
 	}
 	if err := o.GatherInfo(); err != nil {
 		return err
