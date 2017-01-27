@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/ghodss/yaml"
 	"github.com/spf13/cobra"
-	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 )
 
 // NameFromCommandArgs is a utility function for commands that assume the first argument is a resource name
@@ -21,7 +20,7 @@ func getErrorForNoName(cmd *cobra.Command) error {
 	if cmd.Name() == "get" {
 		return nil
 	} else {
-		return cmdutil.UsageError(cmd, "NAME is required")
+		return fmt.Errorf("NAME is required")
 	}
 }
 
