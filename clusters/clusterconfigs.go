@@ -14,6 +14,7 @@ type ClusterConfig struct {
 	Name string
 	SparkMasterConfig string
 	SparkWorkerConfig string
+	SparkImage string
 }
 
 
@@ -22,7 +23,8 @@ var defaultConfig ClusterConfig = ClusterConfig{
 	                                                        WorkerCount: 1,
 								Name: "default",
 								SparkMasterConfig: "",
-								SparkWorkerConfig: ""}
+								SparkWorkerConfig: "",
+								SparkImage: ""}
 
 const Defaultname = "default"
 const failOnMissing = true
@@ -55,6 +57,9 @@ func assignConfig(res *ClusterConfig, src ClusterConfig) {
 	}
 	if src.SparkWorkerConfig != "" {
 		res.SparkWorkerConfig = src.SparkWorkerConfig
+	}
+	if src.SparkImage != "" {
+		res.SparkImage = src.SparkImage
 	}
 }
 
@@ -93,6 +98,8 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
                 config.SparkMasterConfig = strings.Trim(value, "\n")
 	case "sparkworkerconfig":
                 config.SparkWorkerConfig = strings.Trim(value, "\n")
+	case "sparkimage":
+		config.SparkImage = strings.Trim(value, "\n")
 	}
 	return err
 }
