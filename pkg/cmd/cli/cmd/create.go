@@ -56,7 +56,7 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Com
 	cmd.Flags().String("masterconfig", "", "ConfigMap name for spark master")
 	cmd.Flags().String("workerconfig", "", "ConfigMap name for spark worker")
 	cmd.Flags().String("storedconfig", "", "ConfigMap name for spark cluster")
-	cmd.Flags().String("image", defaultImage, "spark image to be used.Default value is radanalyticsio/openshift-spark.")
+	cmd.Flags().String("image", "", "spark image to be used. Default image is radanalyticsio/openshift-spark.")
 	//cmd.MarkFlagRequired("workers")
 	return cmd
 }
@@ -67,8 +67,9 @@ func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string)
 	config.MasterCount = o.MasterCount
 	config.SparkWorkerConfig = o.WorkerConfig
 	config.SparkMasterConfig = o.MasterConfig
+	config.SparkImage = o.Image
 	config.Name = o.StoredConfig
-	_, err := clusters.CreateCluster(o.Name, o.Project, o.Image, &config, o.Client, o.KClient)
+	_, err := clusters.CreateCluster(o.Name, o.Project, defaultImage, &config, o.Client, o.KClient)
 	if err != nil {
 		return err
 	}
