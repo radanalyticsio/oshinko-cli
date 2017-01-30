@@ -87,6 +87,10 @@ type NewClusterConfig struct {
 	 */
 	Name string `json:"name,omitempty"`
 
+	/* The docker pull specification of a custom image to use for spark pods
+	 */
+	SparkImage string `json:"sparkImage,omitempty"`
+
 	/* The name of a ConfigMap which holds spark configuration files for the master
 	 */
 	SparkMasterConfig string `json:"sparkMasterConfig,omitempty"`

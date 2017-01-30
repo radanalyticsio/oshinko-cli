@@ -30,6 +30,7 @@ const mastermsg = "unable to find spark masters"
 const updateReplMsg = "unable to update replication controller for spark workers"
 const noSuchClusterMsg = "no such cluster '%s'"
 const podListMsg = "unable to retrive pod list"
+const sparkImageMsg = "no spark image specified"
 
 const typeLabel = "oshinko-type"
 const clusterLabel = "oshinko-cluster"
@@ -276,6 +277,12 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 	if err != nil {
 		return result, generalErr(err, clusterConfigMsg, ErrorCode(err))
 	}
+	if finalconfig.SparkImage != "" {
+		sparkimage = finalconfig.SparkImage
+	} else if sparkimage == "" {
+		return result, generalErr(nil, sparkImageMsg, ClusterConfigCode)
+	}
+
 	workercount := int(finalconfig.WorkerCount)
 
 	// Check if finalconfig contains the names of ConfigMaps to use for spark

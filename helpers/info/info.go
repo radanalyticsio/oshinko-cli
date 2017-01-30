@@ -27,7 +27,6 @@ func GetNamespace() (string, error) {
 }
 
 func GetSparkImage() (string, error) {
-	// TODO is there a good well-known location for a spark image?
 	return os.Getenv("OSHINKO_CLUSTER_IMAGE"), nil
 }
 

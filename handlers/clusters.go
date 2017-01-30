@@ -90,6 +90,7 @@ func assignConfig(config *models.NewClusterConfig) *coreclusters.ClusterConfig {
 		WorkerCount: int(config.WorkerCount),
 		SparkMasterConfig: config.SparkMasterConfig,
 		SparkWorkerConfig: config.SparkWorkerConfig,
+		SparkImage: config.SparkImage,
 	}
 	return result
 }
@@ -116,8 +117,11 @@ func CreateClusterResponse(params apiclusters.CreateClusterParams) middleware.Re
 		return reterr(fail(err, nameSpaceMsg, 500))
 	}
 
+	// Even if the image comes back "" at this point, let oshinko-core
+	// generate an error. It is possible that the cluster config specifies
+	// an image even if no default is set in the environment
 	image, err := info.GetSparkImage()
-	if image == "" || err != nil {
+	if err != nil {
 		return reterr(fail(err, imageMsg, 500))
 	}
 

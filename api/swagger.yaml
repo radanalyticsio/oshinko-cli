@@ -127,6 +127,10 @@ definitions:
             description: |-
               The name of a ConfigMap which holds spark configuration files for the workers
             type: string
+          sparkImage:
+            description: |-
+              The docker pull specification of a custom image to use for spark pods
+            type: string
     required:
       - name
     additionalProperties: false
