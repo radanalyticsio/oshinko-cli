@@ -40,6 +40,9 @@ func GetDefaultConfig() ClusterConfig {
 }
 
 func assignConfig(res *ClusterConfig, src ClusterConfig) {
+        if src.Name != "" {
+		res.Name = src.Name
+        }
 	if src.MasterCount != 0 {
 		res.MasterCount = src.MasterCount
 	}
