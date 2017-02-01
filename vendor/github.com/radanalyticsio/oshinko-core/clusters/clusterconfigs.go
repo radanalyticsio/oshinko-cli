@@ -37,7 +37,7 @@ var defaultConfig ClusterConfig = ClusterConfig{
 	SparkMasterConfig: "",
 	SparkWorkerConfig: "",
 	Metrics: MetricsConfig{"","docker.io/tmckay/carbon","docker.io/tmckay/graphite"},
-	ScorpionStare: ScorpionStareConfig{"","docker.io/tmckay/scorpionstare"},
+	ScorpionStare: ScorpionStareConfig{"","docker.io/manyangled/scorpionstare"},
 }
 
 const Defaultname = "default"
