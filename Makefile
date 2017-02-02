@@ -25,3 +25,10 @@ debug:
 	scripts/build.sh debug
 
 
+# Run command tests. Uses whatever binaries are currently built.
+#
+# Example:
+#   make test-cmd
+test-cmd: build
+	hack/test-cmd.sh
+.PHONY: test-cmd
