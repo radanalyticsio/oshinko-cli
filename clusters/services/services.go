@@ -6,31 +6,30 @@ import (
 )
 
 /*
-        {
-            "apiVersion": "v1",
-            "kind": "Service",
-            "metadata": {
-                "labels": {
-                    "name": "spark-master-jpda"
-                },
-                "name": "spark-master-jpda"
-            },
-            "spec": {
-                "ports": [
-                    {
-                        "port": 7077,
-                        "protocol": "TCP",
-                        "targetPort": 7077
-                    }
-                ],
-                "selector": {
-                    "name": "spark-master-jpda"
-                }
-            }
-        },
+   {
+       "apiVersion": "v1",
+       "kind": "Service",
+       "metadata": {
+           "labels": {
+               "name": "spark-master-jpda"
+           },
+           "name": "spark-master-jpda"
+       },
+       "spec": {
+           "ports": [
+               {
+                   "port": 7077,
+                   "protocol": "TCP",
+                   "targetPort": 7077
+               }
+           ],
+           "selector": {
+               "name": "spark-master-jpda"
+           }
+       }
+   },
 
- */
-
+*/
 
 type OService struct {
 	kapi.Service
@@ -86,7 +85,7 @@ type OServicePort struct {
 func ServicePort(port int) *OServicePort {
 	s := OServicePort{}
 	s.ServicePort.Protocol = kapi.ProtocolTCP
-	s.ServicePort.Port = port
+	s.ServicePort.Port = int32(port)
 	return &s
 }
 
@@ -131,4 +130,4 @@ type ServicePort struct {
 	// Default is to auto-allocate a port if the ServiceType of this Service requires one.
 	NodePort int `json:"nodePort"`
 }
- */
+*/
