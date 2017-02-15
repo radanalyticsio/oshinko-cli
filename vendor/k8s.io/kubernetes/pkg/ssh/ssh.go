@@ -1,5 +1,5 @@
 /*
-Copyright 2015 The Kubernetes Authors All rights reserved.
+Copyright 2015 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -265,7 +265,7 @@ func MakePrivateKeySignerFromFile(key string) (ssh.Signer, error) {
 func MakePrivateKeySignerFromBytes(buffer []byte) (ssh.Signer, error) {
 	signer, err := ssh.ParsePrivateKey(buffer)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing SSH key %s: '%v'", buffer, err)
+		return nil, fmt.Errorf("error parsing SSH key: '%v'", err)
 	}
 	return signer, nil
 }
@@ -362,8 +362,12 @@ func (l *SSHTunnelList) healthCheck(e sshTunnelEntry) error {
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	})
 	client := &http.Client{Transport: transport}
-	_, err := client.Get(l.healthCheckURL.String())
-	return err
+	resp, err := client.Get(l.healthCheckURL.String())
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
 }
 
 func (l *SSHTunnelList) removeAndReAdd(e sshTunnelEntry) {

@@ -1,7 +1,6 @@
 package kubernetes
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -11,8 +10,8 @@ import (
 	proxyapp "k8s.io/kubernetes/cmd/kube-proxy/app"
 	proxyoptions "k8s.io/kubernetes/cmd/kube-proxy/app/options"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/kubernetes/pkg/util"
 	kflag "k8s.io/kubernetes/pkg/util/flag"
+	"k8s.io/kubernetes/pkg/util/logs"
 )
 
 const proxyLong = `
@@ -31,8 +30,8 @@ func NewProxyCommand(name, fullName string, out io.Writer) *cobra.Command {
 		Run: func(c *cobra.Command, args []string) {
 			startProfiler()
 
-			util.InitLogs()
-			defer util.FlushLogs()
+			logs.InitLogs()
+			defer logs.FlushLogs()
 
 			s, err := proxyapp.NewProxyServerDefault(proxyConfig)
 			kcmdutil.CheckErr(err)
@@ -47,7 +46,6 @@ func NewProxyCommand(name, fullName string, out io.Writer) *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.SetNormalizeFunc(kflag.WordSepNormalizeFunc)
-	flags.AddGoFlagSet(flag.CommandLine)
 	proxyConfig.AddFlags(flags)
 
 	return cmd

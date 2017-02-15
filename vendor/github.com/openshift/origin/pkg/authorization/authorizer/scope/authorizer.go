@@ -9,19 +9,21 @@ import (
 
 	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
 	defaultauthorizer "github.com/openshift/origin/pkg/authorization/authorizer"
-	"github.com/openshift/origin/pkg/authorization/rulevalidation"
+	"github.com/openshift/origin/pkg/client"
 )
 
 type scopeAuthorizer struct {
 	delegate            defaultauthorizer.Authorizer
-	clusterPolicyGetter rulevalidation.ClusterPolicyGetter
+	clusterPolicyGetter client.ClusterPolicyLister
+
+	forbiddenMessageMaker defaultauthorizer.ForbiddenMessageMaker
 }
 
-func NewAuthorizer(delegate defaultauthorizer.Authorizer, clusterPolicyGetter rulevalidation.ClusterPolicyGetter) defaultauthorizer.Authorizer {
-	return &scopeAuthorizer{delegate: delegate, clusterPolicyGetter: clusterPolicyGetter}
+func NewAuthorizer(delegate defaultauthorizer.Authorizer, clusterPolicyGetter client.ClusterPolicyLister, forbiddenMessageMaker defaultauthorizer.ForbiddenMessageMaker) defaultauthorizer.Authorizer {
+	return &scopeAuthorizer{delegate: delegate, clusterPolicyGetter: clusterPolicyGetter, forbiddenMessageMaker: forbiddenMessageMaker}
 }
 
-func (a *scopeAuthorizer) Authorize(ctx kapi.Context, passedAttributes defaultauthorizer.AuthorizationAttributes) (bool, string, error) {
+func (a *scopeAuthorizer) Authorize(ctx kapi.Context, passedAttributes defaultauthorizer.Action) (bool, string, error) {
 	user, exists := kapi.UserFrom(ctx)
 	if !exists {
 		return false, "", fmt.Errorf("user missing from context")
@@ -55,11 +57,16 @@ func (a *scopeAuthorizer) Authorize(ctx kapi.Context, passedAttributes defaultau
 		}
 	}
 
-	return false, fmt.Sprintf("scopes %v, do not allow this action", scopes), kerrors.NewAggregate(nonFatalErrors)
+	denyReason, err := a.forbiddenMessageMaker.MakeMessage(defaultauthorizer.MessageContext{User: user, Namespace: namespace, Attributes: attributes})
+	if err != nil {
+		denyReason = err.Error()
+	}
+
+	return false, fmt.Sprintf("scopes %v prevent this action; %v", scopes, denyReason), kerrors.NewAggregate(nonFatalErrors)
 }
 
 // TODO remove this. We don't logically need it, but it requires splitting our interface
 // GetAllowedSubjects returns the subjects it knows can perform the action.
-func (a *scopeAuthorizer) GetAllowedSubjects(ctx kapi.Context, attributes defaultauthorizer.AuthorizationAttributes) (sets.String, sets.String, error) {
+func (a *scopeAuthorizer) GetAllowedSubjects(ctx kapi.Context, attributes defaultauthorizer.Action) (sets.String, sets.String, error) {
 	return a.delegate.GetAllowedSubjects(ctx, attributes)
 }

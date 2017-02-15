@@ -4,11 +4,13 @@
   "metadata": {
     "name": "dancer-mysql-example",
     "annotations": {
-      "description": "An example Dancer application with a MySQL database",
-      "tags": "quickstart,perl,dancer,mysql",
+      "openshift.io/display-name": "Dancer + MySQL (Ephemeral)",
+      "description": "An example Dancer application with a MySQL database. For more information about using this template, including OpenShift considerations, see https://github.com/openshift/dancer-ex/blob/master/README.md.\n\nWARNING: Any data stored will be lost upon pod destruction. Only use this template for testing.",
+      "tags": "quickstart,perl,dancer",
       "iconClass": "icon-perl"
     }
   },
+  "message": "The following service(s) have been created in your project: ${NAME}, ${DATABASE_SERVICE_NAME}.\n\nFor more information about using this template, including OpenShift considerations, see https://github.com/openshift/dancer-ex/blob/master/README.md.",
   "labels": {
     "template": "dancer-mysql-example"
   },
@@ -19,7 +21,8 @@
       "metadata": {
         "name": "${NAME}",
         "annotations": {
-          "description": "Exposes and load balances the application pods"
+          "description": "Exposes and load balances the application pods",
+          "service.alpha.openshift.io/dependencies": "[{\"name\": \"${DATABASE_SERVICE_NAME}\", \"kind\": \"Service\"}]"
         }
       },
       "spec": {
@@ -84,7 +87,13 @@
               "kind": "ImageStreamTag",
               "namespace": "${NAMESPACE}",
               "name": "perl:5.20"
-            }
+            },
+            "env":  [
+              {
+                  "name": "CPAN_MIRROR",
+                  "value": "${CPAN_MIRROR}"
+              }
+            ]
           }
         },
         "output": {
@@ -152,7 +161,7 @@
             "containers": [
               {
                 "name": "dancer-mysql-example",
-                "image": "dancer-mysql-example",
+                "image": " ",
                 "ports": [
                   {
                     "containerPort": 8080
@@ -201,9 +210,9 @@
                   }
                 ],
                 "resources": {
-		      "limits": {
-			  "memory": "${MEMORY_LIMIT}"
-		      }
+                  "limits": {
+                    "memory": "${MEMORY_LIMIT}"
+                  }
                 }
               }
             ]
@@ -250,7 +259,7 @@
           {
             "type": "ImageChange",
             "imageChangeParams": {
-              "automatic": false,
+              "automatic": true,
               "containerNames": [
                 "mysql"
               ],
@@ -286,7 +295,7 @@
             "containers": [
               {
                 "name": "mysql",
-                "image": "mysql",
+                "image": " ",
                 "ports": [
                   {
                     "containerPort": 3306
@@ -350,24 +359,28 @@
       "name": "NAMESPACE",
       "displayName": "Namespace",
       "description": "The OpenShift Namespace where the ImageStream resides.",
+      "required": true,
       "value": "openshift"
     },
     {
       "name": "MEMORY_LIMIT",
       "displayName": "Memory Limit",
       "description": "Maximum amount of memory the Perl Dancer container can use.",
+      "required": true,
       "value": "512Mi"
     },
     {
       "name": "MEMORY_MYSQL_LIMIT",
       "displayName": "Memory Limit (MySQL)",
       "description": "Maximum amount of memory the MySQL container can use.",
+      "required": true,
       "value": "512Mi"
     },
     {
       "name": "SOURCE_REPOSITORY_URL",
       "displayName": "Git Repository URL",
       "description": "The URL of the repository with your application source code.",
+      "required": true,
       "value": "https://github.com/openshift/dancer-ex.git"
     },
     {
@@ -408,6 +421,7 @@
     {
       "name": "DATABASE_SERVICE_NAME",
       "displayName": "Database Service Name",
+      "required": true,
       "value": "database"
     },
     {
@@ -425,6 +439,7 @@
     {
       "name": "DATABASE_NAME",
       "displayName": "Database Name",
+      "required": true,
       "value": "sampledb"
     },
     {
@@ -439,6 +454,12 @@
       "description": "Your secret key for verifying the integrity of signed cookies.",
       "generate": "expression",
       "from": "[a-z0-9]{127}"
+    },
+    {
+      "name": "CPAN_MIRROR",
+      "displayName": "Custom CPAN Mirror URL",
+      "description": "The custom CPAN mirror URL",
+      "value": ""
     }
   ]
 }

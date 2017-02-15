@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	goruntime "runtime"
 	"strings"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/imdario/mergo"
 
 	"k8s.io/kubernetes/pkg/api/unversioned"
+	"k8s.io/kubernetes/pkg/client/restclient"
 	clientcmdapi "k8s.io/kubernetes/pkg/client/unversioned/clientcmd/api"
 	clientcmdlatest "k8s.io/kubernetes/pkg/client/unversioned/clientcmd/api/latest"
 	"k8s.io/kubernetes/pkg/runtime"
@@ -63,6 +65,46 @@ func currentMigrationRules() map[string]string {
 	return migrationRules
 }
 
+type ClientConfigLoader interface {
+	ConfigAccess
+	// IsDefaultConfig returns true if the returned config matches the defaults.
+	IsDefaultConfig(*restclient.Config) bool
+	// Load returns the latest config
+	Load() (*clientcmdapi.Config, error)
+}
+
+type KubeconfigGetter func() (*clientcmdapi.Config, error)
+
+type ClientConfigGetter struct {
+	kubeconfigGetter KubeconfigGetter
+}
+
+// ClientConfigGetter implements the ClientConfigLoader interface.
+var _ ClientConfigLoader = &ClientConfigGetter{}
+
+func (g *ClientConfigGetter) Load() (*clientcmdapi.Config, error) {
+	return g.kubeconfigGetter()
+}
+
+func (g *ClientConfigGetter) GetLoadingPrecedence() []string {
+	return nil
+}
+func (g *ClientConfigGetter) GetStartingConfig() (*clientcmdapi.Config, error) {
+	return g.kubeconfigGetter()
+}
+func (g *ClientConfigGetter) GetDefaultFilename() string {
+	return ""
+}
+func (g *ClientConfigGetter) IsExplicitFile() bool {
+	return false
+}
+func (g *ClientConfigGetter) GetExplicitFile() string {
+	return ""
+}
+func (g *ClientConfigGetter) IsDefaultConfig(config *restclient.Config) bool {
+	return false
+}
+
 // ClientConfigLoadingRules is an ExplicitPath and string slice of specific locations that are used for merging together a Config
 // Callers can put the chain together however they want, but we'd recommend:
 // EnvVarPathFiles if set (a list of files if set) OR the HomeDirectoryPath
@@ -78,7 +120,14 @@ type ClientConfigLoadingRules struct {
 	// DoNotResolvePaths indicates whether or not to resolve paths with respect to the originating files.  This is phrased as a negative so
 	// that a default object that doesn't set this will usually get the behavior it wants.
 	DoNotResolvePaths bool
+
+	// DefaultClientConfig is an optional field indicating what rules to use to calculate a default configuration.
+	// This should match the overrides passed in to ClientConfig loader.
+	DefaultClientConfig ClientConfig
 }
+
+// ClientConfigLoadingRules implements the ClientConfigLoader interface.
+var _ ClientConfigLoader = &ClientConfigLoadingRules{}
 
 // NewDefaultClientConfigLoadingRules returns a ClientConfigLoadingRules object with default fields filled in.  You are not required to
 // use this constructor
@@ -155,6 +204,7 @@ func (rules *ClientConfigLoadingRules) Load() (*clientcmdapi.Config, error) {
 
 	// first merge all of our maps
 	mapConfig := clientcmdapi.NewConfig()
+
 	for _, kubeconfig := range kubeconfigs {
 		mergo.Merge(mapConfig, kubeconfig)
 	}
@@ -178,7 +228,6 @@ func (rules *ClientConfigLoadingRules) Load() (*clientcmdapi.Config, error) {
 			errlist = append(errlist, err)
 		}
 	}
-
 	return config, utilerrors.NewAggregate(errlist)
 }
 
@@ -193,14 +242,17 @@ func (rules *ClientConfigLoadingRules) Migrate() error {
 		if _, err := os.Stat(destination); err == nil {
 			// if the destination already exists, do nothing
 			continue
+		} else if os.IsPermission(err) {
+			// if we can't access the file, skip it
+			continue
 		} else if !os.IsNotExist(err) {
 			// if we had an error other than non-existence, fail
 			return err
 		}
 
 		if sourceInfo, err := os.Stat(source); err != nil {
-			if os.IsNotExist(err) {
-				// if the source file doesn't exist, there's no work to do.
+			if os.IsNotExist(err) || os.IsPermission(err) {
+				// if the source file doesn't exist or we can't access it, there's no work to do.
 				continue
 			}
 
@@ -227,6 +279,66 @@ func (rules *ClientConfigLoadingRules) Migrate() error {
 	}
 
 	return nil
+}
+
+// GetLoadingPrecedence implements ConfigAccess
+func (rules *ClientConfigLoadingRules) GetLoadingPrecedence() []string {
+	return rules.Precedence
+}
+
+// GetStartingConfig implements ConfigAccess
+func (rules *ClientConfigLoadingRules) GetStartingConfig() (*clientcmdapi.Config, error) {
+	clientConfig := NewNonInteractiveDeferredLoadingClientConfig(rules, &ConfigOverrides{})
+	rawConfig, err := clientConfig.RawConfig()
+	if os.IsNotExist(err) {
+		return clientcmdapi.NewConfig(), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &rawConfig, nil
+}
+
+// GetDefaultFilename implements ConfigAccess
+func (rules *ClientConfigLoadingRules) GetDefaultFilename() string {
+	// Explicit file if we have one.
+	if rules.IsExplicitFile() {
+		return rules.GetExplicitFile()
+	}
+	// Otherwise, first existing file from precedence.
+	for _, filename := range rules.GetLoadingPrecedence() {
+		if _, err := os.Stat(filename); err == nil {
+			return filename
+		}
+	}
+	// If none exists, use the first from precedence.
+	if len(rules.Precedence) > 0 {
+		return rules.Precedence[0]
+	}
+	return ""
+}
+
+// IsExplicitFile implements ConfigAccess
+func (rules *ClientConfigLoadingRules) IsExplicitFile() bool {
+	return len(rules.ExplicitPath) > 0
+}
+
+// GetExplicitFile implements ConfigAccess
+func (rules *ClientConfigLoadingRules) GetExplicitFile() string {
+	return rules.ExplicitPath
+}
+
+// IsDefaultConfig returns true if the provided configuration matches the default
+func (rules *ClientConfigLoadingRules) IsDefaultConfig(config *restclient.Config) bool {
+	if rules.DefaultClientConfig == nil {
+		return false
+	}
+	defaultConfig, err := rules.DefaultClientConfig.ClientConfig()
+	if err != nil {
+		return false
+	}
+	return reflect.DeepEqual(config, defaultConfig)
 }
 
 // LoadFromFile takes a filename and deserializes the contents into Config object
@@ -296,6 +408,7 @@ func WriteToFile(config clientcmdapi.Config, filename string) error {
 			return err
 		}
 	}
+
 	if err := ioutil.WriteFile(filename, content, 0600); err != nil {
 		return err
 	}
@@ -414,7 +527,7 @@ func GetClusterFileReferences(cluster *clientcmdapi.Cluster) []*string {
 }
 
 func GetAuthInfoFileReferences(authInfo *clientcmdapi.AuthInfo) []*string {
-	return []*string{&authInfo.ClientCertificate, &authInfo.ClientKey}
+	return []*string{&authInfo.ClientCertificate, &authInfo.ClientKey, &authInfo.TokenFile}
 }
 
 // ResolvePaths updates the given refs to be absolute paths, relative to the given base directory

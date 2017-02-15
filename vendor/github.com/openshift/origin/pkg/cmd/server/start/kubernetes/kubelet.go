@@ -1,7 +1,6 @@
 package kubernetes
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -10,8 +9,8 @@ import (
 
 	kubeletapp "k8s.io/kubernetes/cmd/kubelet/app"
 	kubeletoptions "k8s.io/kubernetes/cmd/kubelet/app/options"
-	"k8s.io/kubernetes/pkg/util"
 	kflag "k8s.io/kubernetes/pkg/util/flag"
+	"k8s.io/kubernetes/pkg/util/logs"
 )
 
 const kubeletLog = `Start Kubelet
@@ -30,8 +29,8 @@ func NewKubeletCommand(name, fullName string, out io.Writer) *cobra.Command {
 		Run: func(c *cobra.Command, args []string) {
 			startProfiler()
 
-			util.InitLogs()
-			defer util.FlushLogs()
+			logs.InitLogs()
+			defer logs.FlushLogs()
 
 			if err := kubeletapp.Run(kubeletOptions, nil); err != nil {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -43,7 +42,6 @@ func NewKubeletCommand(name, fullName string, out io.Writer) *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.SetNormalizeFunc(kflag.WordSepNormalizeFunc)
-	flags.AddGoFlagSet(flag.CommandLine)
 	kubeletOptions.AddFlags(flags)
 
 	return cmd

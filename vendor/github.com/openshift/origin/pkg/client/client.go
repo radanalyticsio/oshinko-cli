@@ -10,6 +10,7 @@ import (
 	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/errors"
 	"k8s.io/kubernetes/pkg/client/restclient"
+	"k8s.io/kubernetes/pkg/client/typed/discovery"
 
 	"github.com/openshift/origin/pkg/api/latest"
 	"github.com/openshift/origin/pkg/version"
@@ -21,6 +22,7 @@ type Interface interface {
 	BuildConfigsNamespacer
 	BuildLogsNamespacer
 	ImagesInterfacer
+	ImageSignaturesInterfacer
 	ImageStreamsNamespacer
 	ImageStreamMappingsNamespacer
 	ImageStreamTagsNamespacer
@@ -32,6 +34,7 @@ type Interface interface {
 	HostSubnetsInterface
 	NetNamespacesInterface
 	ClusterNetworkingInterface
+	EgressNetworkPoliciesNamespacer
 	IdentitiesInterface
 	UsersInterface
 	GroupsInterface
@@ -45,9 +48,13 @@ type Interface interface {
 	SubjectAccessReviews
 	LocalSubjectAccessReviewsNamespacer
 	SelfSubjectRulesReviewsNamespacer
+	SubjectRulesReviewsNamespacer
 	TemplatesNamespacer
 	TemplateConfigsNamespacer
+	OAuthClientsInterface
+	OAuthClientAuthorizationsInterface
 	OAuthAccessTokensInterface
+	OAuthAuthorizeTokensInterface
 	PoliciesNamespacer
 	PolicyBindingsNamespacer
 	RolesNamespacer
@@ -56,6 +63,9 @@ type Interface interface {
 	ClusterPolicyBindingsInterface
 	ClusterRolesInterface
 	ClusterRoleBindingsInterface
+	ClusterResourceQuotasInterface
+	AppliedClusterResourceQuotasNamespacer
+	RoleBindingRestrictionsNamespacer
 }
 
 // Builds provides a REST client for Builds
@@ -76,6 +86,11 @@ func (c *Client) BuildLogs(namespace string) BuildLogsInterface {
 // Images provides a REST client for Images
 func (c *Client) Images() ImageInterface {
 	return newImages(c)
+}
+
+// ImageSignatures provides a REST client for ImageSignatures
+func (c *Client) ImageSignatures() ImageSignatureInterface {
+	return newImageSignatures(c)
 }
 
 // ImageStreamImages provides a REST client for retrieving image secrets in a namespace
@@ -131,6 +146,11 @@ func (c *Client) NetNamespaces() NetNamespaceInterface {
 // ClusterNetwork provides a REST client for ClusterNetworking
 func (c *Client) ClusterNetwork() ClusterNetworkInterface {
 	return newClusterNetwork(c)
+}
+
+// EgressNetworkPolicies provides a REST client for EgressNetworkPolicy
+func (c *Client) EgressNetworkPolicies(namespace string) EgressNetworkPolicyInterface {
+	return newEgressNetworkPolicy(c, namespace)
 }
 
 // Users provides a REST client for User
@@ -227,9 +247,24 @@ func (c *Client) SelfSubjectRulesReviews(namespace string) SelfSubjectRulesRevie
 	return newSelfSubjectRulesReviews(c, namespace)
 }
 
-// OAuthAccessTokens provides a REST client for OAuthAccessTokens
+func (c *Client) SubjectRulesReviews(namespace string) SubjectRulesReviewInterface {
+	return newSubjectRulesReviews(c, namespace)
+}
+
+func (c *Client) OAuthClients() OAuthClientInterface {
+	return newOAuthClients(c)
+}
+
+func (c *Client) OAuthClientAuthorizations() OAuthClientAuthorizationInterface {
+	return newOAuthClientAuthorizations(c)
+}
+
 func (c *Client) OAuthAccessTokens() OAuthAccessTokenInterface {
 	return newOAuthAccessTokens(c)
+}
+
+func (c *Client) OAuthAuthorizeTokens() OAuthAuthorizeTokenInterface {
+	return newOAuthAuthorizeTokens(c)
 }
 
 func (c *Client) ClusterPolicies() ClusterPolicyInterface {
@@ -246,6 +281,18 @@ func (c *Client) ClusterRoles() ClusterRoleInterface {
 
 func (c *Client) ClusterRoleBindings() ClusterRoleBindingInterface {
 	return newClusterRoleBindings(c)
+}
+
+func (c *Client) ClusterResourceQuotas() ClusterResourceQuotaInterface {
+	return newClusterResourceQuotas(c)
+}
+
+func (c *Client) AppliedClusterResourceQuotas(namespace string) AppliedClusterResourceQuotaInterface {
+	return newAppliedClusterResourceQuotas(c, namespace)
+}
+
+func (c *Client) RoleBindingRestrictions(namespace string) RoleBindingRestrictionInterface {
+	return newRoleBindingRestrictions(c, namespace)
 }
 
 // Client is an OpenShift client object
@@ -269,6 +316,12 @@ func New(c *restclient.Config) (*Client, error) {
 	return &Client{client}, nil
 }
 
+// DiscoveryClient returns a discovery client.
+func (c *Client) Discovery() discovery.DiscoveryInterface {
+	d := NewDiscoveryClient(c.RESTClient)
+	return d
+}
+
 // SetOpenShiftDefaults sets the default settings on the passed
 // client configuration
 func SetOpenShiftDefaults(config *restclient.Config) error {
@@ -283,15 +336,8 @@ func SetOpenShiftDefaults(config *restclient.Config) error {
 	if config.APIPath == "" {
 		config.APIPath = "/oapi"
 	}
-
-	// groupMeta, err := registered.Group(config.GroupVersion.Group)
-	// if err != nil {
-	// 	return fmt.Errorf("API group %q is not recognized (valid values: %v)", config.GroupVersion.Group, latest.Versions)
-	// }
-
-	if config.Codec == nil {
-		config.Codec = kapi.Codecs.LegacyCodec(*config.GroupVersion)
-		// config.Codec = kapi.Codecs.CodecForVersions(groupMeta.Codec, []unversioned.GroupVersion{*config.GroupVersion}, groupMeta.GroupVersions)
+	if config.NegotiatedSerializer == nil {
+		config.NegotiatedSerializer = kapi.Codecs
 	}
 	return nil
 }

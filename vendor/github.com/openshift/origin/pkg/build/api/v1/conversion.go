@@ -11,7 +11,7 @@ import (
 )
 
 func Convert_v1_BuildConfig_To_api_BuildConfig(in *BuildConfig, out *newer.BuildConfig, s conversion.Scope) error {
-	if err := s.DefaultConvert(in, out, conversion.IgnoreMissingFields); err != nil {
+	if err := autoConvert_v1_BuildConfig_To_api_BuildConfig(in, out, s); err != nil {
 		return err
 	}
 
@@ -74,7 +74,7 @@ func Convert_v1_CustomBuildStrategy_To_api_CustomBuildStrategy(in *CustomBuildSt
 }
 
 func Convert_v1_BuildOutput_To_api_BuildOutput(in *BuildOutput, out *newer.BuildOutput, s conversion.Scope) error {
-	if err := s.DefaultConvert(in, out, conversion.IgnoreMissingFields); err != nil {
+	if err := autoConvert_v1_BuildOutput_To_api_BuildOutput(in, out, s); err != nil {
 		return err
 	}
 	if in.To != nil && (in.To.Kind == "ImageStream" || len(in.To.Kind) == 0) {
@@ -85,9 +85,10 @@ func Convert_v1_BuildOutput_To_api_BuildOutput(in *BuildOutput, out *newer.Build
 }
 
 func Convert_v1_BuildTriggerPolicy_To_api_BuildTriggerPolicy(in *BuildTriggerPolicy, out *newer.BuildTriggerPolicy, s conversion.Scope) error {
-	if err := s.DefaultConvert(in, out, conversion.DestFromSource); err != nil {
+	if err := autoConvert_v1_BuildTriggerPolicy_To_api_BuildTriggerPolicy(in, out, s); err != nil {
 		return err
 	}
+
 	switch in.Type {
 	case ImageChangeBuildTriggerTypeDeprecated:
 		out.Type = newer.ImageChangeBuildTriggerType
@@ -100,7 +101,7 @@ func Convert_v1_BuildTriggerPolicy_To_api_BuildTriggerPolicy(in *BuildTriggerPol
 }
 
 func Convert_api_SourceRevision_To_v1_SourceRevision(in *newer.SourceRevision, out *SourceRevision, s conversion.Scope) error {
-	if err := s.DefaultConvert(in, out, conversion.IgnoreMissingFields); err != nil {
+	if err := autoConvert_api_SourceRevision_To_v1_SourceRevision(in, out, s); err != nil {
 		return err
 	}
 	out.Type = BuildSourceGit
@@ -149,51 +150,8 @@ func Convert_api_BuildStrategy_To_v1_BuildStrategy(in *newer.BuildStrategy, out 
 	return nil
 }
 
-func addConversionFuncs(scheme *runtime.Scheme) {
-	err := scheme.AddDefaultingFuncs(
-		func(config *BuildConfigSpec) {
-			if len(config.RunPolicy) == 0 {
-				config.RunPolicy = BuildRunPolicySerial
-			}
-		},
-		func(source *BuildSource) {
-			if (source != nil) && (source.Type == BuildSourceBinary) && (source.Binary == nil) {
-				source.Binary = &BinaryBuildSource{}
-			}
-		},
-		func(strategy *BuildStrategy) {
-			if (strategy != nil) && (strategy.Type == DockerBuildStrategyType) && (strategy.DockerStrategy == nil) {
-				strategy.DockerStrategy = &DockerBuildStrategy{}
-			}
-		},
-		func(obj *SourceBuildStrategy) {
-			if len(obj.From.Kind) == 0 {
-				obj.From.Kind = "ImageStreamTag"
-			}
-		},
-		func(obj *DockerBuildStrategy) {
-			if obj.From != nil && len(obj.From.Kind) == 0 {
-				obj.From.Kind = "ImageStreamTag"
-			}
-		},
-		func(obj *CustomBuildStrategy) {
-			if len(obj.From.Kind) == 0 {
-				obj.From.Kind = "ImageStreamTag"
-			}
-		},
-		// TODO: this defaulter is never called, because triggers with ImageChange type but imagechange nil
-		// are dropped.
-		func(obj *BuildTriggerPolicy) {
-			if obj.Type == ImageChangeBuildTriggerType && obj.ImageChange == nil {
-				obj.ImageChange = &ImageChangeTrigger{}
-			}
-		},
-	)
-	if err != nil {
-		panic(err)
-	}
-
-	scheme.AddConversionFuncs(
+func addConversionFuncs(scheme *runtime.Scheme) error {
+	if err := scheme.AddConversionFuncs(
 		Convert_v1_BuildConfig_To_api_BuildConfig,
 		Convert_api_BuildConfig_To_v1_BuildConfig,
 		Convert_v1_SourceBuildStrategy_To_api_SourceBuildStrategy,
@@ -212,17 +170,20 @@ func addConversionFuncs(scheme *runtime.Scheme) {
 		Convert_api_BuildSource_To_v1_BuildSource,
 		Convert_v1_BuildStrategy_To_api_BuildStrategy,
 		Convert_api_BuildStrategy_To_v1_BuildStrategy,
-	)
+	); err != nil {
+		return err
+	}
 
 	if err := scheme.AddFieldLabelConversionFunc("v1", "Build",
 		oapi.GetFieldLabelConversionFunc(newer.BuildToSelectableFields(&newer.Build{}), map[string]string{"name": "metadata.name"}),
 	); err != nil {
-		panic(err)
+		return err
 	}
 
 	if err := scheme.AddFieldLabelConversionFunc("v1", "BuildConfig",
 		oapi.GetFieldLabelConversionFunc(newer.BuildConfigToSelectableFields(&newer.BuildConfig{}), map[string]string{"name": "metadata.name"}),
 	); err != nil {
-		panic(err)
+		return err
 	}
+	return nil
 }

@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,6 +27,9 @@ import (
 	"github.com/golang/glog"
 	"github.com/imdario/mergo"
 
+	"strconv"
+	"time"
+
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/client/restclient"
 	clientauth "k8s.io/kubernetes/pkg/client/unversioned/auth"
@@ -34,15 +37,24 @@ import (
 )
 
 var (
-	// DefaultCluster is the cluster config used when no other config is specified
-	// TODO: eventually apiserver should start on 443 and be secure by default
-	DefaultCluster = clientcmdapi.Cluster{Server: "http://localhost:8080"}
-
-	// EnvVarCluster allows overriding the DefaultCluster using an envvar for the server name
-	EnvVarCluster = clientcmdapi.Cluster{Server: os.Getenv("KUBERNETES_MASTER")}
-
-	DefaultClientConfig = DirectClientConfig{*clientcmdapi.NewConfig(), "", &ConfigOverrides{}, nil}
+	// ClusterDefaults has the same behavior as the old EnvVar and DefaultCluster fields
+	// DEPRECATED will be replaced
+	ClusterDefaults = clientcmdapi.Cluster{Server: getDefaultServer()}
+	// DefaultClientConfig represents the legacy behavior of this package for defaulting
+	// DEPRECATED will be replace
+	DefaultClientConfig = DirectClientConfig{*clientcmdapi.NewConfig(), "", &ConfigOverrides{
+		ClusterDefaults: ClusterDefaults,
+	}, nil, NewDefaultClientConfigLoadingRules()}
 )
+
+// getDefaultServer returns a default setting for DefaultClientConfig
+// DEPRECATED
+func getDefaultServer() string {
+	if server := os.Getenv("KUBERNETES_MASTER"); len(server) > 0 {
+		return server
+	}
+	return "http://localhost:8080"
+}
 
 // ClientConfig is used to make it easy to get an api server client
 type ClientConfig interface {
@@ -54,7 +66,11 @@ type ClientConfig interface {
 	// result of all overrides and a boolean indicating if it was
 	// overridden
 	Namespace() (string, bool, error)
+	// ConfigAccess returns the rules for loading/persisting the config.
+	ConfigAccess() ConfigAccess
 }
+
+type PersistAuthProviderConfigForUser func(user string) restclient.AuthProviderConfigPersister
 
 // DirectClientConfig is a ClientConfig interface that is backed by a clientcmdapi.Config, options overrides, and an optional fallbackReader for auth information
 type DirectClientConfig struct {
@@ -62,21 +78,22 @@ type DirectClientConfig struct {
 	contextName    string
 	overrides      *ConfigOverrides
 	fallbackReader io.Reader
+	configAccess   ConfigAccess
 }
 
 // NewDefaultClientConfig creates a DirectClientConfig using the config.CurrentContext as the context name
 func NewDefaultClientConfig(config clientcmdapi.Config, overrides *ConfigOverrides) ClientConfig {
-	return &DirectClientConfig{config, config.CurrentContext, overrides, nil}
+	return &DirectClientConfig{config, config.CurrentContext, overrides, nil, NewDefaultClientConfigLoadingRules()}
 }
 
 // NewNonInteractiveClientConfig creates a DirectClientConfig using the passed context name and does not have a fallback reader for auth information
-func NewNonInteractiveClientConfig(config clientcmdapi.Config, contextName string, overrides *ConfigOverrides) ClientConfig {
-	return &DirectClientConfig{config, contextName, overrides, nil}
+func NewNonInteractiveClientConfig(config clientcmdapi.Config, contextName string, overrides *ConfigOverrides, configAccess ConfigAccess) ClientConfig {
+	return &DirectClientConfig{config, contextName, overrides, nil, configAccess}
 }
 
 // NewInteractiveClientConfig creates a DirectClientConfig using the passed context name and a reader in case auth information is not provided via files or flags
-func NewInteractiveClientConfig(config clientcmdapi.Config, contextName string, overrides *ConfigOverrides, fallbackReader io.Reader) ClientConfig {
-	return &DirectClientConfig{config, contextName, overrides, fallbackReader}
+func NewInteractiveClientConfig(config clientcmdapi.Config, contextName string, overrides *ConfigOverrides, fallbackReader io.Reader, configAccess ConfigAccess) ClientConfig {
+	return &DirectClientConfig{config, contextName, overrides, fallbackReader, configAccess}
 }
 
 func (config *DirectClientConfig) RawConfig() (clientcmdapi.Config, error) {
@@ -85,15 +102,42 @@ func (config *DirectClientConfig) RawConfig() (clientcmdapi.Config, error) {
 
 // ClientConfig implements ClientConfig
 func (config *DirectClientConfig) ClientConfig() (*restclient.Config, error) {
+	// check that getAuthInfo, getContext, and getCluster do not return an error.
+	// Do this before checking if the curent config is usable in the event that an
+	// AuthInfo, Context, or Cluster config with user-defined names are not found.
+	// This provides a user with the immediate cause for error if one is found
+	configAuthInfo, err := config.getAuthInfo()
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = config.getContext()
+	if err != nil {
+		return nil, err
+	}
+
+	configClusterInfo, err := config.getCluster()
+	if err != nil {
+		return nil, err
+	}
+
 	if err := config.ConfirmUsable(); err != nil {
 		return nil, err
 	}
 
-	configAuthInfo := config.getAuthInfo()
-	configClusterInfo := config.getCluster()
-
 	clientConfig := &restclient.Config{}
 	clientConfig.Host = configClusterInfo.Server
+
+	if len(config.overrides.Timeout) > 0 {
+		if i, err := strconv.ParseInt(config.overrides.Timeout, 10, 64); err == nil && i >= 0 {
+			clientConfig.Timeout = time.Duration(i) * time.Second
+		} else if requestTimeout, err := time.ParseDuration(config.overrides.Timeout); err == nil {
+			clientConfig.Timeout = requestTimeout
+		} else {
+			return nil, fmt.Errorf("Invalid value for option '--request-timeout'. Value must be a single integer, or an integer followed by a corresponding time unit (e.g. 1s | 2m | 3h)")
+		}
+	}
+
 	if u, err := url.ParseRequestURI(clientConfig.Host); err == nil && u.Opaque == "" && len(u.Path) > 1 {
 		u.RawQuery = ""
 		u.Fragment = ""
@@ -110,7 +154,12 @@ func (config *DirectClientConfig) ClientConfig() (*restclient.Config, error) {
 		// mergo is a first write wins for map value and a last writing wins for interface values
 		// NOTE: This behavior changed with https://github.com/imdario/mergo/commit/d304790b2ed594794496464fadd89d2bb266600a.
 		//       Our mergo.Merge version is older than this change.
-		userAuthPartialConfig, err := getUserIdentificationPartialConfig(configAuthInfo, config.fallbackReader)
+		var persister restclient.AuthProviderConfigPersister
+		if config.configAccess != nil {
+			authInfoName, _ := config.getAuthInfoName()
+			persister = PersisterForUser(config.configAccess, authInfoName)
+		}
+		userAuthPartialConfig, err := getUserIdentificationPartialConfig(configAuthInfo, config.fallbackReader, persister)
 		if err != nil {
 			return nil, err
 		}
@@ -152,12 +201,18 @@ func getServerIdentificationPartialConfig(configAuthInfo clientcmdapi.AuthInfo, 
 // 2.  configAuthInfo.auth-path (this file can contain information that conflicts with #1, and we want #1 to win the priority)
 // 3.  if there is not enough information to idenfity the user, load try the ~/.kubernetes_auth file
 // 4.  if there is not enough information to identify the user, prompt if possible
-func getUserIdentificationPartialConfig(configAuthInfo clientcmdapi.AuthInfo, fallbackReader io.Reader) (*restclient.Config, error) {
+func getUserIdentificationPartialConfig(configAuthInfo clientcmdapi.AuthInfo, fallbackReader io.Reader, persistAuthConfig restclient.AuthProviderConfigPersister) (*restclient.Config, error) {
 	mergedConfig := &restclient.Config{}
 
 	// blindly overwrite existing values based on precedence
 	if len(configAuthInfo.Token) > 0 {
 		mergedConfig.BearerToken = configAuthInfo.Token
+	} else if len(configAuthInfo.TokenFile) > 0 {
+		tokenBytes, err := ioutil.ReadFile(configAuthInfo.TokenFile)
+		if err != nil {
+			return nil, err
+		}
+		mergedConfig.BearerToken = string(tokenBytes)
 	}
 	if len(configAuthInfo.Impersonate) > 0 {
 		mergedConfig.Impersonate = configAuthInfo.Impersonate
@@ -171,6 +226,10 @@ func getUserIdentificationPartialConfig(configAuthInfo clientcmdapi.AuthInfo, fa
 	if len(configAuthInfo.Username) > 0 || len(configAuthInfo.Password) > 0 {
 		mergedConfig.Username = configAuthInfo.Username
 		mergedConfig.Password = configAuthInfo.Password
+	}
+	if configAuthInfo.AuthProvider != nil {
+		mergedConfig.AuthProvider = configAuthInfo.AuthProvider
+		mergedConfig.AuthConfigPersister = persistAuthConfig
 	}
 
 	// if there still isn't enough information to authenticate the user, try prompting
@@ -212,17 +271,20 @@ func makeServerIdentificationConfig(info clientauth.Info) restclient.Config {
 func canIdentifyUser(config restclient.Config) bool {
 	return len(config.Username) > 0 ||
 		(len(config.CertFile) > 0 || len(config.CertData) > 0) ||
-		len(config.BearerToken) > 0
-
+		len(config.BearerToken) > 0 ||
+		config.AuthProvider != nil
 }
 
-// Namespace implements KubeConfig
+// Namespace implements ClientConfig
 func (config *DirectClientConfig) Namespace() (string, bool, error) {
 	if err := config.ConfirmUsable(); err != nil {
 		return "", false, err
 	}
 
-	configContext := config.getContext()
+	configContext, err := config.getContext()
+	if err != nil {
+		return "", false, err
+	}
 
 	if len(configContext.Namespace) == 0 {
 		return api.NamespaceDefault, false, nil
@@ -235,12 +297,21 @@ func (config *DirectClientConfig) Namespace() (string, bool, error) {
 	return configContext.Namespace, overridden, nil
 }
 
+// ConfigAccess implements ClientConfig
+func (config *DirectClientConfig) ConfigAccess() ConfigAccess {
+	return config.configAccess
+}
+
 // ConfirmUsable looks a particular context and determines if that particular part of the config is useable.  There might still be errors in the config,
 // but no errors in the sections requested or referenced.  It does not return early so that it can find as many errors as possible.
 func (config *DirectClientConfig) ConfirmUsable() error {
 	validationErrors := make([]error, 0)
-	validationErrors = append(validationErrors, validateAuthInfo(config.getAuthInfoName(), config.getAuthInfo())...)
-	validationErrors = append(validationErrors, validateClusterInfo(config.getClusterName(), config.getCluster())...)
+	authInfoName, _ := config.getAuthInfoName()
+	authInfo, _ := config.getAuthInfo()
+	validationErrors = append(validationErrors, validateAuthInfo(authInfoName, authInfo)...)
+	clusterName, _ := config.getClusterName()
+	cluster, _ := config.getCluster()
+	validationErrors = append(validationErrors, validateClusterInfo(clusterName, cluster)...)
 	// when direct client config is specified, and our only error is that no server is defined, we should
 	// return a standard "no config" error
 	if len(validationErrors) == 1 && validationErrors[0] == ErrEmptyCluster {
@@ -249,66 +320,84 @@ func (config *DirectClientConfig) ConfirmUsable() error {
 	return newErrConfigurationInvalid(validationErrors)
 }
 
-func (config *DirectClientConfig) getContextName() string {
+// getContextName returns the default, or user-set context name, and a boolean that indicates
+// whether the default context name has been overwritten by a user-set flag, or left as its default value
+func (config *DirectClientConfig) getContextName() (string, bool) {
 	if len(config.overrides.CurrentContext) != 0 {
-		return config.overrides.CurrentContext
+		return config.overrides.CurrentContext, true
 	}
 	if len(config.contextName) != 0 {
-		return config.contextName
+		return config.contextName, false
 	}
 
-	return config.config.CurrentContext
+	return config.config.CurrentContext, false
 }
 
-func (config *DirectClientConfig) getAuthInfoName() string {
+// getAuthInfoName returns a string containing the current authinfo name for the current context,
+// and a boolean indicating  whether the default authInfo name is overwritten by a user-set flag, or
+// left as its default value
+func (config *DirectClientConfig) getAuthInfoName() (string, bool) {
 	if len(config.overrides.Context.AuthInfo) != 0 {
-		return config.overrides.Context.AuthInfo
+		return config.overrides.Context.AuthInfo, true
 	}
-	return config.getContext().AuthInfo
+	context, _ := config.getContext()
+	return context.AuthInfo, false
 }
 
-func (config *DirectClientConfig) getClusterName() string {
+// getClusterName returns a string containing the default, or user-set cluster name, and a boolean
+// indicating whether the default clusterName has been overwritten by a user-set flag, or left as
+// its default value
+func (config *DirectClientConfig) getClusterName() (string, bool) {
 	if len(config.overrides.Context.Cluster) != 0 {
-		return config.overrides.Context.Cluster
+		return config.overrides.Context.Cluster, true
 	}
-	return config.getContext().Cluster
+	context, _ := config.getContext()
+	return context.Cluster, false
 }
 
-func (config *DirectClientConfig) getContext() clientcmdapi.Context {
+// getContext returns the clientcmdapi.Context, or an error if a required context is not found.
+func (config *DirectClientConfig) getContext() (clientcmdapi.Context, error) {
 	contexts := config.config.Contexts
-	contextName := config.getContextName()
+	contextName, required := config.getContextName()
 
 	var mergedContext clientcmdapi.Context
 	if configContext, exists := contexts[contextName]; exists {
 		mergo.Merge(&mergedContext, configContext)
+	} else if required {
+		return clientcmdapi.Context{}, fmt.Errorf("context %q does not exist", contextName)
 	}
 	mergo.Merge(&mergedContext, config.overrides.Context)
 
-	return mergedContext
+	return mergedContext, nil
 }
 
-func (config *DirectClientConfig) getAuthInfo() clientcmdapi.AuthInfo {
+// getAuthInfo returns the clientcmdapi.AuthInfo, or an error if a required auth info is not found.
+func (config *DirectClientConfig) getAuthInfo() (clientcmdapi.AuthInfo, error) {
 	authInfos := config.config.AuthInfos
-	authInfoName := config.getAuthInfoName()
+	authInfoName, required := config.getAuthInfoName()
 
 	var mergedAuthInfo clientcmdapi.AuthInfo
 	if configAuthInfo, exists := authInfos[authInfoName]; exists {
 		mergo.Merge(&mergedAuthInfo, configAuthInfo)
+	} else if required {
+		return clientcmdapi.AuthInfo{}, fmt.Errorf("auth info %q does not exist", authInfoName)
 	}
 	mergo.Merge(&mergedAuthInfo, config.overrides.AuthInfo)
 
-	return mergedAuthInfo
+	return mergedAuthInfo, nil
 }
 
-func (config *DirectClientConfig) getCluster() clientcmdapi.Cluster {
+// getCluster returns the clientcmdapi.Cluster, or an error if a required cluster is not found.
+func (config *DirectClientConfig) getCluster() (clientcmdapi.Cluster, error) {
 	clusterInfos := config.config.Clusters
-	clusterInfoName := config.getClusterName()
+	clusterInfoName, required := config.getClusterName()
 
 	var mergedClusterInfo clientcmdapi.Cluster
-	mergo.Merge(&mergedClusterInfo, DefaultCluster)
-	mergo.Merge(&mergedClusterInfo, EnvVarCluster)
+	mergo.Merge(&mergedClusterInfo, config.overrides.ClusterDefaults)
 	if configClusterInfo, exists := clusterInfos[clusterInfoName]; exists {
 		mergo.Merge(&mergedClusterInfo, configClusterInfo)
+	} else if required {
+		return clientcmdapi.Cluster{}, fmt.Errorf("cluster %q does not exist", clusterInfoName)
 	}
 	mergo.Merge(&mergedClusterInfo, config.overrides.ClusterInfo)
 	// An override of --insecure-skip-tls-verify=true and no accompanying CA/CA data should clear already-set CA/CA data
@@ -320,11 +409,13 @@ func (config *DirectClientConfig) getCluster() clientcmdapi.Cluster {
 		mergedClusterInfo.CertificateAuthorityData = nil
 	}
 
-	return mergedClusterInfo
+	return mergedClusterInfo, nil
 }
 
 // inClusterClientConfig makes a config that will work from within a kubernetes cluster container environment.
 type inClusterClientConfig struct{}
+
+var _ ClientConfig = inClusterClientConfig{}
 
 func (inClusterClientConfig) RawConfig() (clientcmdapi.Config, error) {
 	return clientcmdapi.Config{}, fmt.Errorf("inCluster environment config doesn't support multiple clusters")
@@ -334,21 +425,25 @@ func (inClusterClientConfig) ClientConfig() (*restclient.Config, error) {
 	return restclient.InClusterConfig()
 }
 
-func (inClusterClientConfig) Namespace() (string, error) {
+func (inClusterClientConfig) Namespace() (string, bool, error) {
 	// This way assumes you've set the POD_NAMESPACE environment variable using the downward API.
 	// This check has to be done first for backwards compatibility with the way InClusterConfig was originally set up
 	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
-		return ns, nil
+		return ns, true, nil
 	}
 
 	// Fall back to the namespace associated with the service account token, if available
 	if data, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
 		if ns := strings.TrimSpace(string(data)); len(ns) > 0 {
-			return ns, nil
+			return ns, true, nil
 		}
 	}
 
-	return "default", nil
+	return "default", false, nil
+}
+
+func (inClusterClientConfig) ConfigAccess() ConfigAccess {
+	return NewDefaultClientConfigLoadingRules()
 }
 
 // Possible returns true if loading an inside-kubernetes-cluster is possible.
@@ -373,8 +468,17 @@ func BuildConfigFromFlags(masterUrl, kubeconfigPath string) (*restclient.Config,
 		}
 		glog.Warning("error creating inClusterConfig, falling back to default config: ", err)
 	}
-
 	return NewNonInteractiveDeferredLoadingClientConfig(
 		&ClientConfigLoadingRules{ExplicitPath: kubeconfigPath},
 		&ConfigOverrides{ClusterInfo: clientcmdapi.Cluster{Server: masterUrl}}).ClientConfig()
+}
+
+// BuildConfigFromKubeconfigGetter is a helper function that builds configs from a master
+// url and a kubeconfigGetter.
+func BuildConfigFromKubeconfigGetter(masterUrl string, kubeconfigGetter KubeconfigGetter) (*restclient.Config, error) {
+	// TODO: We do not need a DeferredLoader here. Refactor code and see if we can use DirectClientConfig here.
+	cc := NewNonInteractiveDeferredLoadingClientConfig(
+		&ClientConfigGetter{kubeconfigGetter: kubeconfigGetter},
+		&ConfigOverrides{ClusterInfo: clientcmdapi.Cluster{Server: masterUrl}})
+	return cc.ClientConfig()
 }

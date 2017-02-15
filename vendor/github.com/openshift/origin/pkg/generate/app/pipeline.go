@@ -8,6 +8,7 @@ import (
 
 	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/validation"
+	extensions "k8s.io/kubernetes/pkg/apis/extensions"
 	"k8s.io/kubernetes/pkg/runtime"
 	"k8s.io/kubernetes/pkg/util/intstr"
 	kuval "k8s.io/kubernetes/pkg/util/validation"
@@ -253,20 +254,27 @@ func (g PipelineGroup) String() string {
 	return strings.Join(s, "+")
 }
 
-var invalidServiceChars = regexp.MustCompile("[^-a-z0-9]")
-
-func makeValidServiceName(name string) (string, string) {
-	if ok, _ := validation.ValidateServiceName(name, false); ok {
-		return name, ""
-	}
+// MakeSimpleName strips any non-alphanumeric characters out of a string and returns
+// either an empty string or a string which is valid for most Kubernetes resources.
+func MakeSimpleName(name string) string {
 	name = strings.ToLower(name)
 	name = invalidServiceChars.ReplaceAllString(name, "")
 	name = strings.TrimFunc(name, func(r rune) bool { return r == '-' })
-	switch {
-	case len(name) == 0:
+	if len(name) > kuval.DNS1035LabelMaxLength {
+		name = name[:kuval.DNS1035LabelMaxLength]
+	}
+	return name
+}
+
+var invalidServiceChars = regexp.MustCompile("[^-a-z0-9]")
+
+func makeValidServiceName(name string) (string, string) {
+	if len(validation.ValidateServiceName(name, false)) == 0 {
+		return name, ""
+	}
+	name = MakeSimpleName(name)
+	if len(name) == 0 {
 		return "", "service-"
-	case len(name) > kuval.DNS952LabelMaxLength:
-		name = name[:kuval.DNS952LabelMaxLength]
 	}
 	return name, ""
 }
@@ -319,7 +327,7 @@ func UniqueContainerToServicePorts(ports []kapi.ContainerPort) []kapi.ServicePor
 	var result []kapi.ServicePort
 	svcPorts := map[string]struct{}{}
 	for _, p := range ports {
-		name := portName(p.ContainerPort, p.Protocol)
+		name := portName(int(p.ContainerPort), p.Protocol)
 		_, exists := svcPorts[name]
 		if exists {
 			continue
@@ -329,7 +337,7 @@ func UniqueContainerToServicePorts(ports []kapi.ContainerPort) []kapi.ServicePor
 			Name:       name,
 			Port:       p.ContainerPort,
 			Protocol:   p.Protocol,
-			TargetPort: intstr.FromInt(p.ContainerPort),
+			TargetPort: intstr.FromInt(int(p.ContainerPort)),
 		})
 	}
 	return result
@@ -341,19 +349,32 @@ func AddServices(objects Objects, firstPortOnly bool) Objects {
 	for _, o := range objects {
 		switch t := o.(type) {
 		case *deploy.DeploymentConfig:
-			ports := UniqueContainerToServicePorts(AllContainerPorts(t.Spec.Template.Spec.Containers...))
-			if len(ports) == 0 {
-				continue
+			svc := addServiceInternal(t.Spec.Template.Spec.Containers, t.ObjectMeta, t.Spec.Selector, firstPortOnly)
+			if svc != nil {
+				svcs = append(svcs, svc)
 			}
-			if firstPortOnly {
-				ports = ports[:1]
+		case *extensions.DaemonSet:
+			svc := addServiceInternal(t.Spec.Template.Spec.Containers, t.ObjectMeta, t.Spec.Template.Labels, firstPortOnly)
+			if svc != nil {
+				svcs = append(svcs, svc)
 			}
-			svc := GenerateService(t.ObjectMeta, t.Spec.Selector)
-			svc.Spec.Ports = ports
-			svcs = append(svcs, svc)
 		}
 	}
 	return append(objects, svcs...)
+}
+
+// addServiceInternal utility used by AddServices to create services for multiple types.
+func addServiceInternal(containers []kapi.Container, objectMeta kapi.ObjectMeta, selector map[string]string, firstPortOnly bool) *kapi.Service {
+	ports := UniqueContainerToServicePorts(AllContainerPorts(containers...))
+	if len(ports) == 0 {
+		return nil
+	}
+	if firstPortOnly {
+		ports = ports[:1]
+	}
+	svc := GenerateService(objectMeta, selector)
+	svc.Spec.Ports = ports
+	return svc
 }
 
 // AddRoutes sets up routes for the provided objects.
@@ -368,7 +389,7 @@ func AddRoutes(objects Objects) Objects {
 					Labels: t.Labels,
 				},
 				Spec: route.RouteSpec{
-					To: kapi.ObjectReference{
+					To: route.RouteTargetReference{
 						Name: t.Name,
 					},
 				},
@@ -406,11 +427,11 @@ func (a *acceptUnique) Accept(from interface{}) bool {
 	if err != nil {
 		return false
 	}
-	gvk, err := a.typer.ObjectKind(obj)
+	gvk, _, err := a.typer.ObjectKinds(obj)
 	if err != nil {
 		return false
 	}
-	key := fmt.Sprintf("%s/%s/%s", gvk.Kind, meta.Namespace, meta.Name)
+	key := fmt.Sprintf("%s/%s/%s", gvk[0].Kind, meta.Namespace, meta.Name)
 	_, exists := a.objects[key]
 	if exists {
 		return false
@@ -450,11 +471,11 @@ func (a *acceptBuildConfigs) Accept(from interface{}) bool {
 	if err != nil {
 		return false
 	}
-	gvk, err := a.typer.ObjectKind(obj)
+	gvk, _, err := a.typer.ObjectKinds(obj)
 	if err != nil {
 		return false
 	}
-	return gvk.GroupKind() == build.Kind("BuildConfig") || gvk.GroupKind() == image.Kind("ImageStream")
+	return gvk[0].GroupKind() == build.Kind("BuildConfig") || gvk[0].GroupKind() == image.Kind("ImageStream")
 }
 
 // NewAcceptBuildConfigs creates an acceptor accepting BuildConfig objects

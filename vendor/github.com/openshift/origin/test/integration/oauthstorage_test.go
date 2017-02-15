@@ -1,5 +1,3 @@
-// +build integration
-
 package integration
 
 import (
@@ -12,10 +10,8 @@ import (
 	"golang.org/x/oauth2"
 
 	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/apimachinery/registered"
-	etcdstorage "k8s.io/kubernetes/pkg/storage/etcd"
-	"k8s.io/kubernetes/pkg/storage/etcd/etcdtest"
 
+	originrest "github.com/openshift/origin/pkg/cmd/server/origin/rest"
 	"github.com/openshift/origin/pkg/oauth/api"
 	accesstokenregistry "github.com/openshift/origin/pkg/oauth/registry/oauthaccesstoken"
 	accesstokenetcd "github.com/openshift/origin/pkg/oauth/registry/oauthaccesstoken/etcd"
@@ -26,6 +22,7 @@ import (
 	"github.com/openshift/origin/pkg/oauth/server/osinserver"
 	registrystorage "github.com/openshift/origin/pkg/oauth/server/osinserver/registrystorage"
 	testutil "github.com/openshift/origin/test/util"
+	testserver "github.com/openshift/origin/test/util/server"
 )
 
 type testUser struct {
@@ -56,20 +53,32 @@ func (u *testUser) ConvertFromAccessToken(*api.OAuthAccessToken) (interface{}, e
 
 func TestOAuthStorage(t *testing.T) {
 	testutil.RequireEtcd(t)
+	defer testutil.DumpEtcdOnFailure(t)
 
-	groupMeta := registered.GroupOrDie(api.GroupName)
-	etcdClient, err := testutil.MakeNewEtcdClient()
+	masterOptions, err := testserver.DefaultMasterOptions()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	etcdHelper := etcdstorage.NewEtcdStorage(etcdClient, kapi.Codecs.LegacyCodec(groupMeta.GroupVersions...), etcdtest.PathPrefix(), false)
 
-	accessTokenStorage := accesstokenetcd.NewREST(etcdHelper)
-	accessTokenRegistry := accesstokenregistry.NewRegistry(accessTokenStorage)
-	authorizeTokenStorage := authorizetokenetcd.NewREST(etcdHelper)
-	authorizeTokenRegistry := authorizetokenregistry.NewRegistry(authorizeTokenStorage)
-	clientStorage := clientetcd.NewREST(etcdHelper)
+	optsGetter := originrest.StorageOptions(*masterOptions)
+
+	clientStorage, err := clientetcd.NewREST(optsGetter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	clientRegistry := clientregistry.NewRegistry(clientStorage)
+
+	accessTokenStorage, err := accesstokenetcd.NewREST(optsGetter, clientRegistry)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	accessTokenRegistry := accesstokenregistry.NewRegistry(accessTokenStorage)
+
+	authorizeTokenStorage, err := authorizetokenetcd.NewREST(optsGetter, clientRegistry)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	authorizeTokenRegistry := authorizetokenregistry.NewRegistry(authorizeTokenStorage)
 
 	user := &testUser{UserName: "test", UserUID: "1"}
 	storage := registrystorage.New(accessTokenRegistry, authorizeTokenRegistry, clientRegistry, user)
@@ -77,7 +86,7 @@ func TestOAuthStorage(t *testing.T) {
 	oauthServer := osinserver.New(
 		osinserver.NewDefaultServerConfig(),
 		storage,
-		osinserver.AuthorizeHandlerFunc(func(ar *osin.AuthorizeRequest, w http.ResponseWriter) (bool, error) {
+		osinserver.AuthorizeHandlerFunc(func(ar *osin.AuthorizeRequest, resp *osin.Response, w http.ResponseWriter) (bool, error) {
 			ar.UserData = "test"
 			ar.Authorized = true
 			return false, nil
@@ -112,15 +121,22 @@ func TestOAuthStorage(t *testing.T) {
 	}))
 
 	clientRegistry.CreateClient(kapi.NewContext(), &api.OAuthClient{
-		ObjectMeta:   kapi.ObjectMeta{Name: "test"},
-		Secret:       "secret",
-		RedirectURIs: []string{assertServer.URL + "/assert"},
+		ObjectMeta:        kapi.ObjectMeta{Name: "test"},
+		Secret:            "secret",
+		AdditionalSecrets: []string{"secret1"},
+		RedirectURIs:      []string{assertServer.URL + "/assert"},
 	})
 	storedClient, err := storage.GetClient("test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if storedClient.GetSecret() != "secret" {
+	if !osin.CheckClientSecret(storedClient, "secret") {
+		t.Fatalf("unexpected stored client: %#v", storedClient)
+	}
+	if !osin.CheckClientSecret(storedClient, "secret1") {
+		t.Fatalf("unexpected stored client: %#v", storedClient)
+	}
+	if osin.CheckClientSecret(storedClient, "secret2") {
 		t.Fatalf("unexpected stored client: %#v", storedClient)
 	}
 

@@ -8,7 +8,7 @@ const NoSuchClusterCode = 103
 const ComponentExistsCode = 104
 
 type ClusterError struct {
-	Msg string
+	Msg  string
 	Code int
 }
 

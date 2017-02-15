@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/golang/glog"
 	kapi "k8s.io/kubernetes/pkg/api"
@@ -9,6 +10,7 @@ import (
 	"k8s.io/kubernetes/pkg/watch"
 
 	routeapi "github.com/openshift/origin/pkg/route/api"
+	"github.com/openshift/origin/pkg/route/api/validation"
 	"github.com/openshift/origin/pkg/router"
 )
 
@@ -84,6 +86,11 @@ func (p *UniqueHost) HandleEndpoints(eventType watch.EventType, endpoints *kapi.
 	return p.plugin.HandleEndpoints(eventType, endpoints)
 }
 
+// HandleNode processes watch events on the Node resource and calls the router
+func (p *UniqueHost) HandleNode(eventType watch.EventType, node *kapi.Node) error {
+	return p.plugin.HandleNode(eventType, node)
+}
+
 // HandleRoute processes watch events on the Route resource.
 // TODO: this function can probably be collapsed with the router itself, as a function that
 //   determines which component needs to be recalculated (which template) and then does so
@@ -93,7 +100,6 @@ func (p *UniqueHost) HandleRoute(eventType watch.EventType, route *routeapi.Rout
 		return nil
 	}
 
-	key := routeKey(route)
 	routeName := routeNameKey(route)
 
 	host := p.hostForRoute(route)
@@ -103,6 +109,20 @@ func (p *UniqueHost) HandleRoute(eventType watch.EventType, route *routeapi.Rout
 		return nil
 	}
 	route.Spec.Host = host
+
+	// Run time check to defend against older routes. Validate that the
+	// route host name conforms to DNS requirements.
+	if errs := validation.ValidateHostName(route); len(errs) > 0 {
+		glog.V(4).Infof("Route %s - invalid host name %s", routeName, host)
+		errMessages := make([]string, len(errs))
+		for i := 0; i < len(errs); i++ {
+			errMessages[i] = errs[i].Error()
+		}
+
+		err := fmt.Errorf("host name validation errors: %s", strings.Join(errMessages, ", "))
+		p.recorder.RecordRouteRejection(route, "InvalidHost", err.Error())
+		return err
+	}
 
 	// ensure hosts can only be claimed by one namespace at a time
 	// TODO: this could be abstracted above this layer?
@@ -132,6 +152,24 @@ func (p *UniqueHost) HandleRoute(eventType watch.EventType, route *routeapi.Rout
 				}
 			}
 			if !added {
+				// Clean out any old form of this route
+				next := []*routeapi.Route{}
+				for i := range old {
+					if routeNameKey(old[i]) != routeNameKey(route) {
+						next = append(next, old[i])
+					}
+				}
+				old = next
+
+				// We need to reset the oldest in case we removed it, but if it was the only
+				// item, we'll just use ourselves since we'll become the oldest, and for
+				// the append below, it doesn't matter
+				if len(next) > 0 {
+					oldest = old[0]
+				} else {
+					oldest = route
+				}
+
 				if routeapi.RouteLessThan(route, oldest) {
 					p.hostToRoute[host] = append([]*routeapi.Route{route}, old...)
 				} else {
@@ -154,7 +192,7 @@ func (p *UniqueHost) HandleRoute(eventType watch.EventType, route *routeapi.Rout
 			p.hostToRoute[host] = []*routeapi.Route{route}
 		}
 	} else {
-		glog.V(4).Infof("Route %s claims %s", key, host)
+		glog.V(4).Infof("Route %s claims %s", routeName, host)
 		p.hostToRoute[host] = []*routeapi.Route{route}
 	}
 
@@ -162,7 +200,7 @@ func (p *UniqueHost) HandleRoute(eventType watch.EventType, route *routeapi.Rout
 	case watch.Added, watch.Modified:
 		if old, ok := p.routeToHost[routeName]; ok {
 			if old != host {
-				glog.V(4).Infof("Route %s changed from serving host %s to host %s", key, old, host)
+				glog.V(4).Infof("Route %s changed from serving host %s to host %s", routeName, old, host)
 				delete(p.hostToRoute, old)
 			}
 		}
@@ -170,7 +208,7 @@ func (p *UniqueHost) HandleRoute(eventType watch.EventType, route *routeapi.Rout
 		return p.plugin.HandleRoute(eventType, route)
 
 	case watch.Deleted:
-		glog.V(4).Infof("Deleting routes for %s", key)
+		glog.V(4).Infof("Deleting routes for %s", routeName)
 		if old, ok := p.hostToRoute[host]; ok {
 			switch len(old) {
 			case 1, 0:
@@ -182,7 +220,12 @@ func (p *UniqueHost) HandleRoute(eventType watch.EventType, route *routeapi.Rout
 						next = append(next, old[i])
 					}
 				}
-				p.hostToRoute[host] = next
+
+				if len(next) > 0 {
+					p.hostToRoute[host] = next
+				} else {
+					delete(p.hostToRoute, host)
+				}
 			}
 		}
 		delete(p.routeToHost, routeName)
@@ -212,9 +255,18 @@ func (p *UniqueHost) HandleNamespaces(namespaces sets.String) error {
 	return p.plugin.HandleNamespaces(namespaces)
 }
 
-// routeKey returns the internal router key to use for the given Route.
-func routeKey(route *routeapi.Route) string {
-	return fmt.Sprintf("%s/%s", route.Namespace, route.Spec.To.Name)
+func (p *UniqueHost) SetLastSyncProcessed(processed bool) error {
+	return p.plugin.SetLastSyncProcessed(processed)
+}
+
+// routeKeys returns the internal router key to use for the given Route.
+func routeKeys(route *routeapi.Route) []string {
+	keys := make([]string, 1+len(route.Spec.AlternateBackends))
+	keys[0] = fmt.Sprintf("%s/%s", route.Namespace, route.Spec.To.Name)
+	for i, svc := range route.Spec.AlternateBackends {
+		keys[i] = fmt.Sprintf("%s/%s", route.Namespace, svc.Name)
+	}
+	return keys
 }
 
 // routeNameKey returns a unique name for a given route

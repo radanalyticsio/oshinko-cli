@@ -15,12 +15,11 @@ import (
 	"k8s.io/kubernetes/pkg/kubectl/resource"
 	"k8s.io/kubernetes/pkg/runtime"
 	utilerrors "k8s.io/kubernetes/pkg/util/errors"
-	"k8s.io/kubernetes/pkg/util/sets"
+	utilruntime "k8s.io/kubernetes/pkg/util/runtime"
 	"k8s.io/kubernetes/pkg/util/wait"
 
 	"github.com/openshift/origin/pkg/api/latest"
 	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
-	authorizationclient "github.com/openshift/origin/pkg/authorization/client"
 	"github.com/openshift/origin/pkg/client"
 	configcmd "github.com/openshift/origin/pkg/config/cmd"
 	projectapi "github.com/openshift/origin/pkg/project/api"
@@ -38,10 +37,10 @@ type REST struct {
 
 	// policyBindings is an auth cache that is shared with the authorizer for the API server.
 	// we use this cache to detect when the authorizer has observed the change for the auth rules
-	policyBindings authorizationclient.PolicyBindingsReadOnlyNamespacer
+	policyBindings client.PolicyBindingsListerNamespacer
 }
 
-func NewREST(message, templateNamespace, templateName string, openshiftClient *client.Client, kubeClient *kclient.Client, policyBindingCache authorizationclient.PolicyBindingsReadOnlyNamespacer) *REST {
+func NewREST(message, templateNamespace, templateName string, openshiftClient *client.Client, kubeClient *kclient.Client, policyBindingCache client.PolicyBindingsListerNamespacer) *REST {
 	return &REST{
 		message:           message,
 		templateNamespace: templateNamespace,
@@ -133,9 +132,19 @@ func (r *REST) Create(ctx kapi.Context, obj runtime.Object) (runtime.Object, err
 	}
 
 	// we split out project creation separately so that in a case of racers for the same project, only one will win and create the rest of their template objects
-	if _, err := r.openshiftClient.Projects().Create(projectFromTemplate); err != nil {
+	createdProject, err := r.openshiftClient.Projects().Create(projectFromTemplate)
+	if err != nil {
+		// log errors other than AlreadyExists and Forbidden
+		if !kapierror.IsAlreadyExists(err) && !kapierror.IsForbidden(err) {
+			utilruntime.HandleError(fmt.Errorf("error creating requested project %#v: %v", projectFromTemplate, err))
+		}
 		return nil, err
 	}
+
+	// Stop on the first error, since we have to delete the whole project if any item in the template fails
+	stopOnErr := configcmd.AfterFunc(func(_ *resource.Info, err error) bool {
+		return err != nil
+	})
 
 	bulk := configcmd.Bulk{
 		Mapper: &resource.Mapper{
@@ -148,9 +157,15 @@ func (r *REST) Create(ctx kapi.Context, obj runtime.Object) (runtime.Object, err
 				return r.kubeClient, nil
 			}),
 		},
-		Op: configcmd.Create,
+		After: stopOnErr,
+		Op:    configcmd.Create,
 	}
 	if err := utilerrors.NewAggregate(bulk.Run(objectsToCreate, projectName)); err != nil {
+		utilruntime.HandleError(fmt.Errorf("error creating items in requested project %q: %v", createdProject.Name, err))
+		// We have to clean up the project if any part of the project request template fails
+		if deleteErr := r.openshiftClient.Projects().Delete(createdProject.Name); deleteErr != nil {
+			utilruntime.HandleError(fmt.Errorf("error cleaning up requested project %q: %v", createdProject.Name, deleteErr))
+		}
 		return nil, kapierror.NewInternalError(err)
 	}
 
@@ -169,7 +184,7 @@ func (r *REST) waitForRoleBinding(namespace, name string) {
 	backoff := kclient.DefaultBackoff
 	backoff.Steps = 6 // this effectively waits for 6-ish seconds
 	err := wait.ExponentialBackoff(backoff, func() (bool, error) {
-		policyBindingList, _ := r.policyBindings.ReadOnlyPolicyBindings(namespace).List(nil)
+		policyBindingList, _ := r.policyBindings.PolicyBindings(namespace).List(kapi.ListOptions{})
 		for _, policyBinding := range policyBindingList.Items {
 			for roleBindingName := range policyBinding.RoleBindings {
 				if roleBindingName == name {
@@ -204,15 +219,14 @@ func (r *REST) List(ctx kapi.Context, options *kapi.ListOptions) (runtime.Object
 
 	// the caller might not have permission to run a subject access review (he has it by default, but it could have been removed).
 	// So we'll escalate for the subject access review to determine rights
-	accessReview := &authorizationapi.SubjectAccessReview{
-		Action: authorizationapi.AuthorizationAttributes{
-			Verb:     "create",
-			Group:    projectapi.GroupName,
-			Resource: "projectrequests",
-		},
-		User:   userInfo.GetName(),
-		Groups: sets.NewString(userInfo.GetGroups()...),
-	}
+	accessReview := authorizationapi.AddUserToSAR(userInfo,
+		&authorizationapi.SubjectAccessReview{
+			Action: authorizationapi.Action{
+				Verb:     "create",
+				Group:    projectapi.GroupName,
+				Resource: "projectrequests",
+			},
+		})
 	accessReviewResponse, err := r.openshiftClient.SubjectAccessReviews().Create(accessReview)
 	if err != nil {
 		return nil, err
@@ -221,7 +235,7 @@ func (r *REST) List(ctx kapi.Context, options *kapi.ListOptions) (runtime.Object
 		return &unversioned.Status{Status: unversioned.StatusSuccess}, nil
 	}
 
-	forbiddenError, _ := kapierror.NewForbidden(projectapi.Resource("projectrequest"), "", errors.New("you may not request a new project via this API.")).(*kapierror.StatusError)
+	forbiddenError := kapierror.NewForbidden(projectapi.Resource("projectrequest"), "", errors.New("you may not request a new project via this API."))
 	if len(r.message) > 0 {
 		forbiddenError.ErrStatus.Message = r.message
 		forbiddenError.ErrStatus.Details = &unversioned.StatusDetails{

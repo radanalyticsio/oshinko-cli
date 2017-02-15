@@ -41,7 +41,7 @@ Extended tests live under the `./test/extended` directory in the origin reposito
 The structure of this directory is following:
 
 * [**`test/extended/util`**](util) provides useful helpers and utilities to use in your extended test. It provides a easy-to-use interface to OpenShift CLI and also
-access to the Kubernetes [E2E framework](https://github.com/openshift/origin/tree/master/Godeps/_workspace/src/k8s.io/kubernetes/test/e2e) helpers. It also contains OpenShift helpers that are shared across multiple test cases, to make the test cases more DRY.
+access to the Kubernetes [E2E framework](https://github.com/openshift/origin/tree/master/vendor/k8s.io/kubernetes/test/e2e) helpers. It also contains OpenShift helpers that are shared across multiple test cases, to make the test cases more DRY.
 * [**`test/extended/fixtures`**](fixtures) contains the JSON and YAML fixtures that are meant to be used by the extended tests.
 * [**`test/extended/[images,builds,...]`**](builds) each of these Go packages contains extended tests that are related to each other. For example, the `images` directory should contain test cases that are exercising usage of various Docker images in OpenShift.
 * [**`hack/test-extended/[group]/run.sh`**](../../hack/test-extended) is the shell script that sets up any needed dependencies and then launches the extended tests whose top level ginkgo spec's Describe call reference the [group](#groups-vs-packages)
@@ -96,10 +96,10 @@ Common functions for extended tests are located in `./hack/util.sh`. Environment
 * `compile_extended()` perform the compilation of the Go tests into a test binary.
 * `test_privileges()` verify if you have permissions to start OpenShift server.
 * `os::util::environment::setup_all_server_vars()` setup all required environment variables related to OpenShift server.
-* `configure_os_server()` generates all configuration files for OpenShift server.
-* `start_os_server()` starts the OpenShift master and node.
-* `install_router_extended()` installs the OpenShift router service.
-* `install_registry_extended()` installs the OpenShift Docker registry service.
+* `os::start::configure_server()` generates all configuration files for OpenShift server.
+* `os::start::server()` starts the OpenShift master and node.
+* `os::start::router()` installs the OpenShift router service.
+* `os::start::registry()` installs the OpenShift Docker registry service.
 * `create_image_streams_extended()` creates ImageStream(s) for all OpenShift images.
 
 CLI interface
@@ -120,7 +120,7 @@ var _ = g.Describe("[<test bucket>] <Testing scenario>", func() {
 	defer g.GinkgoRecover()
 	var (
 		oc = exutil.NewCLI("test-name", exutil.KubeConfigPath())
-		testFixture = filepath.Join("fixtures", "test.json")
+		testFixture = filepath.Join("testdata", "test.json")
 	)
 })
 ```
@@ -131,7 +131,7 @@ The test suite should be organized into lower-level Ginkgo describe(s) container
 var _ = g.Describe("[default] STI build", func() {
 	defer GinkgoRecover()
 	var (
-		stiBuildFixture = filepath.Join("fixtures", "test-build.json")
+		stiBuildFixture = filepath.Join("testdata", "test-build.json")
 		oc              = exutil.NewCLI("build-sti", kubeConfigPath())
 	)
 

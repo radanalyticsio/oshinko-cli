@@ -1,5 +1,3 @@
-// +build integration,docker
-
 package router
 
 import (
@@ -8,9 +6,12 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+
+	"github.com/golang/glog"
+	"golang.org/x/net/websocket"
 
 	"github.com/openshift/origin/pkg/cmd/util"
-	"golang.org/x/net/websocket"
 )
 
 // GetDefaultLocalAddress returns an address at which the local host can
@@ -18,6 +19,9 @@ import (
 // to itself) if the actual default local address cannot be determined.
 func GetDefaultLocalAddress() string {
 	addr := "0.0.0.0"
+	if a := os.Getenv("OPENSHIFT_ROUTER_SERVER_ADDRESS"); len(a) > 0 {
+		return a
+	}
 	ip, err := util.DefaultLocalIP4()
 	if err == nil {
 		addr = ip.String()
@@ -32,6 +36,8 @@ func GetDefaultLocalAddress() string {
 func NewTestHttpService() *TestHttpService {
 	endpointChannel := make(chan string)
 	routeChannel := make(chan string)
+	nodeChannel := make(chan string)
+	svcChannel := make(chan string)
 
 	addr := GetDefaultLocalAddress()
 
@@ -51,6 +57,8 @@ func NewTestHttpService() *TestHttpService {
 		PodHttpsCaCert:       []byte(ExampleCACert),
 		EndpointChannel:      endpointChannel,
 		RouteChannel:         routeChannel,
+		NodeChannel:          nodeChannel,
+		SvcChannel:           svcChannel,
 	}
 }
 
@@ -73,6 +81,8 @@ type TestHttpService struct {
 	PodTestPath          string
 	EndpointChannel      chan string
 	RouteChannel         chan string
+	NodeChannel          chan string
+	SvcChannel           chan string
 
 	listeners []net.Listener
 }
@@ -127,28 +137,57 @@ func (s *TestHttpService) handleHelloPodTestSecure(w http.ResponseWriter, r *htt
 	fmt.Fprint(w, HelloPodPathSecure)
 }
 
+// handleSvcList handles calls to /api/v1beta1/services and always returns empty data
+func (s *TestHttpService) handleSvcList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprint(w, "{}")
+}
+
+// handleSvcWatch handles calls to /api/v1beta1/watch/services and uses the svc channel to simulate watch events
+func (s *TestHttpService) handleSvcWatch(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	io.WriteString(w, <-s.SvcChannel)
+}
+
+// handleNodeList handles calls to /api/v1beta1/nodes and always returns empty data
+func (s *TestHttpService) handleNodeList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprint(w, "{}")
+}
+
+// handleNodeWatch handles calls to /api/v1beta1/watch/nodes and uses the node channel to simulate watch events
+func (s *TestHttpService) handleNodeWatch(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	io.WriteString(w, <-s.NodeChannel)
+}
+
 // handleRouteWatch handles calls to /osapi/v1beta1/watch/routes and uses the route channel to simulate watch events
 func (s *TestHttpService) handleRouteWatch(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	io.WriteString(w, <-s.RouteChannel)
 }
 
 // handleRouteList handles calls to /osapi/v1beta1/routes and always returns empty data
 func (s *TestHttpService) handleRouteList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprint(w, "{}")
 }
 
 // handleRouteCalls handles calls to /osapi/v1/routes/* and returns whatever the client sent
 func (s *TestHttpService) handleRouteCalls(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprint(w, "{}")
 }
 
 // handleEndpointWatch handles calls to /api/v1beta1/watch/endpoints and uses the endpoint channel to simulate watch events
 func (s *TestHttpService) handleEndpointWatch(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	io.WriteString(w, <-s.EndpointChannel)
 }
 
 // handleEndpointList handles calls to /api/v1beta1/endpoints and always returns empty data
 func (s *TestHttpService) handleEndpointList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprint(w, "{}")
 }
 
@@ -166,7 +205,7 @@ func (s *TestHttpService) Stop() {
 	if s.listeners != nil && len(s.listeners) > 0 {
 		for _, l := range s.listeners {
 			if l != nil {
-				fmt.Printf("Stopping listener at %s\n", l.Addr().String())
+				glog.Infof("Stopping listener at %s\n", l.Addr().String())
 				l.Close()
 			}
 		}
@@ -191,8 +230,7 @@ func (s *TestHttpService) Start() error {
 
 func (s *TestHttpService) startMaster() error {
 	masterServer := http.NewServeMux()
-	// TODO: this is incorrect
-	apis := []string{"v1beta3", "v1"}
+	apis := []string{"v1"}
 
 	for _, version := range apis {
 		masterServer.HandleFunc(fmt.Sprintf("/api/%s/endpoints", version), s.handleEndpointList)
@@ -200,6 +238,10 @@ func (s *TestHttpService) startMaster() error {
 		masterServer.HandleFunc(fmt.Sprintf("/oapi/%s/routes", version), s.handleRouteList)
 		masterServer.HandleFunc(fmt.Sprintf("/oapi/%s/namespaces/", version), s.handleRouteCalls)
 		masterServer.HandleFunc(fmt.Sprintf("/oapi/%s/watch/routes", version), s.handleRouteWatch)
+		masterServer.HandleFunc(fmt.Sprintf("/api/%s/nodes", version), s.handleNodeList)
+		masterServer.HandleFunc(fmt.Sprintf("/api/%s/watch/nodes", version), s.handleNodeWatch)
+		masterServer.HandleFunc(fmt.Sprintf("/api/%s/services", version), s.handleSvcList)
+		masterServer.HandleFunc(fmt.Sprintf("/api/%s/watch/services", version), s.handleSvcWatch)
 	}
 
 	if err := s.startServing(s.MasterHttpAddr, http.Handler(masterServer)); err != nil {
@@ -258,14 +300,13 @@ func (s *TestHttpService) startServing(addr string, handler http.Handler) error 
 
 	s.listeners = append(s.listeners, listener)
 
-	fmt.Printf("Started, serving at %s\n", listener.Addr().String())
+	glog.Infof("Started, serving at %s\n", listener.Addr().String())
 
 	go func() {
 		err := http.Serve(listener, handler)
 
 		if err != nil {
-			fmt.Printf("Server message: %v", err)
-			s.Stop()
+			glog.Errorf("HTTP server failed: %v", err)
 		}
 	}()
 
@@ -291,13 +332,11 @@ func (s *TestHttpService) startServingTLS(addr string, cert []byte, key []byte, 
 	}
 
 	s.listeners = append(s.listeners, listener)
-	fmt.Printf("Started, serving TLS at %s\n", listener.Addr().String())
+	glog.Infof("Started, serving TLS at %s\n", listener.Addr().String())
 
 	go func() {
-		err := http.Serve(listener, handler)
-
-		if err != nil {
-			fmt.Printf("Server message: %v", err)
+		if err := http.Serve(listener, handler); err != nil {
+			glog.Errorf("HTTPS server failed: %v", err)
 		}
 	}()
 

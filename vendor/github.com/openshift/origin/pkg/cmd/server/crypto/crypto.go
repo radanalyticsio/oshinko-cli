@@ -36,18 +36,48 @@ import (
 // TODO: allow override
 func SecureTLSConfig(config *tls.Config) *tls.Config {
 	// Recommendations from https://wiki.mozilla.org/Security/Server_Side_TLS
-	// Change default from SSLv3 to TLSv1.0 (because of POODLE vulnerability)
-	config.MinVersion = tls.VersionTLS10
+	// Can't use SSLv3 because of POODLE and BEAST
+	// Can't use TLSv1.0 because of POODLE and BEAST using CBC cipher
+	// Can't use TLSv1.1 because of RC4 cipher usage
+	config.MinVersion = tls.VersionTLS12
 	// In a legacy environment, allow cipher control to be disabled.
 	if len(os.Getenv("OPENSHIFT_ALLOW_DANGEROUS_TLS_CIPHER_SUITES")) == 0 {
 		config.PreferServerCipherSuites = true
 		config.CipherSuites = []uint16{
+			// Ciphers below are selected and ordered based on the recommended "Intermediate compatibility" suite
+			// Compare with available ciphers when bumping Go versions
+			//
+			// Available ciphers from last comparison (go 1.6):
+			// TLS_RSA_WITH_RC4_128_SHA - no
+			// TLS_RSA_WITH_3DES_EDE_CBC_SHA
+			// TLS_RSA_WITH_AES_128_CBC_SHA
+			// TLS_RSA_WITH_AES_256_CBC_SHA
+			// TLS_RSA_WITH_AES_128_GCM_SHA256
+			// TLS_RSA_WITH_AES_256_GCM_SHA384
+			// TLS_ECDHE_ECDSA_WITH_RC4_128_SHA - no
+			// TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA
+			// TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA
+			// TLS_ECDHE_RSA_WITH_RC4_128_SHA - no
+			// TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA
+			// TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA
+			// TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA
+			// TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+			// TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+			// TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+			// TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+
 			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
 			tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
 			tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
 			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
 			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			// the next two are in the intermediate suite, but go1.6 http2 complains when they are included at the recommended index
+			// fixed in https://github.com/golang/go/commit/b5aae1a2845f157a2565b856fb2d7773a0f7af25 in go1.7
+			// tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+			// tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
 			tls.TLS_RSA_WITH_AES_128_CBC_SHA,
 			tls.TLS_RSA_WITH_AES_256_CBC_SHA,
 			tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
@@ -77,6 +107,19 @@ func (c *TLSCertificateConfig) writeCertConfig(certFile, keyFile string) error {
 	}
 	return nil
 }
+func (c *TLSCertificateConfig) GetPEMBytes() ([]byte, []byte, error) {
+	certBytes, err := encodeCertificates(c.Certs...)
+	if err != nil {
+		return nil, nil, err
+	}
+	keyBytes, err := encodeKey(c.Key)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return certBytes, keyBytes, nil
+}
+
 func (c *TLSCARoots) writeCARoots(rootFile string) error {
 	if err := writeCertificates(rootFile, c.Roots...); err != nil {
 		return err
@@ -295,7 +338,7 @@ func MakeCA(certFile, keyFile, serialFile, name string) (*CA, error) {
 func (ca *CA) EnsureServerCert(certFile, keyFile string, hostnames sets.String) (*TLSCertificateConfig, bool, error) {
 	certConfig, err := GetServerCert(certFile, keyFile, hostnames)
 	if err != nil {
-		certConfig, err = ca.MakeServerCert(certFile, keyFile, hostnames)
+		certConfig, err = ca.MakeAndWriteServerCert(certFile, keyFile, hostnames)
 		return certConfig, true, err
 	}
 
@@ -320,9 +363,20 @@ func GetServerCert(certFile, keyFile string, hostnames sets.String) (*TLSCertifi
 	return nil, fmt.Errorf("Existing server certificate in %s was missing some hostnames (%v) or IP addresses (%v).", certFile, missingDns, missingIps)
 }
 
-func (ca *CA) MakeServerCert(certFile, keyFile string, hostnames sets.String) (*TLSCertificateConfig, error) {
+func (ca *CA) MakeAndWriteServerCert(certFile, keyFile string, hostnames sets.String) (*TLSCertificateConfig, error) {
 	glog.V(4).Infof("Generating server certificate in %s, key in %s", certFile, keyFile)
 
+	server, err := ca.MakeServerCert(hostnames)
+	if err != nil {
+		return nil, err
+	}
+	if err := server.writeCertConfig(certFile, keyFile); err != nil {
+		return server, err
+	}
+	return server, nil
+}
+
+func (ca *CA) MakeServerCert(hostnames sets.String) (*TLSCertificateConfig, error) {
 	serverPublicKey, serverPrivateKey, _ := NewKeyPair()
 	serverTemplate, _ := newServerCertificateTemplate(pkix.Name{CommonName: hostnames.List()[0]}, hostnames.List())
 	serverCrt, err := ca.signCertificate(serverTemplate, serverPublicKey)
@@ -332,9 +386,6 @@ func (ca *CA) MakeServerCert(certFile, keyFile string, hostnames sets.String) (*
 	server := &TLSCertificateConfig{
 		Certs: append([]*x509.Certificate{serverCrt}, ca.Config.Certs...),
 		Key:   serverPrivateKey,
-	}
-	if err := server.writeCertConfig(certFile, keyFile); err != nil {
-		return server, err
 	}
 	return server, nil
 }

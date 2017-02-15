@@ -23,7 +23,7 @@ func TestDeploymentConfigStrategy(t *testing.T) {
 		ObjectMeta: kapi.ObjectMeta{Name: "foo", Namespace: "default"},
 		Spec:       deploytest.OkDeploymentConfigSpec(),
 	}
-	Strategy.PrepareForCreate(deploymentConfig)
+	Strategy.PrepareForCreate(ctx, deploymentConfig)
 	errs := Strategy.Validate(ctx, deploymentConfig)
 	if len(errs) != 0 {
 		t.Errorf("Unexpected error validating %v", errs)
@@ -50,8 +50,9 @@ func TestDeploymentConfigStrategy(t *testing.T) {
 	}
 }
 
-// TestPrepareForUpdate exercises updates made by both old and new clients.
+// TestPrepareForUpdate exercises various client updates.
 func TestPrepareForUpdate(t *testing.T) {
+	ctx := kapi.NewDefaultContext()
 	tests := []struct {
 		name string
 
@@ -60,16 +61,10 @@ func TestPrepareForUpdate(t *testing.T) {
 		expected runtime.Object
 	}{
 		{
-			name:     "old client update",
+			name:     "latestVersion bump",
 			prev:     prevDeployment(),
-			after:    afterDeploymentByOldClient(),
-			expected: expectedAfterByOldClient(),
-		},
-		{
-			name:     "new client update",
-			prev:     prevDeployment(),
-			after:    afterDeploymentByNewClient(),
-			expected: expectedAfterByNewClient(),
+			after:    afterDeploymentVersionBump(),
+			expected: expectedAfterVersionBump(),
 		},
 		{
 			name:     "spec change",
@@ -80,7 +75,7 @@ func TestPrepareForUpdate(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		strategy{}.PrepareForUpdate(test.after, test.prev)
+		strategy{}.PrepareForUpdate(ctx, test.after, test.prev)
 		if !reflect.DeepEqual(test.expected, test.after) {
 			t.Errorf("%s: unexpected object mismatch! Expected:\n%#v\ngot:\n%#v", test.name, test.expected, test.after)
 		}
@@ -110,31 +105,16 @@ func expectedAfterDeployment() *deployapi.DeploymentConfig {
 	return dc
 }
 
-// afterDeploymentByOldClient is a deployment updated by an old oc client.
-func afterDeploymentByOldClient() *deployapi.DeploymentConfig {
+// afterDeploymentVersionBump is a deployment config updated to a newer version.
+func afterDeploymentVersionBump() *deployapi.DeploymentConfig {
 	dc := prevDeployment()
 	dc.Status.LatestVersion++
 	return dc
 }
 
-// expectedAfterByOldClient is the object we expect from the update hook after an old client update.
-func expectedAfterByOldClient() *deployapi.DeploymentConfig {
-	dc := afterDeploymentByOldClient()
-	dc.Generation++
-	return dc
-}
-
-// afterDeploymentByNewClient is a deployment updated by an new oc client.
-func afterDeploymentByNewClient() *deployapi.DeploymentConfig {
-	dc := prevDeployment()
-	dc.Annotations[deployapi.DeploymentInstantiatedAnnotation] = deployapi.DeploymentInstantiatedAnnotationValue
-	return dc
-}
-
-// expectedAfterByNewClient is the object we expect from the update hook after a new client update.
-func expectedAfterByNewClient() *deployapi.DeploymentConfig {
-	dc := prevDeployment()
-	dc.Status.LatestVersion++
+// expectedAfterVersionBump is the object we expect after a version bump.
+func expectedAfterVersionBump() *deployapi.DeploymentConfig {
+	dc := afterDeploymentVersionBump()
 	dc.Generation++
 	return dc
 }

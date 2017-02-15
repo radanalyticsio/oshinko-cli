@@ -1,19 +1,11 @@
 #!/bin/bash
-
-set -o errexit
-set -o nounset
-set -o pipefail
-
-OS_ROOT=$(dirname "${BASH_SOURCE}")/..
-source "${OS_ROOT}/hack/common.sh"
-
-cd "${OS_ROOT}"
+source "$(dirname "${BASH_SOURCE}")/lib/init.sh"
 
 echo "===== Verifying Generated Completions ====="
 
 platform="$(os::build::host_platform)"
 if [[ "${platform}" != "linux/amd64" ]]; then
-  echo "WARNING: Completions cannot be verified on non-Linux systems (${platform})"
+  os::log::warn "Completions cannot be verified on non-Linux systems (${platform})"
   exit 0
 fi
 

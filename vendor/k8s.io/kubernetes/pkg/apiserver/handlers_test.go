@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -71,7 +71,7 @@ func pathWithPrefix(prefix, resource, namespace, name string) string {
 // - we correctly recover after some "short" requests finish, i.e. we can process new ones.
 func TestMaxInFlight(t *testing.T) {
 	const AllowedInflightRequestsNo = 3
-	// Size of inflightRequestsChannel determines how many concurent inflight requests
+	// Size of inflightRequestsChannel determines how many concurrent inflight requests
 	// are allowed.
 	inflightRequestsChannel := make(chan bool, AllowedInflightRequestsNo)
 	// notAccountedPathsRegexp specifies paths requests to which we don't account into
@@ -112,8 +112,7 @@ func TestMaxInFlight(t *testing.T) {
 			}),
 		),
 	)
-	// TODO: Uncomment when fix #19254
-	// defer server.Close()
+	defer server.Close()
 
 	// These should hang, but not affect accounting.  use a query param match
 	for i := 0; i < AllowedInflightRequestsNo; i++ {
@@ -175,8 +174,7 @@ func TestReadOnly(t *testing.T) {
 			}
 		},
 	)))
-	// TODO: Uncomment when fix #19254
-	// defer server.Close()
+	defer server.Close()
 	for _, verb := range []string{"GET", "POST", "PUT", "DELETE", "CREATE"} {
 		req, err := http.NewRequest(verb, server.URL, nil)
 		if err != nil {
@@ -202,8 +200,7 @@ func TestTimeout(t *testing.T) {
 		func(*http.Request) (<-chan time.Time, string) {
 			return timeout, timeoutResp
 		}))
-	// TODO: Uncomment when fix #19254
-	// defer ts.Close()
+	defer ts.Close()
 
 	// No timeouts
 	sendResponse <- struct{}{}

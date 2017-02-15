@@ -24,7 +24,7 @@ func DeploymentConfig(name, namespace string) *ODeploymentConfig {
 }
 
 func (dc *ODeploymentConfig) Replicas(r int) *ODeploymentConfig {
-	dc.Spec.Replicas = r
+	dc.Spec.Replicas = int32(r)
 	return dc
 }
 
@@ -151,7 +151,7 @@ func (dc *ODeploymentConfig) FindPort(name string) int {
 		for _, val := range dc.Spec.Template.Spec.Containers {
 			for _, port := range val.Ports {
 				if port.Name == name {
-					return port.ContainerPort
+					return int(port.ContainerPort)
 				}
 			}
 		}

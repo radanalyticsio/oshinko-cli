@@ -4,11 +4,13 @@
   "metadata": {
     "name": "cakephp-mysql-example",
     "annotations": {
-      "description": "An example CakePHP application with a MySQL database",
-      "tags": "quickstart,php,cakephp,mysql",
+      "openshift.io/display-name": "CakePHP + MySQL (Ephemeral)",
+      "description": "An example CakePHP application with a MySQL database. For more information about using this template, including OpenShift considerations, see https://github.com/openshift/cakephp-ex/blob/master/README.md.\n\nWARNING: Any data stored will be lost upon pod destruction. Only use this template for testing.",
+      "tags": "quickstart,php,cakephp",
       "iconClass": "icon-php"
     }
   },
+  "message": "The following service(s) have been created in your project: ${NAME}, ${DATABASE_SERVICE_NAME}.\n\nFor more information about using this template, including OpenShift considerations, see https://github.com/openshift/cake-ex/blob/master/README.md.",
   "labels": {
     "template": "cakephp-mysql-example"
   },
@@ -19,7 +21,8 @@
       "metadata": {
         "name": "${NAME}",
         "annotations": {
-          "description": "Exposes and load balances the application pods"
+          "description": "Exposes and load balances the application pods",
+          "service.alpha.openshift.io/dependencies": "[{\"name\": \"${DATABASE_SERVICE_NAME}\", \"kind\": \"Service\"}]"
         }
       },
       "spec": {
@@ -84,7 +87,13 @@
               "kind": "ImageStreamTag",
               "namespace": "${NAMESPACE}",
               "name": "php:5.6"
-            }
+            },
+            "env":  [
+              {
+                  "name": "COMPOSER_MIRROR",
+                  "value": "${COMPOSER_MIRROR}"
+              }
+            ]
           }
         },
         "output": {
@@ -120,9 +129,9 @@
       },
       "spec": {
         "strategy": {
-          "type": "Rolling",
+          "type": "Recreate",
           "recreateParams": {
-          "pre": {
+            "pre": {
               "failurePolicy": "Retry",
               "execNewPod": {
                 "command": [
@@ -166,7 +175,7 @@
             "containers": [
               {
                 "name": "cakephp-mysql-example",
-                "image": "cakephp-mysql-example",
+                "image": " ",
                 "ports": [
                   {
                     "containerPort": 8080
@@ -276,7 +285,7 @@
           {
             "type": "ImageChange",
             "imageChangeParams": {
-              "automatic": false,
+              "automatic": true,
               "containerNames": [
                 "mysql"
               ],
@@ -312,7 +321,7 @@
             "containers": [
               {
                 "name": "mysql",
-                "image": "mysql",
+                "image": " ",
                 "ports": [
                   {
                     "containerPort": 3306
@@ -376,24 +385,28 @@
       "name": "NAMESPACE",
       "displayName": "Namespace",
       "description": "The OpenShift Namespace where the ImageStream resides.",
+      "required": true,
       "value": "openshift"
     },
     {
       "name": "MEMORY_LIMIT",
       "displayName": "Memory Limit",
       "description": "Maximum amount of memory the CakePHP container can use.",
+      "required": true,
       "value": "512Mi"
     },
     {
       "name": "MEMORY_MYSQL_LIMIT",
       "displayName": "Memory Limit (MySQL)",
       "description": "Maximum amount of memory the MySQL container can use.",
+      "required": true,
       "value": "512Mi"
     },
     {
       "name": "SOURCE_REPOSITORY_URL",
       "displayName": "Git Repository URL",
       "description": "The URL of the repository with your application source code.",
+      "required": true,
       "value": "https://github.com/openshift/cakephp-ex.git"
     },
     {
@@ -422,22 +435,26 @@
     {
       "name": "DATABASE_SERVICE_NAME",
       "displayName": "Database Service Name",
+      "required": true,
       "value": "mysql"
     },
     {
       "name": "DATABASE_ENGINE",
       "displayName": "Database Engine",
       "description": "Database engine: postgresql, mysql or sqlite (default).",
+      "required": true,
       "value": "mysql"
     },
     {
       "name": "DATABASE_NAME",
       "displayName": "Database Name",
+      "required": true,
       "value": "default"
     },
     {
       "name": "DATABASE_USER",
       "displayName": "Database User",
+      "required": true,
       "value": "cakephp"
     },
     {
@@ -472,6 +489,12 @@
       "displayName": "OPcache Revalidation Frequency",
       "description": "How often to check script timestamps for updates, in seconds. 0 will result in OPcache checking for updates on every request.",
       "value": "2"
+    },
+    {
+      "name": "COMPOSER_MIRROR",
+      "displayName": "Custom Composer Mirror URL",
+      "description": "The custom Composer mirror URL",
+      "value": ""
     }
   ]
 }

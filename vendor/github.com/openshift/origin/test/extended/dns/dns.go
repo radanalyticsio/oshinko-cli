@@ -7,23 +7,17 @@ import (
 	"io"
 	"io/ioutil"
 	"strings"
-	"time"
 
 	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
 	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/api/errors"
 	"k8s.io/kubernetes/pkg/api/unversioned"
 	"k8s.io/kubernetes/pkg/apimachinery/registered"
-	"k8s.io/kubernetes/pkg/util"
 	"k8s.io/kubernetes/pkg/util/sets"
-	"k8s.io/kubernetes/pkg/util/wait"
-	"k8s.io/kubernetes/test/e2e"
+	"k8s.io/kubernetes/pkg/util/uuid"
+	"k8s.io/kubernetes/pkg/watch"
+	e2e "k8s.io/kubernetes/test/e2e/framework"
 )
-
-func init() {
-	// Origin provides implicit cluster DNS
-	e2e.ClusterDNSVerifier = func(f *e2e.Framework) {}
-}
 
 func createDNSPod(namespace, probeCmd string) *api.Pod {
 	pod := &api.Pod{
@@ -32,7 +26,7 @@ func createDNSPod(namespace, probeCmd string) *api.Pod {
 			APIVersion: registered.GroupOrDie(api.GroupName).GroupVersion.String(),
 		},
 		ObjectMeta: api.ObjectMeta{
-			Name:      "dns-test-" + string(util.NewUUID()),
+			Name:      "dns-test-" + string(uuid.NewUUID()),
 			Namespace: namespace,
 		},
 		Spec: api.PodSpec{
@@ -66,6 +60,42 @@ func digForNames(namesToResolve []string, expect sets.String) string {
 		fileName = fmt.Sprintf("%s_tcp@%s", fileNamePrefix, name)
 		expect.Insert(fileName)
 		probeCmd += fmt.Sprintf(`test -n "$$(dig +tcp +noall +answer +search %s %s)" && echo %q;`, name, lookup, fileName)
+	}
+	return probeCmd
+}
+
+func digForCNAMEs(namesToResolve []string, expect sets.String) string {
+	fileNamePrefix := "test"
+	var probeCmd string
+	for _, name := range namesToResolve {
+		// Resolve by TCP and UDP DNS.  Use $$(...) because $(...) is
+		// expanded by kubernetes (though this won't expand so should
+		// remain a literal, safe > sorry).
+		lookup := "CNAME"
+		fileName := fmt.Sprintf("%s_udp@%s", fileNamePrefix, name)
+		expect.Insert(fileName)
+		probeCmd += fmt.Sprintf(`test -n "$$(dig +notcp +noall +answer +search %s %s)" && echo %q;`, name, lookup, fileName)
+		fileName = fmt.Sprintf("%s_tcp@%s", fileNamePrefix, name)
+		expect.Insert(fileName)
+		probeCmd += fmt.Sprintf(`test -n "$$(dig +tcp +noall +answer +search %s %s)" && echo %q;`, name, lookup, fileName)
+	}
+	return probeCmd
+}
+
+func digForSRVs(namesToResolve []string, expect sets.String) string {
+	fileNamePrefix := "test"
+	var probeCmd string
+	for _, name := range namesToResolve {
+		// Resolve by TCP and UDP DNS.  Use $$(...) because $(...) is
+		// expanded by kubernetes (though this won't expand so should
+		// remain a literal, safe > sorry).
+		lookup := "SRV"
+		fileName := fmt.Sprintf("%s_udp@%s", fileNamePrefix, name)
+		expect.Insert(fileName)
+		probeCmd += fmt.Sprintf(`test -n "$$(dig +notcp +noall +additional +search %s %s)" && echo %q;`, name, lookup, fileName)
+		fileName = fmt.Sprintf("%s_tcp@%s", fileNamePrefix, name)
+		expect.Insert(fileName)
+		probeCmd += fmt.Sprintf(`test -n "$$(dig +tcp +noall +additional +search %s %s)" && echo %q;`, name, lookup, fileName)
 	}
 	return probeCmd
 }
@@ -123,6 +153,25 @@ func assertLinesExist(lines sets.String, expect int, r io.Reader) error {
 	return nil
 }
 
+// PodSucceeded returns true if the pod has succeeded, false if the pod has not yet
+// reached running state, or an error in any other case.
+func PodSucceeded(event watch.Event) (bool, error) {
+	switch event.Type {
+	case watch.Deleted:
+		return false, errors.NewNotFound(unversioned.GroupResource{Resource: "pods"}, "")
+	}
+	switch t := event.Object.(type) {
+	case *api.Pod:
+		switch t.Status.Phase {
+		case api.PodSucceeded:
+			return true, nil
+		case api.PodFailed:
+			return false, fmt.Errorf("pod failed: %#v", t)
+		}
+	}
+	return false, nil
+}
+
 func validateDNSResults(f *e2e.Framework, pod *api.Pod, fileNames sets.String, expect int) {
 	By("submitting the pod to kubernetes")
 	podClient := f.Client.Pods(f.Namespace.Name)
@@ -131,25 +180,18 @@ func validateDNSResults(f *e2e.Framework, pod *api.Pod, fileNames sets.String, e
 		defer GinkgoRecover()
 		podClient.Delete(pod.Name, api.NewDeleteOptions(0))
 	}()
-	if _, err := podClient.Create(pod); err != nil {
+	updated, err := podClient.Create(pod)
+	if err != nil {
 		e2e.Failf("Failed to create %s pod: %v", pod.Name, err)
 	}
 
-	Expect(f.WaitForPodRunning(pod.Name)).To(BeNil())
-	Expect(wait.Poll(2*time.Second, 5*time.Minute, func() (bool, error) {
-		pod, err := podClient.Get(pod.Name)
-		if err != nil {
-			return false, err
-		}
-		switch pod.Status.Phase {
-		case api.PodSucceeded:
-			return true, nil
-		case api.PodFailed:
-			return false, fmt.Errorf("pod failed")
-		default:
-			return false, nil
-		}
-	})).To(BeNil())
+	w, err := f.Client.Pods(f.Namespace.Name).Watch(api.SingleObject(api.ObjectMeta{Name: pod.Name, ResourceVersion: updated.ResourceVersion}))
+	if err != nil {
+		e2e.Failf("Failed: %v", err)
+	}
+	if _, err = watch.Until(e2e.PodStartTimeout, w, PodSucceeded); err != nil {
+		e2e.Failf("Failed: %v", err)
+	}
 
 	By("retrieving the pod logs")
 	r, err := podClient.GetLogs(pod.Name, &api.PodLogOptions{Container: "querier"}).Stream()
@@ -172,8 +214,8 @@ func validateDNSResults(f *e2e.Framework, pod *api.Pod, fileNames sets.String, e
 	e2e.Logf("DNS probes using %s succeeded\n", pod.Name)
 }
 
-func createServiceSpec(serviceName string, isHeadless bool, selector map[string]string) *api.Service {
-	headlessService := &api.Service{
+func createServiceSpec(serviceName string, isHeadless bool, externalName string, selector map[string]string) *api.Service {
+	s := &api.Service{
 		ObjectMeta: api.ObjectMeta{
 			Name: serviceName,
 		},
@@ -185,9 +227,14 @@ func createServiceSpec(serviceName string, isHeadless bool, selector map[string]
 		},
 	}
 	if isHeadless {
-		headlessService.Spec.ClusterIP = "None"
+		s.Spec.ClusterIP = "None"
 	}
-	return headlessService
+	if len(externalName) > 0 {
+		s.Spec.Type = api.ServiceTypeExternalName
+		s.Spec.ExternalName = externalName
+		s.Spec.ClusterIP = ""
+	}
+	return s
 }
 
 func createEndpointSpec(name string) *api.Endpoints {
@@ -198,7 +245,7 @@ func createEndpointSpec(name string) *api.Endpoints {
 		Subsets: []api.EndpointSubset{
 			{
 				Addresses: []api.EndpointAddress{
-					{IP: "1.1.1.1"},
+					{IP: "1.1.1.1", Hostname: "endpoint1"},
 					{IP: "1.1.1.2"},
 				},
 				NotReadyAddresses: []api.EndpointAddress{
@@ -227,19 +274,20 @@ var _ = Describe("DNS", func() {
 	f := e2e.NewDefaultFramework("dns")
 
 	It("should answer endpoint and wildcard queries for the cluster [Conformance]", func() {
-		e2e.ClusterDNSVerifier(f)
-
-		if _, err := f.Client.Services(f.Namespace.Name).Create(createServiceSpec("headless", true, nil)); err != nil {
+		if _, err := f.Client.Services(f.Namespace.Name).Create(createServiceSpec("headless", true, "", nil)); err != nil {
 			e2e.Failf("unable to create headless service: %v", err)
 		}
 		if _, err := f.Client.Endpoints(f.Namespace.Name).Create(createEndpointSpec("headless")); err != nil {
 			e2e.Failf("unable to create clusterip endpoints: %v", err)
 		}
-		if _, err := f.Client.Services(f.Namespace.Name).Create(createServiceSpec("clusterip", false, nil)); err != nil {
+		if _, err := f.Client.Services(f.Namespace.Name).Create(createServiceSpec("clusterip", false, "", nil)); err != nil {
 			e2e.Failf("unable to create clusterip service: %v", err)
 		}
 		if _, err := f.Client.Endpoints(f.Namespace.Name).Create(createEndpointSpec("clusterip")); err != nil {
 			e2e.Failf("unable to create clusterip endpoints: %v", err)
+		}
+		if _, err := f.Client.Services(f.Namespace.Name).Create(createServiceSpec("externalname", true, "www.google.com", nil)); err != nil {
+			e2e.Failf("unable to create externalName service: %v", err)
 		}
 
 		ep, err := f.Client.Endpoints("default").Get("kubernetes")
@@ -262,19 +310,30 @@ var _ = Describe("DNS", func() {
 				"prefix.kubernetes.default.svc",
 				"prefix.kubernetes.default.svc.cluster.local",
 
-				// answer wildcards on cluster service
-				fmt.Sprintf("prefix.headless.%s", f.Namespace.Name),
+				// answer wildcards on clusterIP services
 				fmt.Sprintf("prefix.clusterip.%s", f.Namespace.Name),
+			}, expect),
+
+			// the DNS pod should be able to get additional A records for this service
+			digForSRVs([]string{
+				fmt.Sprintf("_http._tcp.externalname.%s.svc", f.Namespace.Name),
+			}, expect),
+
+			// the DNS pod should be able to get a CNAME for this service
+			digForCNAMEs([]string{
+				fmt.Sprintf("externalname.%s.svc", f.Namespace.Name),
 			}, expect),
 
 			// the DNS pod should be able to look up endpoints for names and wildcards
 			digForARecords(map[string][]string{
-				"kubernetes.default.endpoints":                      kubeEndpoints,
-				"prefix.kubernetes.default.endpoints.cluster.local": kubeEndpoints,
+				"kubernetes.default.endpoints": kubeEndpoints,
 
 				fmt.Sprintf("headless.%s.svc", f.Namespace.Name):        readyEndpoints,
 				fmt.Sprintf("headless.%s.endpoints", f.Namespace.Name):  readyEndpoints,
 				fmt.Sprintf("clusterip.%s.endpoints", f.Namespace.Name): readyEndpoints,
+
+				fmt.Sprintf("endpoint1.headless.%s.endpoints", f.Namespace.Name):  {"1.1.1.1"},
+				fmt.Sprintf("endpoint1.clusterip.%s.endpoints", f.Namespace.Name): {"1.1.1.1"},
 			}, expect),
 
 			// the DNS pod should respond to its own request

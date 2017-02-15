@@ -1,9 +1,8 @@
-// +build integration
-
 package integration
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 	overridesapi "github.com/openshift/origin/pkg/build/admission/overrides/api"
 	buildtestutil "github.com/openshift/origin/pkg/build/admission/testutil"
 	buildapi "github.com/openshift/origin/pkg/build/api"
-	buildutil "github.com/openshift/origin/pkg/build/util"
 	"github.com/openshift/origin/pkg/client"
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
 	"github.com/openshift/origin/pkg/cmd/server/bootstrappolicy"
@@ -24,9 +22,10 @@ import (
 	testserver "github.com/openshift/origin/test/util/server"
 )
 
-var buildPodAdmissionTestTimeout time.Duration = 10 * time.Second
+var buildPodAdmissionTestTimeout time.Duration = 30 * time.Second
 
 func TestBuildDefaultGitHTTPProxy(t *testing.T) {
+	defer testutil.DumpEtcdOnFailure(t)
 	httpProxy := "http://my.test.proxy:12345"
 	oclient, kclient := setupBuildDefaultsAdmissionTest(t, &defaultsapi.BuildDefaultsConfig{
 		GitHTTPProxy: httpProxy,
@@ -38,6 +37,7 @@ func TestBuildDefaultGitHTTPProxy(t *testing.T) {
 }
 
 func TestBuildDefaultGitHTTPSProxy(t *testing.T) {
+	defer testutil.DumpEtcdOnFailure(t)
 	httpsProxy := "https://my.test.proxy:12345"
 	oclient, kclient := setupBuildDefaultsAdmissionTest(t, &defaultsapi.BuildDefaultsConfig{
 		GitHTTPSProxy: httpsProxy,
@@ -49,6 +49,7 @@ func TestBuildDefaultGitHTTPSProxy(t *testing.T) {
 }
 
 func TestBuildDefaultEnvironment(t *testing.T) {
+	defer testutil.DumpEtcdOnFailure(t)
 	env := []kapi.EnvVar{
 		{
 			Name:  "VAR1",
@@ -68,7 +69,44 @@ func TestBuildDefaultEnvironment(t *testing.T) {
 	}
 }
 
+func TestBuildDefaultLabels(t *testing.T) {
+	defer testutil.DumpEtcdOnFailure(t)
+	labels := []buildapi.ImageLabel{{Name: "KEY", Value: "VALUE"}}
+	oclient, kclient := setupBuildDefaultsAdmissionTest(t, &defaultsapi.BuildDefaultsConfig{
+		ImageLabels: labels,
+	})
+	build, _ := runBuildPodAdmissionTest(t, oclient, kclient, buildPodAdmissionTestDockerBuild())
+	if actual := build.Spec.Output.ImageLabels; !reflect.DeepEqual(labels, actual) {
+		t.Errorf("Resulting build did not get expected labels: %v", actual)
+	}
+}
+
+func TestBuildDefaultNodeSelectors(t *testing.T) {
+	defer testutil.DumpEtcdOnFailure(t)
+	selectors := map[string]string{"KEY": "VALUE"}
+	oclient, kclient := setupBuildDefaultsAdmissionTest(t, &defaultsapi.BuildDefaultsConfig{
+		NodeSelector: selectors,
+	})
+	_, pod := runBuildPodAdmissionTest(t, oclient, kclient, buildPodAdmissionTestDockerBuild())
+	if actual := pod.Spec.NodeSelector; !reflect.DeepEqual(selectors, actual) {
+		t.Errorf("Resulting pod did not get expected nodeselectors: %v", actual)
+	}
+}
+
+func TestBuildDefaultAnnotations(t *testing.T) {
+	defer testutil.DumpEtcdOnFailure(t)
+	annotations := map[string]string{"KEY": "VALUE"}
+	oclient, kclient := setupBuildDefaultsAdmissionTest(t, &defaultsapi.BuildDefaultsConfig{
+		Annotations: annotations,
+	})
+	_, pod := runBuildPodAdmissionTest(t, oclient, kclient, buildPodAdmissionTestDockerBuild())
+	if actual := pod.Annotations; strings.Compare(actual["KEY"], annotations["KEY"]) != 0 {
+		t.Errorf("Resulting pod did not get expected annotations: actual: %v, expected: %v", actual["KEY"], annotations["KEY"])
+	}
+}
+
 func TestBuildOverrideForcePull(t *testing.T) {
+	defer testutil.DumpEtcdOnFailure(t)
 	oclient, kclient := setupBuildOverridesAdmissionTest(t, &overridesapi.BuildOverridesConfig{
 		ForcePull: true,
 	})
@@ -79,6 +117,7 @@ func TestBuildOverrideForcePull(t *testing.T) {
 }
 
 func TestBuildOverrideForcePullCustomStrategy(t *testing.T) {
+	defer testutil.DumpEtcdOnFailure(t)
 	oclient, kclient := setupBuildOverridesAdmissionTest(t, &overridesapi.BuildOverridesConfig{
 		ForcePull: true,
 	})
@@ -88,6 +127,42 @@ func TestBuildOverrideForcePullCustomStrategy(t *testing.T) {
 	}
 	if !build.Spec.Strategy.CustomStrategy.ForcePull {
 		t.Errorf("ForcePull was not set on resulting build")
+	}
+}
+
+func TestBuildOverrideLabels(t *testing.T) {
+	defer testutil.DumpEtcdOnFailure(t)
+	labels := []buildapi.ImageLabel{{Name: "KEY", Value: "VALUE"}}
+	oclient, kclient := setupBuildOverridesAdmissionTest(t, &overridesapi.BuildOverridesConfig{
+		ImageLabels: labels,
+	})
+	build, _ := runBuildPodAdmissionTest(t, oclient, kclient, buildPodAdmissionTestDockerBuild())
+	if actual := build.Spec.Output.ImageLabels; !reflect.DeepEqual(labels, actual) {
+		t.Errorf("Resulting build did not get expected labels: %v", actual)
+	}
+}
+
+func TestBuildOverrideNodeSelectors(t *testing.T) {
+	defer testutil.DumpEtcdOnFailure(t)
+	selectors := map[string]string{"KEY": "VALUE"}
+	oclient, kclient := setupBuildOverridesAdmissionTest(t, &overridesapi.BuildOverridesConfig{
+		NodeSelector: selectors,
+	})
+	_, pod := runBuildPodAdmissionTest(t, oclient, kclient, buildPodAdmissionTestDockerBuild())
+	if actual := pod.Spec.NodeSelector; !reflect.DeepEqual(selectors, actual) {
+		t.Errorf("Resulting build did not get expected nodeselectors: %v", actual)
+	}
+}
+
+func TestBuildOverrideAnnotations(t *testing.T) {
+	defer testutil.DumpEtcdOnFailure(t)
+	annotations := map[string]string{"KEY": "VALUE"}
+	oclient, kclient := setupBuildOverridesAdmissionTest(t, &overridesapi.BuildOverridesConfig{
+		Annotations: annotations,
+	})
+	_, pod := runBuildPodAdmissionTest(t, oclient, kclient, buildPodAdmissionTestDockerBuild())
+	if actual := pod.Annotations; strings.Compare(actual["KEY"], annotations["KEY"]) != 0 {
+		t.Errorf("Resulting build did not get expected annotations: %v", actual)
 	}
 }
 
@@ -130,7 +205,7 @@ func runBuildPodAdmissionTest(t *testing.T, client *client.Client, kclient *kcli
 	watchOpt := kapi.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector(
 			"metadata.name",
-			buildutil.GetBuildPodName(build),
+			buildapi.GetBuildPodName(build),
 		),
 	}
 	podWatch, err := kclient.Pods(ns).Watch(watchOpt)
@@ -187,7 +262,7 @@ func setupBuildPodAdmissionTest(t *testing.T, pluginConfig map[string]configapi.
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-	master.KubernetesMasterConfig.AdmissionConfig.PluginConfig = pluginConfig
+	master.AdmissionConfig.PluginConfig = pluginConfig
 	clusterAdminKubeConfig, err := testserver.StartConfiguredMaster(master)
 	if err != nil {
 		t.Fatalf("%v", err)

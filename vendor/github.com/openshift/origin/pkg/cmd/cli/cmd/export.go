@@ -14,44 +14,43 @@ import (
 	"k8s.io/kubernetes/pkg/runtime"
 	utilerrors "k8s.io/kubernetes/pkg/util/errors"
 
+	"github.com/openshift/origin/pkg/cmd/templates"
 	cmdutil "github.com/openshift/origin/pkg/cmd/util"
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	templateapi "github.com/openshift/origin/pkg/template/api"
 )
 
-const (
-	exportLong = `
-Export resources so they can be used elsewhere
+var (
+	exportLong = templates.LongDesc(`
+		Export resources so they can be used elsewhere
 
-The export command makes it easy to take existing objects and convert them to configuration files
-for backups or for creating elsewhere in the cluster. Fields that cannot be specified on create
-will be set to empty, and any field which is assigned on creation (like a service's clusterIP, or
-a deployment config's latestVersion). The status part of objects is also cleared.
+		The export command makes it easy to take existing objects and convert them to configuration files
+		for backups or for creating elsewhere in the cluster. Fields that cannot be specified on create
+		will be set to empty, and any field which is assigned on creation (like a service's clusterIP, or
+		a deployment config's latestVersion). The status part of objects is also cleared.
 
-Some fields like clusterIP may be useful when exporting an application from one cluster to apply
-to another - assuming another service on the destination cluster does not already use that IP.
-The --exact flag will instruct export to not clear fields that might be useful. You may also use
---raw to get the exact values for an object - useful for converting a file on disk between API
-versions.
+		Some fields like clusterIP may be useful when exporting an application from one cluster to apply
+		to another - assuming another service on the destination cluster does not already use that IP.
+		The --exact flag will instruct export to not clear fields that might be useful. You may also use
+		--raw to get the exact values for an object - useful for converting a file on disk between API
+		versions.
 
-Another use case for export is to create reusable templates for applications. Pass --as-template
-to generate the API structure for a template to which you can add parameters and object labels.`
+		Another use case for export is to create reusable templates for applications. Pass --as-template
+		to generate the API structure for a template to which you can add parameters and object labels.`)
 
-	exportExample = `  # export the services and deployment configurations labeled name=test
-  %[1]s export svc,dc -l name=test
+	exportExample = templates.Examples(`
+		# export the services and deployment configurations labeled name=test
+	  %[1]s export svc,dc -l name=test
 
-  # export all services to a template
-  %[1]s export service --as-template=test
+	  # export all services to a template
+	  %[1]s export service --as-template=test
 
-  # export to JSON
-  %[1]s export service -o json
-
-  # convert a file on disk to the latest API version (in YAML, the default)
-  %[1]s export -f a_v1beta3_service.json --output-version=v1 --exact`
+	  # export to JSON
+	  %[1]s export service -o json`)
 )
 
 func NewCmdExport(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) *cobra.Command {
-	exporter := &defaultExporter{}
+	exporter := &DefaultExporter{}
 	var filenames []string
 	cmd := &cobra.Command{
 		Use:     "export RESOURCE/NAME ... [options]",
@@ -67,11 +66,11 @@ func NewCmdExport(fullName string, f *clientcmd.Factory, in io.Reader, out io.Wr
 		},
 	}
 	cmd.Flags().String("as-template", "", "Output a Template object with specified name instead of a List or single object.")
-	cmd.Flags().Bool("exact", false, "Preserve fields that may be cluster specific, such as service portalIPs or generated names")
+	cmd.Flags().Bool("exact", false, "Preserve fields that may be cluster specific, such as service clusterIPs or generated names")
 	cmd.Flags().Bool("raw", false, "If true, do not alter the resources in any way after they are loaded.")
 	cmd.Flags().StringP("selector", "l", "", "Selector (label query) to filter on")
 	cmd.Flags().Bool("all-namespaces", false, "If present, list the requested object(s) across all namespaces. Namespace in current context is ignored even if specified with --namespace.")
-	cmd.Flags().StringSliceVarP(&filenames, "filename", "f", filenames, "Filename, directory, or URL to file to use to edit the resource.")
+	cmd.Flags().StringSliceVarP(&filenames, "filename", "f", filenames, "Filename, directory, or URL to file for the resource to export.")
 	cmd.MarkFlagFilename("filename")
 	cmd.Flags().Bool("all", true, "DEPRECATED: all is ignored, specifying a resource without a name selects all the instances of that resource")
 	cmd.Flags().MarkDeprecated("all", "all is ignored because specifying a resource without a name selects all the instances of that resource")
@@ -141,7 +140,7 @@ func RunExport(f *clientcmd.Factory, exporter Exporter, in io.Reader, out io.Wri
 
 	var result runtime.Object
 	if len(asTemplate) > 0 {
-		objects, err := resource.AsVersionedObjects(infos, outputVersion.String(), kapi.Codecs.LegacyCodec(outputVersion))
+		objects, err := resource.AsVersionedObjects(infos, outputVersion, kapi.Codecs.LegacyCodec(outputVersion))
 		if err != nil {
 			return err
 		}
@@ -149,12 +148,12 @@ func RunExport(f *clientcmd.Factory, exporter Exporter, in io.Reader, out io.Wri
 			Objects: objects,
 		}
 		template.Name = asTemplate
-		result, err = kapi.Scheme.ConvertToVersion(template, outputVersion.String())
+		result, err = kapi.Scheme.ConvertToVersion(template, outputVersion)
 		if err != nil {
 			return err
 		}
 	} else {
-		object, err := resource.AsVersionedObject(infos, !one, outputVersion.String(), kapi.Codecs.LegacyCodec(outputVersion))
+		object, err := resource.AsVersionedObject(infos, !one, outputVersion, kapi.Codecs.LegacyCodec(outputVersion))
 		if err != nil {
 			return err
 		}
@@ -170,7 +169,7 @@ func RunExport(f *clientcmd.Factory, exporter Exporter, in io.Reader, out io.Wri
 	if len(outputFormat) == 0 {
 		outputFormat = "yaml"
 	}
-	p, _, err := kubectl.GetPrinter(outputFormat, templateFile)
+	p, _, err := kubectl.GetPrinter(outputFormat, templateFile, kcmdutil.GetFlagBool(cmd, "no-headers"))
 	if err != nil {
 		return err
 	}

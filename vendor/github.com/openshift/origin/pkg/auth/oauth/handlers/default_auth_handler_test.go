@@ -20,7 +20,11 @@ func (w *testClient) GetId() string {
 }
 
 func (w *testClient) GetSecret() string {
-	return w.client.Secret
+	panic("unsupported")
+}
+
+func (w *testClient) ClientSecretMatches(in string) bool {
+	return w.client.Secret == in
 }
 
 func (w *testClient) GetRedirectUri() string {
@@ -230,7 +234,11 @@ func (w *badTestClient) GetId() string {
 }
 
 func (w *badTestClient) GetSecret() string {
-	return w.client.Secret
+	panic("unsupported")
+}
+
+func (w *badTestClient) ClientSecretMatches(in string) bool {
+	return in == w.client.Secret
 }
 
 func (w *badTestClient) GetRedirectUri() string {

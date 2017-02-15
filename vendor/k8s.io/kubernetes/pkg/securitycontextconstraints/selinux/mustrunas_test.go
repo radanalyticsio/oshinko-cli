@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,10 +17,11 @@ limitations under the License.
 package selinux
 
 import (
-	"k8s.io/kubernetes/pkg/api"
 	"reflect"
 	"strings"
 	"testing"
+
+	"k8s.io/kubernetes/pkg/api"
 )
 
 func TestMustRunAsOptions(t *testing.T) {
@@ -59,11 +60,11 @@ func TestMustRunAsGenerate(t *testing.T) {
 	}
 	mustRunAs, err := NewMustRunAs(opts)
 	if err != nil {
-		t.Fatal("unexpected error initializing NewMustRunAs %v", err)
+		t.Fatalf("unexpected error initializing NewMustRunAs %v", err)
 	}
 	generated, err := mustRunAs.Generate(nil, nil)
 	if err != nil {
-		t.Fatal("unexpected error generating selinux %v", err)
+		t.Fatalf("unexpected error generating selinux %v", err)
 	}
 	if !reflect.DeepEqual(generated, opts.SELinuxOptions) {
 		t.Errorf("generated selinux does not equal configured selinux")

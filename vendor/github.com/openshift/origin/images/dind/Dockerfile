@@ -1,43 +1,87 @@
 #
-# This image is used for running a host of an openshift dev cluster. This image is
-# a development support image and should not be used in production environments.
+# Image configured with systemd and docker-in-docker.  Useful for
+# simulating multinode deployments.
 #
 # The standard name for this image is openshift/dind
 #
-FROM fedora:23
+# Notes:
+#
+#  - disable SELinux on the docker host (not compatible with dind)
+#
+#  - to use the overlay graphdriver, ensure the overlay module is
+#    installed on the docker host
+#
+#      $ modprobe overlay
+#
+#  - run with --privileged
+#
+#      $ docker run -d --privileged openshift/dind
+#
+
+FROM fedora:24
+
+# Fix 'WARNING: terminal is not fully functional' when TERM=dumb
+ENV TERM=xterm
 
 ## Configure systemd to run in a container
-ENV container=docker
 
-RUN systemctl mask systemd-remount-fs.service dev-hugepages.mount \
-  sys-fs-fuse-connections.mount systemd-logind.service getty.target \
-  console-getty.service dnf-makecache.service lvm2-lvmetad.service \
-  systemd-udevd.service systemd-udev-hwdb-update.service \
-  systemd-udev-trigger.service docker-storage-setup.service
-RUN cp /usr/lib/systemd/system/dbus.service /etc/systemd/system/; \
-  sed -i 's/OOMScoreAdjust=-900//' /etc/systemd/system/dbus.service
+ENV container=docker
 
 VOLUME ["/run", "/tmp"]
 
-## Install packages
-RUN dnf -y update && dnf -y install git golang hg tar make \
-  hostname bind-utils iproute iputils which procps-ng openssh-server \
-  # Node-specific packages
-  docker openvswitch bridge-utils ethtool iptables-services \
-  && dnf clean all
+STOPSIGNAL SIGRTMIN+3
 
-# sshd should be enabled as needed
-RUN systemctl disable sshd.service
+RUN systemctl mask\
+ auditd.service\
+ console-getty.service\
+ dev-hugepages.mount\
+ dnf-makecache.service\
+ docker-storage-setup.service\
+ getty.target\
+ lvm2-lvmetad.service\
+ sys-fs-fuse-connections.mount\
+ systemd-logind.service\
+ systemd-remount-fs.service\
+ systemd-udev-hwdb-update.service\
+ systemd-udev-trigger.service\
+ systemd-udevd.service\
+ systemd-vconsole-setup.service
+RUN cp /usr/lib/systemd/system/dbus.service /etc/systemd/system/;\
+ sed -i 's/OOMScoreAdjust=-900//' /etc/systemd/system/dbus.service
 
-## Configure dind
-ENV DIND_COMMIT 81aa1b507f51901eafcfaad70a656da376cf937d
-RUN curl -fL "https://raw.githubusercontent.com/docker/docker/${DIND_COMMIT}/hack/dind" \
-  -o /usr/local/bin/dind && chmod +x /usr/local/bin/dind
-RUN mkdir -p /etc/systemd/system/docker.service.d
-COPY dind.conf /etc/systemd/system/docker.service.d/
+# Remove non-english translations for glibc to reduce image size by 100mb.
+# docker-v1.10-migrator is unnecessary for a new docker installation
+# selinux-policy-minimum is unnecessary since selinux won't be enabled
+RUN dnf -y update && dnf -y install\
+ docker\
+ glibc-langpack-en\
+ iptables\
+ openssh-clients\
+ openssh-server\
+ && dnf -y remove\
+ docker-v1.10-migrator\
+ glibc-all-langpacks\
+ selinux-policy-minimum\
+ && dnf clean all
 
-RUN systemctl enable docker
+## Configure docker
 
-VOLUME /var/lib/docker
+RUN systemctl enable docker.service
 
-CMD ["/usr/sbin/init"]
+# Default storage to vfs.  overlay will be enabled at runtime if available.
+RUN echo "DOCKER_STORAGE_OPTIONS=--storage-driver vfs" >\
+ /etc/sysconfig/docker-storage
+
+COPY dind-setup.sh /usr/local/bin
+COPY dind-setup.service /etc/systemd/system/
+RUN systemctl enable dind-setup.service
+
+VOLUME ["/var/lib/docker"]
+
+# Hardlink init to another name to avoid having oci-systemd-hooks
+# detect containers using this image as requiring read-only cgroup
+# mounts.  containers running docker need to be run with --privileged
+# to ensure cgroups are mounted with read-write permissions.
+RUN ln /usr/sbin/init /usr/sbin/dind_init
+
+CMD ["/usr/sbin/dind_init"]

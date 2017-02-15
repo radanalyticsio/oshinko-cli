@@ -1,14 +1,5 @@
 #!/bin/bash
-
-set -o errexit
-set -o nounset
-set -o pipefail
-
-OS_ROOT=$(dirname "${BASH_SOURCE}")/../..
-source "${OS_ROOT}/hack/util.sh"
-source "${OS_ROOT}/hack/cmd_util.sh"
-source "${OS_ROOT}/hack/lib/test/junit.sh"
-os::log::install_errexit
+source "$(dirname "${BASH_SOURCE}")/../../hack/lib/init.sh"
 trap os::test::junit::reconcile_output EXIT
 
 # Cleanup cluster resources created by this test
@@ -43,6 +34,8 @@ os::cmd::expect_failure 'oc export svc -l a=b' # return error if no items match 
 os::cmd::expect_failure_and_text 'oc export svc -l a=b' 'no resources found'
 os::cmd::expect_success 'oc export svc -l app=sample'
 os::cmd::expect_success_and_text 'oc export -f examples/sample-app/application-template-stibuild.json --raw --output-version=v1' 'apiVersion: v1'
+os::cmd::expect_success_and_text 'oc export dc/database --template="{{.status.latestVersion}}"' '<no value>'
+os::cmd::expect_success_and_text 'oc get dc/database --export --template="{{.status.conditions}}"' '<no value>'
 echo "export: ok"
 os::test::junit::declare_suite_end
 

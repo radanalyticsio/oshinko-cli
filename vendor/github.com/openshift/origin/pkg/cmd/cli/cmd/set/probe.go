@@ -12,54 +12,57 @@ import (
 	"github.com/spf13/cobra"
 	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/meta"
+	"k8s.io/kubernetes/pkg/api/unversioned"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/resource"
 	"k8s.io/kubernetes/pkg/runtime"
 	"k8s.io/kubernetes/pkg/util/intstr"
 
+	"github.com/openshift/origin/pkg/cmd/templates"
 	cmdutil "github.com/openshift/origin/pkg/cmd/util"
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 )
 
-const (
-	probeLong = `
-Set or remove a liveness or readiness probe from a pod or pod template
+var (
+	probeLong = templates.LongDesc(`
+		Set or remove a liveness or readiness probe from a pod or pod template
 
-Each container in a pod may define one or more probes that are used for general health
-checking. A liveness probe is checked periodically to ensure the container is still healthy:
-if the probe fails, the container is restarted. Readiness probes set or clear the ready
-flag for each container, which controls whether the container's ports are included in the list
-of endpoints for a service and whether a deployment can proceed. A readiness check should
-indicate when your container is ready to accept incoming traffic or begin handling work.
-Setting both liveness and readiness probes for each container is highly recommended.
+		Each container in a pod may define one or more probes that are used for general health
+		checking. A liveness probe is checked periodically to ensure the container is still healthy:
+		if the probe fails, the container is restarted. Readiness probes set or clear the ready
+		flag for each container, which controls whether the container's ports are included in the list
+		of endpoints for a service and whether a deployment can proceed. A readiness check should
+		indicate when your container is ready to accept incoming traffic or begin handling work.
+		Setting both liveness and readiness probes for each container is highly recommended.
 
-The three probe types are:
+		The three probe types are:
 
-1. Open a TCP socket on the pod IP
-2. Perform an HTTP GET against a URL on a container that must return 200 OK
-3. Run a command in the container that must return exit code 0
+		1. Open a TCP socket on the pod IP
+		2. Perform an HTTP GET against a URL on a container that must return 200 OK
+		3. Run a command in the container that must return exit code 0
 
-Containers that take a variable amount of time to start should set generous
-initial-delay-seconds values, otherwise as your application evolves you may suddenly begin
-to fail.`
+		Containers that take a variable amount of time to start should set generous
+		initial-delay-seconds values, otherwise as your application evolves you may suddenly begin
+		to fail.`)
 
-	probeExample = `  # Clear both readiness and liveness probes off all containers
-  $ %[1]s probe dc/registry --remove --readiness --liveness
+	probeExample = templates.Examples(`
+		# Clear both readiness and liveness probes off all containers
+	  %[1]s probe dc/registry --remove --readiness --liveness
 
-  # Set an exec action as a liveness probe to run 'echo ok'
-  $ %[1]s probe dc/registry --liveness -- echo ok
+	  # Set an exec action as a liveness probe to run 'echo ok'
+	  %[1]s probe dc/registry --liveness -- echo ok
 
-  # Set a readiness probe to try to open a TCP socket on 3306
-  $ %[1]s probe rc/mysql --readiness --open-tcp=3306
+	  # Set a readiness probe to try to open a TCP socket on 3306
+	  %[1]s probe rc/mysql --readiness --open-tcp=3306
 
-  # Set an HTTP readiness probe for port 8080 and path /healthz over HTTP on the pod IP
-  $ %[1]s probe dc/webapp --readiness --get-url=http://:8080/healthz
+	  # Set an HTTP readiness probe for port 8080 and path /healthz over HTTP on the pod IP
+	  %[1]s probe dc/webapp --readiness --get-url=http://:8080/healthz
 
-  # Set an HTTP readiness probe over HTTPS on 127.0.0.1 for a hostNetwork pod
-  $ %[1]s probe dc/router --readiness --get-url=https://127.0.0.1:1936/stats
+	  # Set an HTTP readiness probe over HTTPS on 127.0.0.1 for a hostNetwork pod
+	  %[1]s probe dc/router --readiness --get-url=https://127.0.0.1:1936/stats
 
-  # Set only the initial-delay-seconds field on all deployments
-  $ %[1]s probe dc --all --readiness --initial-delay-seconds=30`
+	  # Set only the initial-delay-seconds field on all deployments
+	  %[1]s probe dc --all --readiness --initial-delay-seconds=30`)
 )
 
 type ProbeOptions struct {
@@ -76,10 +79,11 @@ type ProbeOptions struct {
 
 	Encoder runtime.Encoder
 
-	ShortOutput bool
-	Mapper      meta.RESTMapper
+	ShortOutput   bool
+	Mapper        meta.RESTMapper
+	OutputVersion unversioned.GroupVersion
 
-	PrintObject            func(runtime.Object) error
+	PrintObject            func([]*resource.Info) error
 	UpdatePodSpecForObject func(runtime.Object, func(spec *kapi.PodSpec) error) (bool, error)
 
 	Readiness bool
@@ -115,7 +119,7 @@ func NewCmdProbe(fullName string, f *clientcmd.Factory, out, errOut io.Writer) *
 		ContainerSelector: "*",
 	}
 	cmd := &cobra.Command{
-		Use:     "probe RESOURCE/NAME --readiness|--liveness (--get-url=URL|--open-tcp=PORT|-- CMD)",
+		Use:     "probe RESOURCE/NAME --readiness|--liveness [options] (--get-url=URL|--open-tcp=PORT|-- CMD)",
 		Short:   "Update a probe on a pod template",
 		Long:    probeLong,
 		Example: fmt.Sprintf(probeExample, fullName),
@@ -170,6 +174,16 @@ func (o *ProbeOptions) Complete(f *clientcmd.Factory, cmd *cobra.Command, args [
 		return err
 	}
 
+	clientConfig, err := f.ClientConfig()
+	if err != nil {
+		return err
+	}
+
+	o.OutputVersion, err = kcmdutil.OutputVersion(cmd, clientConfig.GroupVersion)
+	if err != nil {
+		return err
+	}
+
 	mapper, typer := f.Object(false)
 	o.Builder = resource.NewBuilder(mapper, typer, resource.ClientMapperFunc(f.ClientForMapping), kapi.Codecs.UniversalDecoder()).
 		ContinueOnError().
@@ -180,8 +194,10 @@ func (o *ProbeOptions) Complete(f *clientcmd.Factory, cmd *cobra.Command, args [
 		Flatten()
 
 	output := kcmdutil.GetFlagString(cmd, "output")
-	if len(output) != 0 {
-		o.PrintObject = func(obj runtime.Object) error { return f.PrintObject(cmd, mapper, obj, o.Out) }
+	if len(output) > 0 {
+		o.PrintObject = func(infos []*resource.Info) error {
+			return f.PrintResourceInfos(cmd, infos, o.Out)
+		}
 	}
 
 	o.Encoder = f.JSONEncoder()
@@ -304,20 +320,7 @@ func (o *ProbeOptions) Run() error {
 	}
 
 	if o.PrintObject != nil {
-		var infos []*resource.Info
-		for _, patch := range patches {
-			info := patch.Info
-			if patch.Err != nil {
-				fmt.Fprintf(o.Err, "error: %s/%s %v\n", info.Mapping.Resource, info.Name, patch.Err)
-				continue
-			}
-			infos = append(infos, info)
-		}
-		object, err := resource.AsVersionedObject(infos, !singular, "", nil)
-		if err != nil {
-			return err
-		}
-		return o.PrintObject(object)
+		return o.PrintObject(infos)
 	}
 
 	failed := false
@@ -341,7 +344,7 @@ func (o *ProbeOptions) Run() error {
 		}
 
 		info.Refresh(obj, true)
-		kcmdutil.PrintSuccess(o.Mapper, o.ShortOutput, o.Out, info.Mapping.Resource, info.Name, "updated")
+		kcmdutil.PrintSuccess(o.Mapper, o.ShortOutput, o.Out, info.Mapping.Resource, info.Name, false, "updated")
 	}
 	if failed {
 		return cmdutil.ErrExit
@@ -384,19 +387,19 @@ func (o *ProbeOptions) updateProbe(probe *kapi.Probe) {
 		probe.Handler = kapi.Handler{TCPSocket: &kapi.TCPSocketAction{Port: intOrString(o.OpenTCPSocket)}}
 	}
 	if o.InitialDelaySeconds != nil {
-		probe.InitialDelaySeconds = *o.InitialDelaySeconds
+		probe.InitialDelaySeconds = int32(*o.InitialDelaySeconds)
 	}
 	if o.SuccessThreshold != nil {
-		probe.SuccessThreshold = *o.SuccessThreshold
+		probe.SuccessThreshold = int32(*o.SuccessThreshold)
 	}
 	if o.FailureThreshold != nil {
-		probe.FailureThreshold = *o.FailureThreshold
+		probe.FailureThreshold = int32(*o.FailureThreshold)
 	}
 	if o.TimeoutSeconds != nil {
-		probe.TimeoutSeconds = *o.TimeoutSeconds
+		probe.TimeoutSeconds = int32(*o.TimeoutSeconds)
 	}
 	if o.PeriodSeconds != nil {
-		probe.PeriodSeconds = *o.PeriodSeconds
+		probe.PeriodSeconds = int32(*o.PeriodSeconds)
 	}
 }
 

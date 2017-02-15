@@ -1,6 +1,6 @@
 # OpenShift Command-Line Interface
 
-The `oc` command line tool is used to interact with the [OpenShift](http://openshift.github.io) and [Kubernetes](http://kubernetes.io/) HTTP API(s). `oc` is an alias for `openshift cli`.
+The `oc` command line tool is used to interact with the [OpenShift](https://www.openshift.org/) and [Kubernetes](http://kubernetes.io/) HTTP API(s). `oc` is an alias for `openshift cli`.
 
 `oc` is *verb focused*.
 The base verbs are *[get](#oc-get)*, *[create](#oc-create)*, *[delete](#oc-delete)*, *[replace](#oc-replace)*, and *[describe](#oc-describe)*.
@@ -17,7 +17,7 @@ Some verbs support the `-f` flag, which accepts regular file path, URL or `-` fo
 the standard input. For most actions, both JSON and YAML file formats are
 supported.
 
-Use `oc --help` for a full list of the verbs and subcommands available. A detailed list of examples for the most common verbs and subcommands is documented in the [oc by example](./generated/oc_by_example_content.adoc) and [oadm by example](./generated/oc_by_example_content.adoc) documents.
+Use `oc --help` for a full list of the verbs and subcommands available. A detailed list of examples for the most common verbs and subcommands is documented in the [oc by example](./generated/oc_by_example_content.adoc) and [oadm by example](./generated/oadm_by_example_content.adoc) documents.
 
 ## Common Flags
 
@@ -156,7 +156,7 @@ $ oc project
 
 This manually starts a build, using either the specified buildConfig or a build name with the `--from-build` option.
 
-Other options:  
+Other options:
 
 | Name       |  Description                                                                                             |
 |:-----------|:---------------------------------------------------------------------------------------------------------|
@@ -691,7 +691,7 @@ The options are:
 |`-f` *filename*        | Write to *filename* instead of standard output.  |
 |`--as-template` *name* | Output in template format with name *name*.      |
 |`--all-namespace`      | If present, list the requested object(s) across all namespaces. Namespace in current context is ignored even if specified with --namespace. |
-|`--exact`              | Preserve fields that may be cluster specific, such as service `portalIP`s or generated names. |
+|`--exact`              | Preserve fields that may be cluster specific, such as service `clusterIP`s or generated names. |
 |`--raw`                | Do not alter the resources in any way after they are loaded. |
 
 The following example exports all services to a template with name `test`.

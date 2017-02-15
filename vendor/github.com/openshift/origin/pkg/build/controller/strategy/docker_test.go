@@ -8,10 +8,10 @@ import (
 	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/resource"
 	"k8s.io/kubernetes/pkg/runtime"
+	"k8s.io/kubernetes/pkg/util/validation"
 
 	buildapi "github.com/openshift/origin/pkg/build/api"
 	_ "github.com/openshift/origin/pkg/build/api/install"
-	buildutil "github.com/openshift/origin/pkg/build/util"
 )
 
 func TestDockerCreateBuildPod(t *testing.T) {
@@ -20,18 +20,22 @@ func TestDockerCreateBuildPod(t *testing.T) {
 		Codec: kapi.Codecs.LegacyCodec(buildapi.SchemeGroupVersion),
 	}
 
-	expected := mockDockerBuild()
-	actual, err := strategy.CreateBuildPod(expected)
+	build := mockDockerBuild()
+	actual, err := strategy.CreateBuildPod(build)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
 
-	if expected, actual := buildutil.GetBuildPodName(expected), actual.ObjectMeta.Name; expected != actual {
+	if expected, actual := buildapi.GetBuildPodName(build), actual.ObjectMeta.Name; expected != actual {
 		t.Errorf("Expected %s, but got %s!", expected, actual)
 	}
-	if !reflect.DeepEqual(map[string]string{buildapi.BuildLabel: expected.Name}, actual.Labels) {
+	if !reflect.DeepEqual(map[string]string{buildapi.BuildLabel: buildapi.LabelValue(build.Name)}, actual.Labels) {
 		t.Errorf("Pod Labels does not match Build Labels!")
 	}
+	if !reflect.DeepEqual(nodeSelector, actual.Spec.NodeSelector) {
+		t.Errorf("Pod NodeSelector does not match Build NodeSelector.  Expected: %v, got: %v", nodeSelector, actual.Spec.NodeSelector)
+	}
+
 	container := actual.Spec.Containers[0]
 	if container.Name != "docker-build" {
 		t.Errorf("Expected docker-build, but got %s!", container.Name)
@@ -66,8 +70,8 @@ func TestDockerCreateBuildPod(t *testing.T) {
 	if len(actual.Spec.Volumes) != 4 {
 		t.Fatalf("Expected 4 volumes in Build pod, got %d", len(actual.Spec.Volumes))
 	}
-	if !kapi.Semantic.DeepEqual(container.Resources, expected.Spec.Resources) {
-		t.Fatalf("Expected actual=expected, %v != %v", container.Resources, expected.Spec.Resources)
+	if !kapi.Semantic.DeepEqual(container.Resources, build.Spec.Resources) {
+		t.Fatalf("Expected actual=expected, %v != %v", container.Resources, build.Spec.Resources)
 	}
 	found := false
 	foundIllegal := false
@@ -86,7 +90,7 @@ func TestDockerCreateBuildPod(t *testing.T) {
 		t.Fatalf("Found illegal environment variable 'ILLEGAL' defined on container")
 	}
 
-	buildJSON, _ := runtime.Encode(kapi.Codecs.LegacyCodec(buildapi.SchemeGroupVersion), expected)
+	buildJSON, _ := runtime.Encode(kapi.Codecs.LegacyCodec(buildapi.SchemeGroupVersion), build)
 	errorCases := map[int][]string{
 		0: {"BUILD", string(buildJSON)},
 	}
@@ -94,6 +98,22 @@ func TestDockerCreateBuildPod(t *testing.T) {
 		if e := container.Env[index]; e.Name != exp[0] || e.Value != exp[1] {
 			t.Errorf("Expected %s:%s, got %s:%s!\n", exp[0], exp[1], e.Name, e.Value)
 		}
+	}
+}
+
+func TestDockerBuildLongName(t *testing.T) {
+	strategy := DockerBuildStrategy{
+		Image: "docker-test-image",
+		Codec: kapi.Codecs.LegacyCodec(buildapi.SchemeGroupVersion),
+	}
+	build := mockDockerBuild()
+	build.Name = strings.Repeat("a", validation.DNS1123LabelMaxLength*2)
+	pod, err := strategy.CreateBuildPod(build)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if pod.Labels[buildapi.BuildLabel] != build.Name[:validation.DNS1123LabelMaxLength] {
+		t.Errorf("Unexpected build label value: %s", pod.Labels[buildapi.BuildLabel])
 	}
 }
 
@@ -107,40 +127,43 @@ func mockDockerBuild() *buildapi.Build {
 			},
 		},
 		Spec: buildapi.BuildSpec{
-			Revision: &buildapi.SourceRevision{
-				Git: &buildapi.GitSourceRevision{},
-			},
-			Source: buildapi.BuildSource{
-				Git: &buildapi.GitBuildSource{
-					URI: "http://my.build.com/the/dockerbuild/Dockerfile",
-					Ref: "master",
+			CommonSpec: buildapi.CommonSpec{
+				Revision: &buildapi.SourceRevision{
+					Git: &buildapi.GitSourceRevision{},
 				},
-				ContextDir:   "my/test/dir",
-				SourceSecret: &kapi.LocalObjectReference{Name: "secretFoo"},
-			},
-			Strategy: buildapi.BuildStrategy{
-				DockerStrategy: &buildapi.DockerBuildStrategy{
-					PullSecret: &kapi.LocalObjectReference{Name: "bar"},
-					Env: []kapi.EnvVar{
-						{Name: "ILLEGAL", Value: "foo"},
-						{Name: "BUILD_LOGLEVEL", Value: "bar"},
+				Source: buildapi.BuildSource{
+					Git: &buildapi.GitBuildSource{
+						URI: "http://my.build.com/the/dockerbuild/Dockerfile",
+						Ref: "master",
+					},
+					ContextDir:   "my/test/dir",
+					SourceSecret: &kapi.LocalObjectReference{Name: "secretFoo"},
+				},
+				Strategy: buildapi.BuildStrategy{
+					DockerStrategy: &buildapi.DockerBuildStrategy{
+						PullSecret: &kapi.LocalObjectReference{Name: "bar"},
+						Env: []kapi.EnvVar{
+							{Name: "ILLEGAL", Value: "foo"},
+							{Name: "BUILD_LOGLEVEL", Value: "bar"},
+						},
 					},
 				},
-			},
-			Output: buildapi.BuildOutput{
-				To: &kapi.ObjectReference{
-					Kind: "DockerImage",
-					Name: "docker-registry/repository/dockerBuild",
+				Output: buildapi.BuildOutput{
+					To: &kapi.ObjectReference{
+						Kind: "DockerImage",
+						Name: "docker-registry/repository/dockerBuild",
+					},
+					PushSecret: &kapi.LocalObjectReference{Name: "foo"},
 				},
-				PushSecret: &kapi.LocalObjectReference{Name: "foo"},
-			},
-			Resources: kapi.ResourceRequirements{
-				Limits: kapi.ResourceList{
-					kapi.ResourceName(kapi.ResourceCPU):    resource.MustParse("10"),
-					kapi.ResourceName(kapi.ResourceMemory): resource.MustParse("10G"),
+				Resources: kapi.ResourceRequirements{
+					Limits: kapi.ResourceList{
+						kapi.ResourceName(kapi.ResourceCPU):    resource.MustParse("10"),
+						kapi.ResourceName(kapi.ResourceMemory): resource.MustParse("10G"),
+					},
 				},
+				CompletionDeadlineSeconds: &timeout,
+				NodeSelector:              nodeSelector,
 			},
-			CompletionDeadlineSeconds: &timeout,
 		},
 		Status: buildapi.BuildStatus{
 			Phase: buildapi.BuildPhaseNew,

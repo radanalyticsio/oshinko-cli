@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,10 +27,12 @@ type Comparable interface {
 	Compare(c Comparable) int
 }
 
-type rbcolor bool
+type rbcolor int
 
-const black = true
-const red = false
+const (
+	black rbcolor = iota
+	red
+)
 
 // Interval implements a Comparable interval [begin, end)
 // TODO: support different sorts of intervals: (a,b), [a,b], (a, b]
@@ -400,7 +402,7 @@ func (ivt *IntervalTree) MaxHeight() int {
 	return int((2 * math.Log2(float64(ivt.Len()+1))) + 0.5)
 }
 
-// InternalVisitor is used on tree searchs; return false to stop searching.
+// IntervalVisitor is used on tree searchs; return false to stop searching.
 type IntervalVisitor func(n *IntervalValue) bool
 
 // Visit calls a visitor function on every tree node intersecting the given interval.
@@ -445,6 +447,9 @@ func (ivt *IntervalTree) Contains(iv Interval) bool {
 
 // Stab returns a slice with all elements in the tree intersecting the interval.
 func (ivt *IntervalTree) Stab(iv Interval) (ivs []*IntervalValue) {
+	if ivt.count == 0 {
+		return nil
+	}
 	f := func(n *IntervalValue) bool { ivs = append(ivs, n); return true }
 	ivt.Visit(iv, f)
 	return ivs

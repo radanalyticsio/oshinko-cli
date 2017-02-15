@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package factory
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
@@ -33,14 +34,16 @@ import (
 
 // PluginFactoryArgs are passed to all plugin factory functions.
 type PluginFactoryArgs struct {
-	PodLister        algorithm.PodLister
-	ServiceLister    algorithm.ServiceLister
-	ControllerLister algorithm.ControllerLister
-	ReplicaSetLister algorithm.ReplicaSetLister
-	NodeLister       algorithm.NodeLister
-	NodeInfo         predicates.NodeInfo
-	PVInfo           predicates.PersistentVolumeInfo
-	PVCInfo          predicates.PersistentVolumeClaimInfo
+	PodLister                      algorithm.PodLister
+	ServiceLister                  algorithm.ServiceLister
+	ControllerLister               algorithm.ControllerLister
+	ReplicaSetLister               algorithm.ReplicaSetLister
+	NodeLister                     algorithm.NodeLister
+	NodeInfo                       predicates.NodeInfo
+	PVInfo                         predicates.PersistentVolumeInfo
+	PVCInfo                        predicates.PersistentVolumeClaimInfo
+	HardPodAffinitySymmetricWeight int
+	FailureDomains                 []string
 }
 
 // A FitPredicateFactory produces a FitPredicate from the given args.
@@ -111,7 +114,6 @@ func RegisterCustomFitPredicate(policy schedulerapi.PredicatePolicy) string {
 		} else if policy.Argument.LabelsPresence != nil {
 			predicateFactory = func(args PluginFactoryArgs) algorithm.FitPredicate {
 				return predicates.NewNodeLabelPredicate(
-					args.NodeInfo,
 					policy.Argument.LabelsPresence.Labels,
 					policy.Argument.LabelsPresence.Presence,
 				)
@@ -120,6 +122,7 @@ func RegisterCustomFitPredicate(policy schedulerapi.PredicatePolicy) string {
 	} else if predicateFactory, ok = fitPredicateMap[policy.Name]; ok {
 		// checking to see if a pre-defined predicate is requested
 		glog.V(2).Infof("Predicate type %s already registered, reusing.", policy.Name)
+		return policy.Name
 	}
 
 	if predicateFactory == nil {
@@ -289,7 +292,7 @@ func validatePredicateOrDie(predicate schedulerapi.PredicatePolicy) {
 			numArgs++
 		}
 		if numArgs != 1 {
-			glog.Fatalf("Exactly 1 predicate argument is required, numArgs: %v", numArgs)
+			glog.Fatalf("Exactly 1 predicate argument is required, numArgs: %v, Predicate: %s", numArgs, predicate.Name)
 		}
 	}
 }
@@ -304,16 +307,17 @@ func validatePriorityOrDie(priority schedulerapi.PriorityPolicy) {
 			numArgs++
 		}
 		if numArgs != 1 {
-			glog.Fatalf("Exactly 1 priority argument is required")
+			glog.Fatalf("Exactly 1 priority argument is required, numArgs: %v, Priority: %s", numArgs, priority.Name)
 		}
 	}
 }
 
-// ListAlgorithmProviders is called when listing all available algortihm providers in `kube-scheduler --help`
+// ListAlgorithmProviders is called when listing all available algorithm providers in `kube-scheduler --help`
 func ListAlgorithmProviders() string {
 	var availableAlgorithmProviders []string
 	for name := range algorithmProviderMap {
 		availableAlgorithmProviders = append(availableAlgorithmProviders, name)
 	}
+	sort.Strings(availableAlgorithmProviders)
 	return strings.Join(availableAlgorithmProviders, " | ")
 }

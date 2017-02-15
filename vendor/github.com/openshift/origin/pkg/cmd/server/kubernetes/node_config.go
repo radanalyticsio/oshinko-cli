@@ -9,31 +9,37 @@ import (
 	"time"
 
 	"github.com/golang/glog"
+
 	proxyoptions "k8s.io/kubernetes/cmd/kube-proxy/app/options"
 	kubeletapp "k8s.io/kubernetes/cmd/kubelet/app"
 	kubeletoptions "k8s.io/kubernetes/cmd/kubelet/app/options"
 	kapi "k8s.io/kubernetes/pkg/api"
+	kerrs "k8s.io/kubernetes/pkg/api/errors"
 	"k8s.io/kubernetes/pkg/api/unversioned"
 	"k8s.io/kubernetes/pkg/apis/componentconfig"
+	"k8s.io/kubernetes/pkg/apis/componentconfig/v1alpha1"
+	"k8s.io/kubernetes/pkg/client/cache"
 	client "k8s.io/kubernetes/pkg/client/unversioned"
 	clientadapter "k8s.io/kubernetes/pkg/client/unversioned/adapters/internalclientset"
 	"k8s.io/kubernetes/pkg/cloudprovider"
+	"k8s.io/kubernetes/pkg/kubelet"
 	"k8s.io/kubernetes/pkg/kubelet/dockertools"
+	kubeletnetwork "k8s.io/kubernetes/pkg/kubelet/network"
+	kubeletcni "k8s.io/kubernetes/pkg/kubelet/network/cni"
 	kubeletserver "k8s.io/kubernetes/pkg/kubelet/server"
 	kubelettypes "k8s.io/kubernetes/pkg/kubelet/types"
 	kcrypto "k8s.io/kubernetes/pkg/util/crypto"
 	kerrors "k8s.io/kubernetes/pkg/util/errors"
-	"k8s.io/kubernetes/pkg/util/oom"
 
-	osdnapi "github.com/openshift/openshift-sdn/plugins/osdn/api"
-	"github.com/openshift/openshift-sdn/plugins/osdn/factory"
-	"github.com/openshift/openshift-sdn/plugins/osdn/ovs"
+	osclient "github.com/openshift/origin/pkg/client"
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
 	"github.com/openshift/origin/pkg/cmd/server/crypto"
 	cmdutil "github.com/openshift/origin/pkg/cmd/util"
-	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	cmdflags "github.com/openshift/origin/pkg/cmd/util/flags"
 	"github.com/openshift/origin/pkg/cmd/util/variable"
+	"github.com/openshift/origin/pkg/dns"
+	sdnapi "github.com/openshift/origin/pkg/sdn/api"
+	sdnplugin "github.com/openshift/origin/pkg/sdn/plugin"
 )
 
 // NodeConfig represents the required parameters to start the OpenShift node
@@ -54,32 +60,42 @@ type NodeConfig struct {
 	DockerClient dockertools.DockerInterface
 	// KubeletServer contains the KubeletServer configuration
 	KubeletServer *kubeletoptions.KubeletServer
-	// KubeletConfig is the configuration for the kubelet, fully initialized
-	KubeletConfig *kubeletapp.KubeletConfig
+	// KubeletDeps are the injected code dependencies for the kubelet, fully initialized
+	KubeletDeps *kubelet.KubeletDeps
 	// ProxyConfig is the configuration for the kube-proxy, fully initialized
 	ProxyConfig *proxyoptions.ProxyServerConfig
 	// IPTablesSyncPeriod is how often iptable rules are refreshed
 	IPTablesSyncPeriod string
+	// EnableUnidling indicates whether or not the unidling hybrid proxy should be used
+	EnableUnidling bool
 
-	// Maximum transmission unit for the network packets
-	MTU uint
+	// ServiceStore is reused between proxy and DNS
+	ServiceStore cache.Store
+	// EndpointsStore is reused between proxy and DNS
+	EndpointsStore cache.Store
+	// ServicesReady is closed when the service and endpoint stores are ready to be used
+	ServicesReady chan struct{}
+
+	// DNSConfig controls the DNS configuration.
+	DNSServer *dns.Server
+
 	// SDNPlugin is an optional SDN plugin
-	SDNPlugin osdnapi.OsdnPlugin
-	// EndpointsFilterer is an optional endpoints filterer
-	FilteringEndpointsHandler osdnapi.FilteringEndpointsConfigHandler
+	SDNPlugin *sdnplugin.OsdnNode
+	// SDNProxy is an optional service endpoints filterer
+	SDNProxy *sdnplugin.OsdnProxy
 }
 
-func BuildKubernetesNodeConfig(options configapi.NodeConfig) (*NodeConfig, error) {
-	originClient, osClientConfig, err := configapi.GetOpenShiftClient(options.MasterKubeConfig)
+func BuildKubernetesNodeConfig(options configapi.NodeConfig, enableProxy, enableDNS bool) (*NodeConfig, error) {
+	originClient, _, err := configapi.GetOpenShiftClient(options.MasterKubeConfig, options.MasterClientConnectionOverrides)
 	if err != nil {
 		return nil, err
 	}
-	kubeClient, _, err := configapi.GetKubeClient(options.MasterKubeConfig)
+	kubeClient, _, err := configapi.GetKubeClient(options.MasterKubeConfig, options.MasterClientConnectionOverrides)
 	if err != nil {
 		return nil, err
 	}
 	// Make a separate client for event reporting, to avoid event QPS blocking node calls
-	eventClient, _, err := configapi.GetKubeClient(options.MasterKubeConfig)
+	eventClient, _, err := configapi.GetKubeClient(options.MasterKubeConfig, options.MasterClientConnectionOverrides)
 	if err != nil {
 		return nil, err
 	}
@@ -104,15 +120,6 @@ func BuildKubernetesNodeConfig(options configapi.NodeConfig) (*NodeConfig, error
 		fileCheckInterval = options.PodManifestConfig.FileCheckIntervalSeconds
 	}
 
-	var dockerExecHandler dockertools.ExecHandler
-
-	switch options.DockerConfig.ExecHandlerName {
-	case configapi.DockerExecHandlerNative:
-		dockerExecHandler = &dockertools.NativeExecHandler{}
-	case configapi.DockerExecHandlerNsenter:
-		dockerExecHandler = &dockertools.NsenterExecHandler{}
-	}
-
 	kubeAddressStr, kubePortStr, err := net.SplitHostPort(options.ServingInfo.BindAddress)
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse node address: %v", err)
@@ -122,17 +129,22 @@ func BuildKubernetesNodeConfig(options configapi.NodeConfig) (*NodeConfig, error
 		return nil, fmt.Errorf("cannot parse node port: %v", err)
 	}
 
+	if err = validateNetworkPluginName(originClient, options.NetworkConfig.NetworkPluginName); err != nil {
+		return nil, err
+	}
+
 	// Defaults are tested in TestKubeletDefaults
 	server := kubeletoptions.NewKubeletServer()
 	// Adjust defaults
-	server.Config = path
+	server.RequireKubeConfig = true
+	server.PodManifestPath = path
 	server.RootDirectory = options.VolumeDirectory
 	server.NodeIP = options.NodeIP
 	server.HostnameOverride = options.NodeName
 	server.AllowPrivileged = true
 	server.RegisterNode = true
 	server.Address = kubeAddressStr
-	server.Port = uint(kubePort)
+	server.Port = int32(kubePort)
 	server.ReadOnlyPort = 0        // no read only access
 	server.CAdvisorPort = 0        // no unsecured cadvisor access
 	server.HealthzPort = 0         // no unsecured healthz access
@@ -140,18 +152,24 @@ func BuildKubernetesNodeConfig(options configapi.NodeConfig) (*NodeConfig, error
 	server.ClusterDNS = options.DNSIP
 	server.ClusterDomain = options.DNSDomain
 	server.NetworkPluginName = options.NetworkConfig.NetworkPluginName
-	server.HostNetworkSources = strings.Join([]string{kubelettypes.ApiserverSource, kubelettypes.FileSource}, ",")
-	server.HostPIDSources = strings.Join([]string{kubelettypes.ApiserverSource, kubelettypes.FileSource}, ",")
-	server.HostIPCSources = strings.Join([]string{kubelettypes.ApiserverSource, kubelettypes.FileSource}, ",")
+	server.HostNetworkSources = []string{kubelettypes.ApiserverSource, kubelettypes.FileSource}
+	server.HostPIDSources = []string{kubelettypes.ApiserverSource, kubelettypes.FileSource}
+	server.HostIPCSources = []string{kubelettypes.ApiserverSource, kubelettypes.FileSource}
 	server.HTTPCheckFrequency = unversioned.Duration{Duration: time.Duration(0)} // no remote HTTP pod creation access
 	server.FileCheckFrequency = unversioned.Duration{Duration: time.Duration(fileCheckInterval) * time.Second}
 	server.PodInfraContainerImage = imageTemplate.ExpandOrDie("pod")
 	server.CPUCFSQuota = true // enable cpu cfs quota enforcement by default
-	server.MaxPods = 110
-	server.SerializeImagePulls = false // disable serial image pulls by default
+	server.MaxPods = 250
+	server.PodsPerCore = 10
+	server.SerializeImagePulls = false          // disable serialized image pulls by default
+	server.EnableControllerAttachDetach = false // stay consistent with existing config, but admins should enable it
+	if enableDNS {
+		// if we are running local DNS, skydns will load the default recursive nameservers for us
+		server.ResolverConfig = ""
+	}
+	server.DockerExecHandlerName = string(options.DockerConfig.ExecHandlerName)
 
-	switch server.NetworkPluginName {
-	case ovs.SingleTenantPluginName, ovs.MultiTenantPluginName:
+	if sdnapi.IsOpenShiftNetworkPlugin(server.NetworkPluginName) {
 		// set defaults for openshift-sdn
 		server.HairpinMode = componentconfig.HairpinNone
 		server.ConfigureCBR0 = false
@@ -176,37 +194,53 @@ func BuildKubernetesNodeConfig(options configapi.NodeConfig) (*NodeConfig, error
 		return nil, err
 	}
 
-	cfg, err := kubeletapp.UnsecuredKubeletConfig(server)
+	// Initialize SDN before building kubelet config so it can modify options
+	iptablesSyncPeriod, err := time.ParseDuration(options.IPTablesSyncPeriod)
+	if err != nil {
+		return nil, fmt.Errorf("Cannot parse the provided ip-tables sync period (%s) : %v", options.IPTablesSyncPeriod, err)
+	}
+	sdnPlugin, err := sdnplugin.NewNodePlugin(options.NetworkConfig.NetworkPluginName, originClient, kubeClient, options.NodeName, options.NodeIP, iptablesSyncPeriod, options.NetworkConfig.MTU)
+	if err != nil {
+		return nil, fmt.Errorf("SDN initialization failed: %v", err)
+	}
+	if sdnPlugin != nil {
+		// SDN plugin pod setup/teardown is implemented as a CNI plugin
+		server.NetworkPluginName = kubeletcni.CNIPluginName
+		server.NetworkPluginDir = kubeletcni.DefaultNetDir
+		server.HairpinMode = componentconfig.HairpinNone
+		server.ConfigureCBR0 = false
+	}
+
+	deps, err := kubeletapp.UnsecuredKubeletDeps(server)
 	if err != nil {
 		return nil, err
 	}
 
-	// provide any config overrides
-	cfg.NodeName = options.NodeName
-	cfg.KubeClient = clientadapter.FromUnversionedClient(kubeClient)
-	cfg.EventClient = clientadapter.FromUnversionedClient(eventClient)
-	cfg.DockerExecHandler = dockerExecHandler
-
-	// docker-in-docker (dind) deployments are used for testing
-	// networking plugins.  Running openshift under dind won't work
-	// with the real oom adjuster due to the state of the cgroups path
-	// in a dind container that uses systemd for init.  Similarly,
-	// cgroup manipulation of the nested docker daemon doesn't work
-	// properly under centos/rhel and should be disabled by setting
-	// the name of the container to an empty string.
-	//
-	// This workaround should become unnecessary once user namespaces
-	if value := cmdutil.Env("OPENSHIFT_DIND", ""); value == "true" {
-		glog.Warningf("Using FakeOOMAdjuster for docker-in-docker compatibility")
-		cfg.OOMAdjuster = oom.NewFakeOOMAdjuster()
+	// Initialize cloud provider
+	cloud, err := buildCloudProvider(server)
+	if err != nil {
+		return nil, err
 	}
+	deps.Cloud = cloud
+
+	// Replace the kubelet-created CNI plugin with the SDN plugin
+	// Kubelet must be initialized with NetworkPluginName="cni" but
+	// the SDN plugin (if available) needs to be the only one used
+	if sdnPlugin != nil {
+		deps.NetworkPlugins = []kubeletnetwork.NetworkPlugin{sdnPlugin}
+	}
+
+	// provide any config overrides
+	//deps.NodeName = options.NodeName
+	deps.KubeClient = clientadapter.FromUnversionedClient(kubeClient)
+	deps.EventClient = clientadapter.FromUnversionedClient(eventClient)
 
 	// Setup auth
 	authnTTL, err := time.ParseDuration(options.AuthConfig.AuthenticationCacheTTL)
 	if err != nil {
 		return nil, err
 	}
-	authn, err := newAuthenticator(clientCAs, clientcmd.AnonymousClientConfig(osClientConfig), authnTTL, options.AuthConfig.AuthenticationCacheSize)
+	authn, err := newAuthenticator(deps.KubeClient.Authentication(), clientCAs, authnTTL, options.AuthConfig.AuthenticationCacheSize)
 	if err != nil {
 		return nil, err
 	}
@@ -225,11 +259,7 @@ func BuildKubernetesNodeConfig(options configapi.NodeConfig) (*NodeConfig, error
 		return nil, err
 	}
 
-	cfg.Auth = kubeletserver.NewKubeletAuth(authn, authzAttr, authz)
-
-	// Make sure the node doesn't think it is in standalone mode
-	// This is required for the node to enforce nodeSelectors on pods, to set hostIP on pod status updates, etc
-	cfg.StandaloneMode = false
+	deps.Auth = kubeletserver.NewKubeletAuth(authn, authzAttr, authz)
 
 	// TODO: could be cleaner
 	if configapi.UseTLS(options.ServingInfo) {
@@ -237,7 +267,7 @@ func BuildKubernetesNodeConfig(options configapi.NodeConfig) (*NodeConfig, error
 		if err != nil {
 			return nil, err
 		}
-		cfg.TLSOptions = &kubeletserver.TLSOptions{
+		deps.TLSOptions = &kubeletserver.TLSOptions{
 			Config: crypto.SecureTLSConfig(&tls.Config{
 				// RequestClientCert lets us request certs, but allow requests without client certs
 				// Verification is done by the authn layer
@@ -252,28 +282,10 @@ func BuildKubernetesNodeConfig(options configapi.NodeConfig) (*NodeConfig, error
 			KeyFile:  options.ServingInfo.ServerCert.KeyFile,
 		}
 	} else {
-		cfg.TLSOptions = nil
+		deps.TLSOptions = nil
 	}
 
-	// Prepare cloud provider
-	cloud, err := cloudprovider.InitCloudProvider(server.CloudProvider, server.CloudConfigFile)
-	if err != nil {
-		return nil, err
-	}
-	if cloud != nil {
-		glog.V(2).Infof("Successfully initialized cloud provider: %q from the config file: %q\n", server.CloudProvider, server.CloudConfigFile)
-	}
-	cfg.Cloud = cloud
-
-	sdnPlugin, err := factory.NewNodePlugin(options.NetworkConfig.NetworkPluginName, originClient, kubeClient, options.NodeName, options.NodeIP)
-	if err != nil {
-		return nil, fmt.Errorf("SDN initialization failed: %v", err)
-	}
-	if sdnPlugin != nil {
-		cfg.NetworkPlugins = append(cfg.NetworkPlugins, sdnPlugin)
-	}
-
-	endpointFilter, err := factory.NewProxyPlugin(options.NetworkConfig.NetworkPluginName, originClient, kubeClient)
+	sdnProxy, err := sdnplugin.NewProxyPlugin(options.NetworkConfig.NetworkPluginName, originClient, kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("SDN proxy initialization failed: %v", err)
 	}
@@ -289,14 +301,46 @@ func BuildKubernetesNodeConfig(options configapi.NodeConfig) (*NodeConfig, error
 		VolumeDir: options.VolumeDirectory,
 
 		KubeletServer: server,
-		KubeletConfig: cfg,
+		KubeletDeps:   deps,
 
-		ProxyConfig: proxyconfig,
+		ServicesReady: make(chan struct{}),
 
-		MTU: options.NetworkConfig.MTU,
+		ProxyConfig:    proxyconfig,
+		EnableUnidling: options.EnableUnidling,
 
-		SDNPlugin:                 sdnPlugin,
-		FilteringEndpointsHandler: endpointFilter,
+		SDNPlugin: sdnPlugin,
+		SDNProxy:  sdnProxy,
+	}
+
+	if enableDNS {
+		dnsConfig, err := dns.NewServerDefaults()
+		if err != nil {
+			return nil, fmt.Errorf("DNS configuration was not possible: %v", err)
+		}
+		if len(options.DNSIP) > 0 {
+			dnsConfig.DnsAddr = options.DNSIP + ":53"
+		}
+		dnsConfig.Domain = server.ClusterDomain + "."
+		dnsConfig.Local = "openshift.default.svc." + dnsConfig.Domain
+
+		services, serviceStore := dns.NewCachedServiceAccessorAndStore()
+		endpoints, endpointsStore := dns.NewCachedEndpointsAccessorAndStore()
+		if !enableProxy {
+			endpoints = kubeClient
+			endpointsStore = nil
+		}
+
+		// TODO: use kubeletConfig.ResolverConfig as an argument to etcd in the event the
+		//   user sets it, instead of passing it to the kubelet.
+
+		config.ServiceStore = serviceStore
+		config.EndpointsStore = endpointsStore
+		config.DNSServer = &dns.Server{
+			Config:      dnsConfig,
+			Services:    services,
+			Endpoints:   endpoints,
+			MetricsName: "node",
+		}
 	}
 
 	return config, nil
@@ -323,7 +367,7 @@ func buildKubeProxyConfig(options configapi.NodeConfig) (*proxyoptions.ProxyServ
 	proxyconfig.HealthzBindAddress = ""
 
 	// OOMScoreAdj, ResourceContainer - clear, we don't run in a container
-	oomScoreAdj := 0
+	oomScoreAdj := int32(0)
 	proxyconfig.OOMScoreAdj = &oomScoreAdj
 	proxyconfig.ResourceContainer = ""
 
@@ -369,4 +413,40 @@ func buildKubeProxyConfig(options configapi.NodeConfig) (*proxyoptions.ProxyServ
 	}
 
 	return proxyconfig, nil
+}
+
+func validateNetworkPluginName(originClient *osclient.Client, pluginName string) error {
+	if sdnapi.IsOpenShiftNetworkPlugin(pluginName) {
+		// Detect any plugin mismatches between node and master
+		clusterNetwork, err := originClient.ClusterNetwork().Get(sdnapi.ClusterNetworkDefault)
+		if kerrs.IsNotFound(err) {
+			return fmt.Errorf("master has not created a default cluster network, network plugin %q can not start", pluginName)
+		} else if err != nil {
+			return fmt.Errorf("cannot fetch %q cluster network: %v", sdnapi.ClusterNetworkDefault, err)
+		}
+
+		if clusterNetwork.PluginName != strings.ToLower(pluginName) {
+			if len(clusterNetwork.PluginName) != 0 {
+				return fmt.Errorf("detected network plugin mismatch between OpenShift node(%q) and master(%q)", pluginName, clusterNetwork.PluginName)
+			} else {
+				// Do not return error in this case
+				glog.Warningf(`either there is network plugin mismatch between OpenShift node(%q) and master or OpenShift master is running an older version where we did not persist plugin name`, pluginName)
+			}
+		}
+	}
+	return nil
+}
+
+func buildCloudProvider(server *kubeletoptions.KubeletServer) (cloudprovider.Interface, error) {
+	if len(server.CloudProvider) == 0 || server.CloudProvider == v1alpha1.AutoDetectCloudProvider {
+		return nil, nil
+	}
+	cloud, err := cloudprovider.InitCloudProvider(server.CloudProvider, server.CloudConfigFile)
+	if err != nil {
+		return nil, err
+	}
+	if cloud != nil {
+		glog.V(2).Infof("Successfully initialized cloud provider: %q from the config file: %q", server.CloudProvider, server.CloudConfigFile)
+	}
+	return cloud, nil
 }

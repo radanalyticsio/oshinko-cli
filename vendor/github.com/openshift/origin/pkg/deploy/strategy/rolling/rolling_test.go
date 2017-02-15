@@ -1,6 +1,7 @@
 package rolling
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 	"time"
@@ -23,8 +24,9 @@ func TestRolling_deployInitial(t *testing.T) {
 	initialStrategyInvoked := false
 
 	strategy := &RollingDeploymentStrategy{
-		decoder: kapi.Codecs.UniversalDecoder(),
-		client:  ktestclient.NewSimpleFake(),
+		decoder:     kapi.Codecs.UniversalDecoder(),
+		rcClient:    ktestclient.NewSimpleFake(),
+		eventClient: ktestclient.NewSimpleFake(),
 		initialStrategy: &testStrategy{
 			deployFn: func(from *kapi.ReplicationController, to *kapi.ReplicationController, desiredReplicas int, updateAcceptor strat.UpdateAcceptor) error {
 				initialStrategyInvoked = true
@@ -43,6 +45,7 @@ func TestRolling_deployInitial(t *testing.T) {
 	config := deploytest.OkDeploymentConfig(1)
 	config.Spec.Strategy = deploytest.OkRollingStrategy()
 	deployment, _ := deployutil.MakeDeployment(config, kapi.Codecs.LegacyCodec(registered.GroupOrDie(kapi.GroupName).GroupVersions[0]))
+	strategy.out, strategy.errOut = &bytes.Buffer{}, &bytes.Buffer{}
 	err := strategy.Deploy(nil, deployment, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -79,8 +82,9 @@ func TestRolling_deployRolling(t *testing.T) {
 
 	var rollingConfig *kubectl.RollingUpdaterConfig
 	strategy := &RollingDeploymentStrategy{
-		decoder: kapi.Codecs.UniversalDecoder(),
-		client:  fake,
+		decoder:     kapi.Codecs.UniversalDecoder(),
+		rcClient:    fake,
+		eventClient: ktestclient.NewSimpleFake(),
 		initialStrategy: &testStrategy{
 			deployFn: func(from *kapi.ReplicationController, to *kapi.ReplicationController, desiredReplicas int, updateAcceptor strat.UpdateAcceptor) error {
 				t.Fatalf("unexpected call to initial strategy")
@@ -96,6 +100,7 @@ func TestRolling_deployRolling(t *testing.T) {
 		apiRetryTimeout:   10 * time.Millisecond,
 	}
 
+	strategy.out, strategy.errOut = &bytes.Buffer{}, &bytes.Buffer{}
 	err := strategy.Deploy(latest, deployment, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -125,7 +130,7 @@ func TestRolling_deployRolling(t *testing.T) {
 	}
 
 	// verify hack
-	if e, a := 1, rollingConfig.NewRc.Spec.Replicas; e != a {
+	if e, a := int32(1), rollingConfig.NewRc.Spec.Replicas; e != a {
 		t.Errorf("expected rollingConfig.NewRc.Spec.Replicas %d, got %d", e, a)
 	}
 
@@ -159,8 +164,9 @@ func TestRolling_deployRollingHooks(t *testing.T) {
 	})
 
 	strategy := &RollingDeploymentStrategy{
-		decoder: kapi.Codecs.UniversalDecoder(),
-		client:  fake,
+		decoder:     kapi.Codecs.UniversalDecoder(),
+		rcClient:    fake,
+		eventClient: ktestclient.NewSimpleFake(),
 		initialStrategy: &testStrategy{
 			deployFn: func(from *kapi.ReplicationController, to *kapi.ReplicationController, desiredReplicas int, updateAcceptor strat.UpdateAcceptor) error {
 				t.Fatalf("unexpected call to initial strategy")
@@ -171,7 +177,7 @@ func TestRolling_deployRollingHooks(t *testing.T) {
 			return nil
 		},
 		hookExecutor: &hookExecutorImpl{
-			executeFunc: func(hook *deployapi.LifecycleHook, deployment *kapi.ReplicationController, label string) error {
+			executeFunc: func(hook *deployapi.LifecycleHook, deployment *kapi.ReplicationController, suffix, label string) error {
 				return hookError
 			},
 		},
@@ -200,6 +206,7 @@ func TestRolling_deployRollingHooks(t *testing.T) {
 		if tc.hookShouldFail {
 			hookError = fmt.Errorf("hook failure")
 		}
+		strategy.out, strategy.errOut = &bytes.Buffer{}, &bytes.Buffer{}
 		err := strategy.Deploy(latest, deployment, 2)
 		if err != nil && tc.deploymentShouldFail {
 			t.Logf("got expected error: %v", err)
@@ -219,8 +226,9 @@ func TestRolling_deployInitialHooks(t *testing.T) {
 	var hookError error
 
 	strategy := &RollingDeploymentStrategy{
-		decoder: kapi.Codecs.UniversalDecoder(),
-		client:  ktestclient.NewSimpleFake(),
+		decoder:     kapi.Codecs.UniversalDecoder(),
+		rcClient:    ktestclient.NewSimpleFake(),
+		eventClient: ktestclient.NewSimpleFake(),
 		initialStrategy: &testStrategy{
 			deployFn: func(from *kapi.ReplicationController, to *kapi.ReplicationController, desiredReplicas int, updateAcceptor strat.UpdateAcceptor) error {
 				return nil
@@ -230,7 +238,7 @@ func TestRolling_deployInitialHooks(t *testing.T) {
 			return nil
 		},
 		hookExecutor: &hookExecutorImpl{
-			executeFunc: func(hook *deployapi.LifecycleHook, deployment *kapi.ReplicationController, label string) error {
+			executeFunc: func(hook *deployapi.LifecycleHook, deployment *kapi.ReplicationController, suffix, label string) error {
 				return hookError
 			},
 		},
@@ -258,6 +266,7 @@ func TestRolling_deployInitialHooks(t *testing.T) {
 		if tc.hookShouldFail {
 			hookError = fmt.Errorf("hook failure")
 		}
+		strategy.out, strategy.errOut = &bytes.Buffer{}, &bytes.Buffer{}
 		err := strategy.Deploy(nil, deployment, 2)
 		if err != nil && tc.deploymentShouldFail {
 			t.Logf("got expected error: %v", err)
@@ -309,7 +318,7 @@ func rollingParams(preFailurePolicy, postFailurePolicy deployapi.LifecycleHookFa
 	}
 }
 
-func getUpdateAcceptor(timeout time.Duration) strat.UpdateAcceptor {
+func getUpdateAcceptor(timeout time.Duration, minReadySeconds int32) strat.UpdateAcceptor {
 	return &testAcceptor{
 		acceptFn: func(deployment *kapi.ReplicationController) error {
 			return nil

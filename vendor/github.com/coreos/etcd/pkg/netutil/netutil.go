@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ import (
 )
 
 var (
-	plog = capnslog.NewPackageLogger("github.com/coreos/etcd/pkg", "netutil")
+	plog = capnslog.NewPackageLogger("github.com/coreos/etcd", "pkg/netutil")
 
 	// indirection for testing
 	resolveTCPAddr = net.ResolveTCPAddr
@@ -115,4 +115,9 @@ func URLStringsEqual(a []string, b []string) bool {
 	}
 
 	return urlsEqual(urlsA, urlsB)
+}
+
+func IsNetworkTimeoutError(err error) bool {
+	nerr, ok := err.(net.Error)
+	return ok && nerr.Timeout()
 }

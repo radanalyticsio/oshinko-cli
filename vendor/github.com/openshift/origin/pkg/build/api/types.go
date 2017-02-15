@@ -11,13 +11,23 @@ import (
 const (
 	// BuildAnnotation is an annotation that identifies a Pod as being for a Build
 	BuildAnnotation = "openshift.io/build.name"
+	// BuildConfigAnnotation is an annotation that identifies the BuildConfig that a Build was created from
+	BuildConfigAnnotation = "openshift.io/build-config.name"
 	// BuildNumberAnnotation is an annotation whose value is the sequential number for this Build
 	BuildNumberAnnotation = "openshift.io/build.number"
 	// BuildCloneAnnotation is an annotation whose value is the name of the build this build was cloned from
 	BuildCloneAnnotation = "openshift.io/build.clone-of"
 	// BuildPodNameAnnotation is an annotation whose value is the name of the pod running this build
 	BuildPodNameAnnotation = "openshift.io/build.pod-name"
+	// BuildJenkinsStatusJSONAnnotation is an annotation holding the Jenkins status information
+	BuildJenkinsStatusJSONAnnotation = "openshift.io/jenkins-status-json"
+	// BuildJenkinsLogURLAnnotation is an annotation holding a link to the Jenkins build console log
+	BuildJenkinsLogURLAnnotation = "openshift.io/jenkins-log-url"
+	// BuildJenkinsBuildURIAnnotation is an annotation holding a link to the Jenkins build
+	BuildJenkinsBuildURIAnnotation = "openshift.io/jenkins-build-uri"
 	// BuildLabel is the key of a Pod label whose value is the Name of a Build which is run.
+	// NOTE: The value for this label may not contain the entire Build name because it will be
+	// truncated to maximum label length.
 	BuildLabel = "openshift.io/build.name"
 	// BuildRunPolicyLabel represents the start policy used to to start the build.
 	BuildRunPolicyLabel = "openshift.io/build.start-policy"
@@ -33,7 +43,8 @@ const (
 	// executing a Source build
 	DropCapabilities = "DROP_CAPS"
 	// BuildConfigLabel is the key of a Build label whose value is the ID of a BuildConfig
-	// on which the Build is based.
+	// on which the Build is based. NOTE: The value for this label may not contain the entire
+	// BuildConfig name because it will be truncated to maximum label length.
 	BuildConfigLabel = "openshift.io/build-config.name"
 	// BuildConfigLabelDeprecated was used as BuildConfigLabel before adding namespaces.
 	// We keep it for backward compatibility.
@@ -42,6 +53,8 @@ const (
 	// New Builds cannot be instantiated from a paused BuildConfig.
 	BuildConfigPausedAnnotation = "openshift.io/build-config.paused"
 )
+
+// +genclient=true
 
 // Build encapsulates the inputs needed to produce a new deployable image, as well as
 // the status of the execution and a reference to the Pod which executed the build.
@@ -58,15 +71,26 @@ type Build struct {
 
 // BuildSpec encapsulates all the inputs necessary to represent a build.
 type BuildSpec struct {
+	CommonSpec
+
+	// TriggeredBy describes which triggers started the most recent update to the
+	// build configuration and contains information about those triggers.
+	TriggeredBy []BuildTriggerCause
+}
+
+// CommonSpec encapsulates all common fields between Build and BuildConfig.
+type CommonSpec struct {
+
 	// ServiceAccount is the name of the ServiceAccount to use to run the pod
 	// created by this build.
-	// The pod will be allowed to use secrets referenced by the ServiceAccount
+	// The pod will be allowed to use secrets referenced by the ServiceAccount.
 	ServiceAccount string
 
 	// Source describes the SCM in use.
 	Source BuildSource
 
-	// Revision is the information from the source for a specific repo snapshot.
+	// Revision is the information from the source for a specific repo
+	// snapshot.
 	// This is optional.
 	Revision *SourceRevision
 
@@ -76,17 +100,86 @@ type BuildSpec struct {
 	// Output describes the Docker image the Strategy should produce.
 	Output BuildOutput
 
-	// Compute resource requirements to execute the build
+	// Resources computes resource requirements to execute the build.
 	Resources kapi.ResourceRequirements
 
 	// PostCommit is a build hook executed after the build output image is
 	// committed, before it is pushed to a registry.
 	PostCommit BuildPostCommitSpec
 
-	// Optional duration in seconds, counted from the time when a build pod gets
-	// scheduled in the system, that the build may be active on a node before the
-	// system actively tries to terminate the build; value must be positive integer
+	// CompletionDeadlineSeconds is an optional duration in seconds, counted from
+	// the time when a build pod gets scheduled in the system, that the build may
+	// be active on a node before the system actively tries to terminate the
+	// build; value must be positive integer.
 	CompletionDeadlineSeconds *int64
+
+	// NodeSelector is a selector which must be true for the build pod to fit on a node
+	// If nil, it can be overridden by default build nodeselector values for the cluster.
+	// If set to an empty map or a map with any values, default build nodeselector values
+	// are ignored.
+	NodeSelector map[string]string
+}
+
+const (
+	BuildTriggerCauseManualMsg  = "Manually triggered"
+	BuildTriggerCauseConfigMsg  = "Build configuration change"
+	BuildTriggerCauseImageMsg   = "Image change"
+	BuildTriggerCauseGithubMsg  = "GitHub WebHook"
+	BuildTriggerCauseGenericMsg = "Generic WebHook"
+)
+
+// BuildTriggerCause holds information about a triggered build. It is used for
+// displaying build trigger data for each build and build configuration in oc
+// describe. It is also used to describe which triggers led to the most recent
+// update in the build configuration.
+type BuildTriggerCause struct {
+	// Message is used to store a human readable message for why the build was
+	// triggered. E.g.: "Manually triggered by user", "Configuration change",etc.
+	Message string
+
+	// genericWebHook represents data for a generic webhook that fired a
+	// specific build.
+	GenericWebHook *GenericWebHookCause
+
+	// GitHubWebHook represents data for a GitHub webhook that fired a specific
+	// build.
+	GitHubWebHook *GitHubWebHookCause
+
+	// ImageChangeBuild stores information about an imagechange event that
+	// triggered a new build.
+	ImageChangeBuild *ImageChangeCause
+}
+
+// GenericWebHookCause holds information about a generic WebHook that
+// triggered a build.
+type GenericWebHookCause struct {
+	// Revision is an optional field that stores the git source revision
+	// information of the generic webhook trigger when it is available.
+	Revision *SourceRevision
+
+	// Secret is the obfuscated webhook secret that triggered a build.
+	Secret string
+}
+
+// GitHubWebHookCause has information about a GitHub webhook that triggered a
+// build.
+type GitHubWebHookCause struct {
+	// Revision is the git source revision information of the trigger.
+	Revision *SourceRevision
+
+	// Secret is the obfuscated webhook secret that triggered a build.
+	Secret string
+}
+
+// ImageChangeCause contains information about the image that triggered a
+// build.
+type ImageChangeCause struct {
+	// ImageID is the ID of the image that triggered a a new build.
+	ImageID string
+
+	// FromRef contains detailed information about an image that triggered a
+	// build
+	FromRef *kapi.ObjectReference
 }
 
 // BuildStatus contains the status of a build
@@ -167,27 +260,32 @@ const (
 
 	// StatusReasonCannotCreateBuildPodSpec is an error condition when the build
 	// strategy cannot create a build pod spec.
-	StatusReasonCannotCreateBuildPodSpec = "CannotCreateBuildPodSpec"
+	StatusReasonCannotCreateBuildPodSpec StatusReason = "CannotCreateBuildPodSpec"
 
 	// StatusReasonCannotCreateBuildPod is an error condition when a build pod
 	// cannot be created.
-	StatusReasonCannotCreateBuildPod = "CannotCreateBuildPod"
+	StatusReasonCannotCreateBuildPod StatusReason = "CannotCreateBuildPod"
 
 	// StatusReasonInvalidOutputReference is an error condition when the build
 	// output is an invalid reference.
-	StatusReasonInvalidOutputReference = "InvalidOutputReference"
+	StatusReasonInvalidOutputReference StatusReason = "InvalidOutputReference"
 
 	// StatusReasonCancelBuildFailed is an error condition when cancelling a build
 	// fails.
-	StatusReasonCancelBuildFailed = "CancelBuildFailed"
+	StatusReasonCancelBuildFailed StatusReason = "CancelBuildFailed"
 
 	// StatusReasonBuildPodDeleted is an error condition when the build pod is
 	// deleted before build completion.
-	StatusReasonBuildPodDeleted = "BuildPodDeleted"
+	StatusReasonBuildPodDeleted StatusReason = "BuildPodDeleted"
 
 	// StatusReasonExceededRetryTimeout is an error condition when the build has
 	// not completed and retrying the build times out.
-	StatusReasonExceededRetryTimeout = "ExceededRetryTimeout"
+	StatusReasonExceededRetryTimeout StatusReason = "ExceededRetryTimeout"
+
+	// StatusReasonMissingPushSecret indicates that the build is missing required
+	// secret for pushing the output image.
+	// The build will stay in the pending state until the secret is created, or the build times out.
+	StatusReasonMissingPushSecret StatusReason = "MissingPushSecret"
 )
 
 // BuildSource is the input used for the build.
@@ -309,6 +407,18 @@ type GitSourceRevision struct {
 	Message string
 }
 
+// ProxyConfig defines what proxies to use for an operation
+type ProxyConfig struct {
+	// HTTPProxy is a proxy used to reach the git repository over http
+	HTTPProxy *string
+
+	// HTTPSProxy is a proxy used to reach the git repository over https
+	HTTPSProxy *string
+
+	// NoProxy is the list of domains for which the proxy should not be used
+	NoProxy *string
+}
+
 // GitBuildSource defines the parameters of a Git SCM
 type GitBuildSource struct {
 	// URI points to the source that will be built. The structure of the source
@@ -318,11 +428,8 @@ type GitBuildSource struct {
 	// Ref is the branch/tag/ref to build.
 	Ref string
 
-	// HTTPProxy is a proxy used to reach the git repository over http
-	HTTPProxy *string
-
-	// HTTPSProxy is a proxy used to reach the git repository over https
-	HTTPSProxy *string
+	// ProxyConfig defines the proxies to use for the git clone operation
+	ProxyConfig
 }
 
 // SourceControlUser defines the identity of a user of source control
@@ -346,7 +453,7 @@ type BuildStrategy struct {
 	CustomStrategy *CustomBuildStrategy
 
 	// JenkinsPipelineStrategy holds the parameters to the Jenkins Pipeline build strategy.
-	// This strategy is experimental.
+	// This strategy is in tech preview.
 	JenkinsPipelineStrategy *JenkinsPipelineBuildStrategy
 }
 
@@ -434,14 +541,28 @@ type SourceBuildStrategy struct {
 	Scripts string
 
 	// Incremental flag forces the Source build to do incremental builds if true.
-	Incremental bool
+	Incremental *bool
 
 	// ForcePull describes if the builder should pull the images from registry prior to building.
 	ForcePull bool
+
+	// RuntimeImage is an optional image that is used to run an application
+	// without unneeded dependencies installed. The building of the application
+	// is still done in the builder image but, post build, you can copy the
+	// needed artifacts in the runtime image for use.
+	// This field and the feature it enables are in tech preview.
+	RuntimeImage *kapi.ObjectReference
+
+	// RuntimeArtifacts specifies a list of source/destination pairs that will be
+	// copied from the builder to a runtime image. sourcePath can be a file or
+	// directory. destinationDir must be a directory. destinationDir can also be
+	// empty or equal to ".", in this case it just refers to the root of WORKDIR.
+	// This field and the feature it enables are in tech preview.
+	RuntimeArtifacts []ImageSourcePath
 }
 
 // JenkinsPipelineStrategy holds parameters specific to a Jenkins Pipeline build.
-// This strategy is experimental.
+// This strategy is in tech preview.
 type JenkinsPipelineBuildStrategy struct {
 	// JenkinsfilePath is the optional path of the Jenkinsfile that will be used to configure the pipeline
 	// relative to the root of the context (contextDir). If both JenkinsfilePath & Jenkinsfile are
@@ -554,6 +675,19 @@ type BuildOutput struct {
 	// up the authentication for executing the Docker push to authentication
 	// enabled Docker Registry (or Docker Hub).
 	PushSecret *kapi.LocalObjectReference
+
+	// ImageLabels define a list of labels that are applied to the resulting image. If there
+	// are multiple labels with the same name then the last one in the list is used.
+	ImageLabels []ImageLabel
+}
+
+// ImageLabel represents a label applied to the resulting image.
+type ImageLabel struct {
+	// Name defines the name of the label. It must have non-zero length.
+	Name string
+
+	// Value defines the literal value of the label.
+	Value string
 }
 
 // BuildConfig is a template which can be used to create new builds.
@@ -570,8 +704,9 @@ type BuildConfig struct {
 
 // BuildConfigSpec describes when and how builds are created
 type BuildConfigSpec struct {
-	// Triggers determine how new Builds can be launched from a BuildConfig. If no triggers
-	// are defined, a new build can only occur as a result of an explicit client build creation.
+	// Triggers determine how new Builds can be launched from a BuildConfig. If
+	// no triggers are defined, a new build can only occur as a result of an
+	// explicit client build creation.
 	Triggers []BuildTriggerPolicy
 
 	// RunPolicy describes how the new build created from this build
@@ -579,8 +714,8 @@ type BuildConfigSpec struct {
 	// This is optional, if not specified we default to "Serial".
 	RunPolicy BuildRunPolicy
 
-	// BuildSpec is the desired build specification
-	BuildSpec
+	// CommonSpec is the desired build specification
+	CommonSpec
 }
 
 // BuildRunPolicy defines the behaviour of how the new builds are executed
@@ -605,7 +740,7 @@ const (
 // BuildConfigStatus contains current state of the build config object.
 type BuildConfigStatus struct {
 	// LastVersion is used to inform about number of last triggered build.
-	LastVersion int
+	LastVersion int64
 }
 
 // WebHookTrigger is a trigger that gets invoked using a webhook type of post
@@ -713,6 +848,7 @@ type GitInfo struct {
 	// Refs is a list of GitRefs for the provided repo - generally sent
 	// when used from a post-receive hook. This field is optional and is
 	// used when sending multiple refs
+	// +k8s:conversion-gen=false
 	Refs []GitRefInfo
 }
 
@@ -747,12 +883,16 @@ type BuildRequest struct {
 	Binary *BinaryBuildSource
 
 	// LastVersion (optional) is the LastVersion of the BuildConfig that was used
-	// to generate the build. If the BuildConfig in the generator doesn't match, a build will
-	// not be generated.
-	LastVersion *int
+	// to generate the build. If the BuildConfig in the generator doesn't match,
+	// a build will not be generated.
+	LastVersion *int64
 
-	// Env contains additional environment variables you want to pass into a builder container
+	// Env contains additional environment variables you want to pass into a builder container.
 	Env []kapi.EnvVar
+
+	// TriggeredBy describes which triggers started the most recent update to the
+	// buildconfig and contains information about those triggers.
+	TriggeredBy []BuildTriggerCause
 }
 
 type BinaryBuildRequestOptions struct {
@@ -799,7 +939,7 @@ type BuildLogOptions struct {
 	// Only one of sinceSeconds or sinceTime may be specified.
 	SinceSeconds *int64
 	// An RFC3339 timestamp from which to show logs. If this value
-	// preceeds the time a pod was started, only logs since the pod start will be returned.
+	// precedes the time a pod was started, only logs since the pod start will be returned.
 	// If this value is in the future, no logs will be returned.
 	// Only one of sinceSeconds or sinceTime may be specified.
 	SinceTime *unversioned.Time

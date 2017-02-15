@@ -14,8 +14,8 @@ import (
 	"k8s.io/kubernetes/pkg/util/diff"
 	"k8s.io/kubernetes/pkg/util/validation/field"
 
-	"github.com/openshift/origin/pkg/api/v1beta3"
 	"github.com/openshift/origin/pkg/template/api"
+	"github.com/openshift/origin/pkg/template/api/v1"
 	"github.com/openshift/origin/pkg/template/generator"
 
 	_ "github.com/openshift/origin/pkg/api/install"
@@ -33,7 +33,7 @@ func makeParameter(name, value, generate string, required bool) api.Parameter {
 func TestAddParameter(t *testing.T) {
 	var template api.Template
 
-	jsonData, _ := ioutil.ReadFile("../../test/templates/fixtures/guestbook.json")
+	jsonData, _ := ioutil.ReadFile("../../test/templates/testdata/guestbook.json")
 	json.Unmarshal(jsonData, &template)
 
 	AddParameter(&template, makeParameter("CUSTOM_PARAM", "1", "", false))
@@ -106,7 +106,7 @@ func TestParameterGenerators(t *testing.T) {
 			map[string]generator.Generator{},
 			false,
 			makeParameter("PARAM-fail-foo-gen", "foo", "", false),
-			field.ErrorTypeNotFound,
+			field.ErrorTypeInvalid,
 			"template.parameters[0]",
 		},
 		{ // No str generator, should fail
@@ -177,17 +177,30 @@ func TestParameterGenerators(t *testing.T) {
 	}
 }
 
-func TestProcessValueEscape(t *testing.T) {
+func TestProcessValue(t *testing.T) {
 	var template api.Template
 	if err := runtime.DecodeInto(kapi.Codecs.UniversalDecoder(), []byte(`{
 		"kind":"Template", "apiVersion":"v1",
 		"objects": [
 			{
-				"kind": "Service", "apiVersion": "v1beta3${VALUE}",
+				"kind": "Service", "apiVersion": "v${VALUE}",
 				"metadata": {
 					"labels": {
+						"i1": "${{INT_1}}",
+						"invalidjsonmap": "${{INVALID_JSON_MAP}}",
+						"invalidjsonarray": "${{INVALID_JSON_ARRAY}}",
 						"key1": "${VALUE}",
-						"key2": "$${VALUE}"
+						"key2": "$${VALUE}",
+						"quoted_string": "${{STRING_1}}",
+						"s1_s1": "${STRING_1}_${STRING_1}",
+						"s1_s2": "${STRING_1}_${STRING_2}",
+						"untouched": "a${{INT_1}}",
+						"untouched2": "${{INT_1}}a",
+						"untouched3": "${{INVALID_PARAMETER}}",
+						"untouched4": "${{INVALID PARAMETER}}",
+						"validjsonmap": "${{VALID_JSON_MAP}}",
+						"validjsonarray": "${{VALID_JSON_ARRAY}}"
+
 					}
 				}
 			}
@@ -195,7 +208,6 @@ func TestProcessValueEscape(t *testing.T) {
 	}`), &template); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
 	generators := map[string]generator.Generator{
 		"expression": generator.NewExpressionValueGenerator(rand.New(rand.NewSource(1337))),
 	}
@@ -203,19 +215,27 @@ func TestProcessValueEscape(t *testing.T) {
 
 	// Define custom parameter for the transformation:
 	AddParameter(&template, makeParameter("VALUE", "1", "", false))
+	AddParameter(&template, makeParameter("STRING_1", "string1", "", false))
+	AddParameter(&template, makeParameter("STRING_2", "string2", "", false))
+	AddParameter(&template, makeParameter("INT_1", "1", "", false))
+	AddParameter(&template, makeParameter("VALID_JSON_MAP", "{\"key\":\"value\"}", "", false))
+	AddParameter(&template, makeParameter("INVALID_JSON_MAP", "{\"key\":\"value\"", "", false))
+	AddParameter(&template, makeParameter("VALID_JSON_ARRAY", "[\"key\",\"value\"]", "", false))
+	AddParameter(&template, makeParameter("INVALID_JSON_ARRAY", "[\"key\":\"value\"", "", false))
 
 	// Transform the template config into the result config
 	errs := processor.Process(&template)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected error: %v", errs)
 	}
-	result, err := runtime.Encode(kapi.Codecs.LegacyCodec(v1beta3.SchemeGroupVersion), &template)
+	result, err := runtime.Encode(kapi.Codecs.LegacyCodec(v1.SchemeGroupVersion), &template)
 	if err != nil {
 		t.Fatalf("unexpected error during encoding Config: %#v", err)
 	}
-	expect := `{"kind":"Template","apiVersion":"v1beta3","metadata":{"creationTimestamp":null},"objects":[{"apiVersion":"v1beta31","kind":"Service","metadata":{"labels":{"key1":"1","key2":"$1"}}}],"parameters":[{"name":"VALUE","value":"1"}]}`
+	expect := `{"kind":"Template","apiVersion":"v1","metadata":{"creationTimestamp":null},"objects":[{"apiVersion":"v1","kind":"Service","metadata":{"labels":{"i1":1,"invalidjsonarray":"[\"key\":\"value\"","invalidjsonmap":"{\"key\":\"value\"","key1":"1","key2":"$1","quoted_string":"string1","s1_s1":"string1_string1","s1_s2":"string1_string2","untouched":"a${{INT_1}}","untouched2":"${{INT_1}}a","untouched3":"${{INVALID_PARAMETER}}","untouched4":"${{INVALID PARAMETER}}","validjsonarray":["key","value"],"validjsonmap":{"key":"value"}}}}],"parameters":[{"name":"VALUE","value":"1"},{"name":"STRING_1","value":"string1"},{"name":"STRING_2","value":"string2"},{"name":"INT_1","value":"1"},{"name":"VALID_JSON_MAP","value":"{\"key\":\"value\"}"},{"name":"INVALID_JSON_MAP","value":"{\"key\":\"value\""},{"name":"VALID_JSON_ARRAY","value":"[\"key\",\"value\"]"},{"name":"INVALID_JSON_ARRAY","value":"[\"key\":\"value\""}]}`
 	stringResult := strings.TrimSpace(string(result))
 	if expect != stringResult {
+		//t.Errorf("unexpected output, expected: \n%s\nGot:\n%s\n", expect, stringResult)
 		t.Errorf("unexpected output: %s", diff.StringDiff(expect, stringResult))
 	}
 }
@@ -233,16 +253,16 @@ func TestEvaluateLabels(t *testing.T) {
 				"kind":"Template", "apiVersion":"v1",
 				"objects": [
 					{
-						"kind": "Service", "apiVersion": "v1beta3",
+						"kind": "Service", "apiVersion": "v1",
 						"metadata": {"labels": {"key1": "v1", "key2": "v2"}	}
 					}
 				]
 			}`,
 			Output: `{
-				"kind":"Template","apiVersion":"v1beta3","metadata":{"creationTimestamp":null},
+				"kind":"Template","apiVersion":"v1","metadata":{"creationTimestamp":null},
 				"objects":[
 					{
-						"apiVersion":"v1beta3","kind":"Service","metadata":{
+						"apiVersion":"v1","kind":"Service","metadata":{
 						"labels":{"key1":"v1","key2":"v2"}}
 					}
 				]
@@ -253,42 +273,17 @@ func TestEvaluateLabels(t *testing.T) {
 				"kind":"Template", "apiVersion":"v1",
 				"objects": [
 					{
-						"kind": "Service", "apiVersion": "v1beta3",
+						"kind": "Service", "apiVersion": "v1",
 						"metadata": {"labels": {"key1": "v1", "key2": "v2"}	}
 					}
 				]
 			}`,
 			Output: `{
-				"kind":"Template","apiVersion":"v1beta3","metadata":{"creationTimestamp":null},
+				"kind":"Template","apiVersion":"v1","metadata":{"creationTimestamp":null},
 				"objects":[
 					{
-						"apiVersion":"v1beta3","kind":"Service","metadata":{
+						"apiVersion":"v1","kind":"Service","metadata":{
 						"labels":{"key1":"v1","key2":"v2","key3":"v3"}}
-					}
-				],
-				"labels":{"key3":"v3"}
-			}`,
-			Labels: map[string]string{"key3": "v3"},
-		},
-		"when the root object has labels and no metadata": {
-			Input: `{
-				"kind":"Template", "apiVersion":"v1",
-				"objects": [
-					{
-						"kind": "Service", "apiVersion": "v1beta3",
-						"labels": {
-							"key1": "v1",
-							"key2": "v2"
-						}
-					}
-				]
-			}`,
-			Output: `{
-				"kind":"Template","apiVersion":"v1beta3","metadata":{"creationTimestamp":null},
-				"objects":[
-					{
-						"apiVersion":"v1beta3","kind":"Service",
-						"labels":{"key1":"v1","key2":"v2","key3":"v3"}
 					}
 				],
 				"labels":{"key3":"v3"}
@@ -300,7 +295,7 @@ func TestEvaluateLabels(t *testing.T) {
 				"kind":"Template", "apiVersion":"v1",
 				"objects": [
 					{
-						"kind": "Service", "apiVersion": "v1beta3",
+						"kind": "Service", "apiVersion": "v1",
 						"metadata": {},
 						"labels": {
 							"key1": "v1",
@@ -310,10 +305,10 @@ func TestEvaluateLabels(t *testing.T) {
 				]
 			}`,
 			Output: `{
-				"kind":"Template","apiVersion":"v1beta3","metadata":{"creationTimestamp":null},
+				"kind":"Template","apiVersion":"v1","metadata":{"creationTimestamp":null},
 				"objects":[
 					{
-						"apiVersion":"v1beta3","kind":"Service",
+						"apiVersion":"v1","kind":"Service",
 						"labels":{"key1":"v1","key2":"v2"},
 						"metadata":{"labels":{"key3":"v3"}}
 					}
@@ -327,16 +322,16 @@ func TestEvaluateLabels(t *testing.T) {
 				"kind":"Template", "apiVersion":"v1",
 				"objects": [
 					{
-						"kind": "Service", "apiVersion": "v1beta3",
+						"kind": "Service", "apiVersion": "v1",
 						"metadata": {"labels": {"key1": "v1", "key2": "v2"}	}
 					}
 				]
 			}`,
 			Output: `{
-				"kind":"Template","apiVersion":"v1beta3","metadata":{"creationTimestamp":null},
+				"kind":"Template","apiVersion":"v1","metadata":{"creationTimestamp":null},
 				"objects":[
 					{
-						"apiVersion":"v1beta3","kind":"Service","metadata":{
+						"apiVersion":"v1","kind":"Service","metadata":{
 						"labels":{"key1":"v1","key2":"v3"}}
 					}
 				],
@@ -366,7 +361,7 @@ func TestEvaluateLabels(t *testing.T) {
 			t.Errorf("%s: unexpected error: %v", k, errs)
 			continue
 		}
-		result, err := runtime.Encode(kapi.Codecs.LegacyCodec(v1beta3.SchemeGroupVersion), &template)
+		result, err := runtime.Encode(kapi.Codecs.LegacyCodec(v1.SchemeGroupVersion), &template)
 		if err != nil {
 			t.Errorf("%s: unexpected error: %v", k, err)
 			continue
@@ -383,12 +378,12 @@ func TestEvaluateLabels(t *testing.T) {
 
 func TestProcessTemplateParameters(t *testing.T) {
 	var template, expectedTemplate api.Template
-	jsonData, _ := ioutil.ReadFile("../../test/templates/fixtures/guestbook.json")
+	jsonData, _ := ioutil.ReadFile("../../test/templates/testdata/guestbook.json")
 	if err := runtime.DecodeInto(kapi.Codecs.UniversalDecoder(), jsonData, &template); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expectedData, _ := ioutil.ReadFile("../../test/templates/fixtures/guestbook_list.json")
+	expectedData, _ := ioutil.ReadFile("../../test/templates/testdata/guestbook_list.json")
 	if err := runtime.DecodeInto(kapi.Codecs.UniversalDecoder(), expectedData, &expectedTemplate); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -406,11 +401,11 @@ func TestProcessTemplateParameters(t *testing.T) {
 	if len(errs) > 0 {
 		t.Fatalf("unexpected error: %v", errs)
 	}
-	result, err := runtime.Encode(kapi.Codecs.LegacyCodec(v1beta3.SchemeGroupVersion), &template)
+	result, err := runtime.Encode(kapi.Codecs.LegacyCodec(v1.SchemeGroupVersion), &template)
 	if err != nil {
 		t.Fatalf("unexpected error during encoding Config: %#v", err)
 	}
-	exp, _ := runtime.Encode(kapi.Codecs.LegacyCodec(v1beta3.SchemeGroupVersion), &expectedTemplate)
+	exp, _ := runtime.Encode(kapi.Codecs.LegacyCodec(v1.SchemeGroupVersion), &expectedTemplate)
 
 	if string(result) != string(exp) {
 		t.Errorf("unexpected output: %s", diff.StringDiff(string(exp), string(result)))

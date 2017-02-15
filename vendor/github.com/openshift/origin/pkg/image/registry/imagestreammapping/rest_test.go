@@ -15,6 +15,7 @@ import (
 	"k8s.io/kubernetes/pkg/api/errors"
 	"k8s.io/kubernetes/pkg/api/unversioned"
 	"k8s.io/kubernetes/pkg/api/v1"
+	"k8s.io/kubernetes/pkg/auth/user"
 	"k8s.io/kubernetes/pkg/registry/registrytest"
 	"k8s.io/kubernetes/pkg/runtime"
 	"k8s.io/kubernetes/pkg/storage/etcd/etcdtest"
@@ -23,16 +24,18 @@ import (
 
 	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
 	"github.com/openshift/origin/pkg/authorization/registry/subjectaccessreview"
+	"github.com/openshift/origin/pkg/image/admission/testutil"
 	"github.com/openshift/origin/pkg/image/api"
 	"github.com/openshift/origin/pkg/image/registry/image"
 	imageetcd "github.com/openshift/origin/pkg/image/registry/image/etcd"
 	"github.com/openshift/origin/pkg/image/registry/imagestream"
 	imagestreametcd "github.com/openshift/origin/pkg/image/registry/imagestream/etcd"
+	"github.com/openshift/origin/pkg/util/restoptions"
 
 	_ "github.com/openshift/origin/pkg/api/install"
 )
 
-var testDefaultRegistry = imagestream.DefaultRegistryFunc(func() (string, bool) { return "defaultregistry:5000", true })
+var testDefaultRegistry = api.DefaultRegistryFunc(func() (string, bool) { return "defaultregistry:5000", true })
 
 type fakeSubjectAccessReviewRegistry struct {
 }
@@ -48,13 +51,19 @@ func setup(t *testing.T) (etcd.KeysAPI, *etcdtesting.EtcdTestServer, *REST) {
 	etcdStorage, server := registrytest.NewEtcdStorage(t, "")
 	etcdClient := etcd.NewKeysAPI(server.Client)
 
-	imageStorage := imageetcd.NewREST(etcdStorage)
-	imageStreamStorage, imageStreamStatus, internalStorage := imagestreametcd.NewREST(etcdStorage, testDefaultRegistry, &fakeSubjectAccessReviewRegistry{})
+	imageStorage, err := imageetcd.NewREST(restoptions.NewSimpleGetter(etcdStorage))
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageStreamStorage, imageStreamStatus, internalStorage, err := imagestreametcd.NewREST(restoptions.NewSimpleGetter(etcdStorage), testDefaultRegistry, &fakeSubjectAccessReviewRegistry{}, &testutil.FakeImageStreamLimitVerifier{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	imageRegistry := image.NewRegistry(imageStorage)
 	imageStreamRegistry := imagestream.NewRegistry(imageStreamStorage, imageStreamStatus, internalStorage)
 
-	storage := NewREST(imageRegistry, imageStreamRegistry)
+	storage := NewREST(imageRegistry, imageStreamRegistry, testDefaultRegistry)
 
 	return etcdClient, server, storage
 }
@@ -156,13 +165,15 @@ func TestCreateSuccessWithName(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
+	ctx := kapi.WithUser(kapi.NewDefaultContext(), &user.DefaultInfo{})
+
 	mapping := validNewMappingWithName()
-	_, err = storage.Create(kapi.NewDefaultContext(), mapping)
+	_, err = storage.Create(ctx, mapping)
 	if err != nil {
 		t.Fatalf("Unexpected error creating mapping: %#v", err)
 	}
 
-	image, err := storage.imageRegistry.GetImage(kapi.NewDefaultContext(), "imageID1")
+	image, err := storage.imageRegistry.GetImage(ctx, "imageID1")
 	if err != nil {
 		t.Errorf("Unexpected error retrieving image: %#v", err)
 	}
@@ -173,7 +184,7 @@ func TestCreateSuccessWithName(t *testing.T) {
 		t.Errorf("Expected %#v, got %#v", mapping.Image, image)
 	}
 
-	repo, err := storage.imageStreamRegistry.GetImageStream(kapi.NewDefaultContext(), "somerepo")
+	repo, err := storage.imageStreamRegistry.GetImageStream(ctx, "somerepo")
 	if err != nil {
 		t.Errorf("Unexpected non-nil err: %#v", err)
 	}
@@ -392,9 +403,9 @@ func TestTrackingTags(t *testing.T) {
 
 	image := &api.Image{
 		ObjectMeta: kapi.ObjectMeta{
-			Name: "5678",
+			Name: "sha256:503c75e8121369581e5e5abe57b5a3f12db859052b217a8ea16eb86f4b5561a1",
 		},
-		DockerImageReference: "foo/bar@sha256:5678",
+		DockerImageReference: "foo/bar@sha256:503c75e8121369581e5e5abe57b5a3f12db859052b217a8ea16eb86f4b5561a1",
 	}
 
 	mapping := api.ImageStreamMapping{
@@ -406,7 +417,9 @@ func TestTrackingTags(t *testing.T) {
 		Tag:   "2.0",
 	}
 
-	_, err = storage.Create(kapi.NewDefaultContext(), &mapping)
+	ctx := kapi.WithUser(kapi.NewDefaultContext(), &user.DefaultInfo{})
+
+	_, err = storage.Create(ctx, &mapping)
 	if err != nil {
 		t.Fatalf("Unexpected error creating mapping: %v", err)
 	}
@@ -447,6 +460,7 @@ func TestTrackingTags(t *testing.T) {
 // using failing registry update calls will return an error.
 func TestCreateRetryUnrecoverable(t *testing.T) {
 	rest := &REST{
+		strategy: NewStrategy(testDefaultRegistry),
 		imageRegistry: &fakeImageRegistry{
 			createImage: func(ctx kapi.Context, image *api.Image) error {
 				return nil
@@ -480,6 +494,7 @@ func TestCreateRetryUnrecoverable(t *testing.T) {
 func TestCreateRetryConflictNoTagDiff(t *testing.T) {
 	firstUpdate := true
 	rest := &REST{
+		strategy: NewStrategy(testDefaultRegistry),
 		imageRegistry: &fakeImageRegistry{
 			createImage: func(ctx kapi.Context, image *api.Image) error {
 				return nil
@@ -522,6 +537,7 @@ func TestCreateRetryConflictTagDiff(t *testing.T) {
 	firstGet := true
 	firstUpdate := true
 	rest := &REST{
+		strategy: NewStrategy(testDefaultRegistry),
 		imageRegistry: &fakeImageRegistry{
 			createImage: func(ctx kapi.Context, image *api.Image) error {
 				return nil
@@ -578,6 +594,7 @@ type fakeImageRegistry struct {
 	createImage func(ctx kapi.Context, image *api.Image) error
 	deleteImage func(ctx kapi.Context, id string) error
 	watchImages func(ctx kapi.Context, options *kapi.ListOptions) (watch.Interface, error)
+	updateImage func(ctx kapi.Context, image *api.Image) (*api.Image, error)
 }
 
 func (f *fakeImageRegistry) ListImages(ctx kapi.Context, options *kapi.ListOptions) (*api.ImageList, error) {
@@ -594,6 +611,9 @@ func (f *fakeImageRegistry) DeleteImage(ctx kapi.Context, id string) error {
 }
 func (f *fakeImageRegistry) WatchImages(ctx kapi.Context, options *kapi.ListOptions) (watch.Interface, error) {
 	return f.watchImages(ctx, options)
+}
+func (f *fakeImageRegistry) UpdateImage(ctx kapi.Context, image *api.Image) (*api.Image, error) {
+	return f.updateImage(ctx, image)
 }
 
 type fakeImageStreamRegistry struct {

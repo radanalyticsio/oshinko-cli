@@ -25,7 +25,6 @@ func TransformTemplate(tpl *templateapi.Template, client client.TemplateConfigsN
 		}
 		v.Value = value
 		v.Generate = ""
-		template.AddParameter(tpl, *v)
 	}
 
 	name := localOrRemoteName(tpl.ObjectMeta, namespace)
@@ -33,14 +32,14 @@ func TransformTemplate(tpl *templateapi.Template, client client.TemplateConfigsN
 	// transform the template
 	result, err := client.TemplateConfigs(namespace).Create(tpl)
 	if err != nil {
-		return nil, fmt.Errorf("error processing template %s: %v", name, err)
+		return nil, fmt.Errorf("error processing template %q: %v", name, err)
 	}
 
 	// ensure the template objects are decoded
 	// TODO: in the future, this should be more automatic
 	if errs := runtime.DecodeList(result.Objects, kapi.Codecs.UniversalDecoder()); len(errs) > 0 {
 		err = errors.NewAggregate(errs)
-		return nil, fmt.Errorf("error processing template %s: %v", name, errs)
+		return nil, fmt.Errorf("error processing template %q: %v", name, err)
 	}
 
 	return result, nil
@@ -48,12 +47,32 @@ func TransformTemplate(tpl *templateapi.Template, client client.TemplateConfigsN
 
 // DescribeGeneratedTemplate writes a description of the provided template to out.
 func DescribeGeneratedTemplate(out io.Writer, input string, result *templateapi.Template, baseNamespace string) {
-	name := localOrRemoteName(result.ObjectMeta, baseNamespace)
-	if len(input) > 0 {
-		fmt.Fprintf(out, "--> Deploying template %s for %q\n", name, input)
+	qualifiedName := localOrRemoteName(result.ObjectMeta, baseNamespace)
+	if len(input) > 0 && result.ObjectMeta.Name != input {
+		fmt.Fprintf(out, "--> Deploying template %q for %q to project %s\n", qualifiedName, input, baseNamespace)
 	} else {
-		fmt.Fprintf(out, "--> Deploying template %s\n", name)
+		fmt.Fprintf(out, "--> Deploying template %q to project %s\n", qualifiedName, baseNamespace)
 	}
+	fmt.Fprintln(out)
+
+	name := displayName(result.ObjectMeta)
+	message := result.Message
+	description := result.Annotations["description"]
+
+	// If there is a message or description
+	if len(message) > 0 || len(description) > 0 {
+		fmt.Fprintf(out, "     %s\n", name)
+		fmt.Fprintf(out, "     ---------\n")
+		if len(description) > 0 {
+			fmt.Fprintf(out, "     %s\n", description)
+			fmt.Fprintln(out)
+		}
+		if len(message) > 0 {
+			fmt.Fprintf(out, "     %s\n", message)
+			fmt.Fprintln(out)
+		}
+	}
+
 	if warnings := result.Annotations[app.GenerationWarningAnnotation]; len(warnings) > 0 {
 		delete(result.Annotations, app.GenerationWarningAnnotation)
 		fmt.Fprintln(out)
@@ -63,8 +82,9 @@ func DescribeGeneratedTemplate(out io.Writer, input string, result *templateapi.
 		}
 		fmt.Fprintln(out)
 	}
+
 	if len(result.Parameters) > 0 {
-		fmt.Fprintf(out, "     With parameters:\n")
+		fmt.Fprintf(out, "     * With parameters:\n")
 		for _, p := range result.Parameters {
 			name := p.DisplayName
 			if len(name) == 0 {
@@ -74,7 +94,8 @@ func DescribeGeneratedTemplate(out io.Writer, input string, result *templateapi.
 			if len(p.Generate) > 0 {
 				generated = " # generated"
 			}
-			fmt.Fprintf(out, "      %s=%s%s\n", name, p.Value, generated)
+			fmt.Fprintf(out, "        * %s=%s%s\n", name, p.Value, generated)
 		}
+		fmt.Fprintln(out)
 	}
 }

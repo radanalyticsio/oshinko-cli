@@ -33,10 +33,11 @@ type TestRunner struct {
 	cover          bool
 	coverPkg       string
 	tags           string
+	gcFlags        string
 	additionalArgs []string
 }
 
-func New(suite testsuite.TestSuite, numCPU int, parallelStream bool, race bool, cover bool, coverPkg string, tags string, additionalArgs []string) *TestRunner {
+func New(suite testsuite.TestSuite, numCPU int, parallelStream bool, race bool, cover bool, coverPkg string, tags string, gcFlags string, additionalArgs []string) *TestRunner {
 	runner := &TestRunner{
 		Suite:          suite,
 		numCPU:         numCPU,
@@ -46,12 +47,13 @@ func New(suite testsuite.TestSuite, numCPU int, parallelStream bool, race bool, 
 		coverPkg:       coverPkg,
 		tags:           tags,
 		additionalArgs: additionalArgs,
+		gcFlags:        gcFlags,
 	}
 
 	if !suite.Precompiled {
 		dir, err := ioutil.TempDir("", "ginkgo")
 		if err != nil {
-			panic(fmt.Sprintf("coulnd't create temporary directory... might be time to rm -rf:\n%s", err.Error()))
+			panic(fmt.Sprintf("couldn't create temporary directory... might be time to rm -rf:\n%s", err.Error()))
 		}
 		runner.compilationTargetPath = filepath.Join(dir, suite.PackageName+".test")
 	}
@@ -72,7 +74,7 @@ func (t *TestRunner) CompileTo(path string) error {
 		return nil
 	}
 
-	args := []string{"test", "-c", "-i", "-o", path}
+	args := []string{"test", "-c", "-i", "-o", path, t.Suite.Path}
 	if t.race {
 		args = append(args, "-race")
 	}
@@ -85,10 +87,11 @@ func (t *TestRunner) CompileTo(path string) error {
 	if t.tags != "" {
 		args = append(args, fmt.Sprintf("-tags=%s", t.tags))
 	}
+	if t.gcFlags != "" {
+		args = append(args, fmt.Sprintf("-gcflags=%s", t.gcFlags))
+	}
 
 	cmd := exec.Command("go", args...)
-
-	cmd.Dir = t.Suite.Path
 
 	output, err := cmd.CombinedOutput()
 
@@ -101,7 +104,7 @@ func (t *TestRunner) CompileTo(path string) error {
 	}
 
 	if fileExists(path) == false {
-		compiledFile := filepath.Join(t.Suite.Path, t.Suite.PackageName+".test")
+		compiledFile := t.Suite.PackageName + ".test"
 		if fileExists(compiledFile) {
 			// seems like we are on an old go version that does not support the -o flag on go test
 			// move the compiled test file to the desired location by hand

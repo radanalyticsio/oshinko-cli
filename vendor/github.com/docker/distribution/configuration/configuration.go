@@ -73,6 +73,10 @@ type Configuration struct {
 		// Secret specifies the secret key which HMAC tokens are created with.
 		Secret string `yaml:"secret,omitempty"`
 
+		// RelativeURLs specifies that relative URLs should be returned in
+		// Location headers
+		RelativeURLs bool `yaml:"relativeurls,omitempty"`
+
 		// TLS instructs the http server to listen with a TLS configuration.
 		// This only support simple tls configuration with a cert and key.
 		// Mostly, this is useful for testing situations or simple deployments
@@ -91,6 +95,19 @@ type Configuration struct {
 			// Specifies the CA certs for client authentication
 			// A file may contain multiple CA certificates encoded as PEM
 			ClientCAs []string `yaml:"clientcas,omitempty"`
+
+			// LetsEncrypt is used to configuration setting up TLS through
+			// Let's Encrypt instead of manually specifying certificate and
+			// key. If a TLS certificate is specified, the Let's Encrypt
+			// section will not be used.
+			LetsEncrypt struct {
+				// CacheFile specifies cache file to use for lets encrypt
+				// certificates and keys.
+				CacheFile string `yaml:"cachefile,omitempty"`
+
+				// Email is the email to use during Let's Encrypt registration
+				Email string `yaml:"email,omitempty"`
+			} `yaml:"letsencrypt,omitempty"`
 		} `yaml:"tls,omitempty"`
 
 		// Headers is a set of headers to include in HTTP responses. A common
@@ -145,6 +162,16 @@ type Configuration struct {
 	Health Health `yaml:"health,omitempty"`
 
 	Proxy Proxy `yaml:"proxy,omitempty"`
+
+	// Compatibility is used for configurations of working with older or deprecated features.
+	Compatibility struct {
+		// Schema1 configures how schema1 manifests will be handled
+		Schema1 struct {
+			// TrustKey is the signing key to use for adding the signature to
+			// schema1 manifests.
+			TrustKey string `yaml:"signingkeyfile,omitempty"`
+		} `yaml:"schema1,omitempty"`
+	} `yaml:"compatibility,omitempty"`
 }
 
 // LogHook is composed of hook Level and Type.
@@ -202,7 +229,7 @@ type FileChecker struct {
 // HTTPChecker is a type of entry in the health section for checking HTTP URIs.
 type HTTPChecker struct {
 	// Timeout is the duration to wait before timing out the HTTP request
-	Timeout time.Duration `yaml:"interval,omitempty"`
+	Timeout time.Duration `yaml:"timeout,omitempty"`
 	// StatusCode is the expected status code
 	StatusCode int
 	// Interval is the duration in between checks
@@ -219,7 +246,7 @@ type HTTPChecker struct {
 // TCPChecker is a type of entry in the health section for checking TCP servers.
 type TCPChecker struct {
 	// Timeout is the duration to wait before timing out the TCP connection
-	Timeout time.Duration `yaml:"interval,omitempty"`
+	Timeout time.Duration `yaml:"timeout,omitempty"`
 	// Interval is the duration in between checks
 	Interval time.Duration `yaml:"interval,omitempty"`
 	// Addr is the TCP address to check
@@ -400,7 +427,7 @@ func (storage Storage) MarshalYAML() (interface{}, error) {
 // Auth defines the configuration for registry authorization.
 type Auth map[string]Parameters
 
-// Type returns the storage driver type, such as filesystem or s3
+// Type returns the auth type, such as htpasswd or token
 func (auth Auth) Type() string {
 	// Return only key in this map
 	for k := range auth {

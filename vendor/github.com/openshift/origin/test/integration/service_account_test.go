@@ -1,5 +1,3 @@
-// +build integration
-
 package integration
 
 import (
@@ -28,6 +26,7 @@ import (
 
 func TestServiceAccountAuthorization(t *testing.T) {
 	testutil.RequireEtcd(t)
+	defer testutil.DumpEtcdOnFailure(t)
 	saNamespace := api.NamespaceDefault
 	saName := serviceaccountadmission.DefaultServiceAccountName
 	saUsername := serviceaccount.MakeUsername(saNamespace, saName)
@@ -248,6 +247,7 @@ func TestAutomaticCreationOfPullSecrets(t *testing.T) {
 	saName := serviceaccountadmission.DefaultServiceAccountName
 
 	testutil.RequireEtcd(t)
+	defer testutil.DumpEtcdOnFailure(t)
 	_, clusterAdminConfig, err := testserver.StartTestMaster()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -305,6 +305,7 @@ func getServiceAccountPullSecret(client *kclient.Client, ns, name string) (strin
 
 func TestEnforcingServiceAccount(t *testing.T) {
 	testutil.RequireEtcd(t)
+	defer testutil.DumpEtcdOnFailure(t)
 	masterConfig, err := testserver.DefaultMasterOptions()
 	masterConfig.ServiceAccountConfig.LimitSecretReferences = false
 	if err != nil {
@@ -365,18 +366,18 @@ func TestEnforcingServiceAccount(t *testing.T) {
 
 	clusterAdminKubeClient.Pods(api.NamespaceDefault).Delete(pod.Name, nil)
 
-	sa, err := clusterAdminKubeClient.ServiceAccounts(api.NamespaceDefault).Get(bootstrappolicy.DeployerServiceAccountName)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if sa.Annotations == nil {
-		sa.Annotations = map[string]string{}
-	}
-	sa.Annotations[serviceaccountadmission.EnforceMountableSecretsAnnotation] = "true"
-
-	time.Sleep(5)
-
-	_, err = clusterAdminKubeClient.ServiceAccounts(api.NamespaceDefault).Update(sa)
+	err = kclient.RetryOnConflict(kclient.DefaultBackoff, func() error {
+		sa, err := clusterAdminKubeClient.ServiceAccounts(api.NamespaceDefault).Get(bootstrappolicy.DeployerServiceAccountName)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if sa.Annotations == nil {
+			sa.Annotations = map[string]string{}
+		}
+		sa.Annotations[serviceaccountadmission.EnforceMountableSecretsAnnotation] = "true"
+		_, err = clusterAdminKubeClient.ServiceAccounts(api.NamespaceDefault).Update(sa)
+		return err
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

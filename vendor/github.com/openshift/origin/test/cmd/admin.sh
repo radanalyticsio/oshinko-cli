@@ -1,14 +1,5 @@
 #!/bin/bash
-
-set -o errexit
-set -o nounset
-set -o pipefail
-
-OS_ROOT=$(dirname "${BASH_SOURCE}")/../..
-source "${OS_ROOT}/hack/util.sh"
-source "${OS_ROOT}/hack/cmd_util.sh"
-source "${OS_ROOT}/hack/lib/test/junit.sh"
-os::log::install_errexit
+source "$(dirname "${BASH_SOURCE}")/../../hack/lib/init.sh"
 trap os::test::junit::reconcile_output EXIT
 
 # Cleanup cluster resources created by this test
@@ -17,6 +8,7 @@ trap os::test::junit::reconcile_output EXIT
   oc delete project/example project/ui-test-project project/recreated-project
   oc delete sa/router -n default
   oc delete node/fake-node
+  oc delete groups/shortoutputgroup
   oc delete groups/group1
   oc delete groups/cascaded-group
   oc delete groups/orphaned-group
@@ -28,6 +20,7 @@ trap os::test::junit::reconcile_output EXIT
   oadm policy reconcile-cluster-role-bindings --confirm --additive-only=false
 ) &>/dev/null
 
+project="$( oc project -q )"
 
 defaultimage="openshift/origin-\${component}:latest"
 USE_IMAGES=${USE_IMAGES:-$defaultimage}
@@ -41,10 +34,11 @@ os::cmd::expect_failure_and_text 'openshift start network' 'kubeconfig must be s
 os::cmd::expect_failure_and_text 'openshift start network --config=${NODECONFIG} --enable=kubelet' 'the following components are not recognized: kubelet'
 os::cmd::expect_failure_and_text 'openshift start network --config=${NODECONFIG} --enable=kubelet,other' 'the following components are not recognized: kubelet, other'
 os::cmd::expect_failure_and_text 'openshift start network --config=${NODECONFIG} --disable=other' 'the following components are not recognized: other'
-os::cmd::expect_failure_and_text 'openshift start network --config=${NODECONFIG} --disable=proxy,plugins' 'at least one node component must be enabled \(plugins, proxy\)'
+os::cmd::expect_failure_and_text 'openshift start network --config=${NODECONFIG} --disable=dns,proxy,plugins' 'at least one node component must be enabled \(dns, plugins, proxy\)'
 os::cmd::expect_failure_and_text 'openshift start node' 'kubeconfig must be set'
 os::cmd::expect_failure_and_text 'openshift start node --config=${NODECONFIG} --disable=other' 'the following components are not recognized: other'
-os::cmd::expect_failure_and_text 'openshift start node --config=${NODECONFIG} --disable=kubelet,proxy,plugins' 'at least one node component must be enabled \(kubelet, plugins, proxy\)'
+os::cmd::expect_failure_and_text 'openshift start node --config=${NODECONFIG} --disable=dns,kubelet,proxy,plugins' 'at least one node component must be enabled \(dns, kubelet, plugins, proxy\)'
+os::cmd::expect_failure_and_text 'openshift start --write-config=/tmp/test --hostname=""' 'error: --hostname must have a value'
 os::test::junit::declare_suite_end
 
 os::test::junit::declare_suite_start "cmd/admin/manage-node"
@@ -67,10 +61,21 @@ status:
     reason: kubelet is posting ready status
     status: \"True\"
     type: Ready
+  allocatable:
+    cpu: \"4\"
+    memory: 8010948Ki
+    pods: \"110\"
+  capacity:
+    cpu: \"4\"
+    memory: 8010948Ki
+    pods: \"110\"
 ' | oc create -f -"
 
 os::cmd::expect_success_and_text 'oadm manage-node --selector= --schedulable=true' 'Ready'
-os::cmd::expect_success_and_not_text 'oadm manage-node --selector= --schedulable=true' 'Sched'
+os::cmd::expect_success_and_not_text 'oadm manage-node --selector= --schedulable=true' 'SchedulingDisabled'
+os::cmd::expect_success_and_not_text 'oc get node -o yaml' 'unschedulable: true'
+os::cmd::expect_success_and_text 'oadm manage-node --selector= --schedulable=false' 'SchedulingDisabled'
+os::cmd::expect_success_and_text 'oc get node -o yaml' 'unschedulable: true'
 echo "manage-node: ok"
 os::test::junit::declare_suite_end
 
@@ -106,7 +111,11 @@ echo "certs: ok"
 os::test::junit::declare_suite_end
 
 os::test::junit::declare_suite_start "cmd/admin/groups"
-os::cmd::expect_success 'oadm groups new group1 foo bar'
+os::cmd::expect_success_and_text 'oadm groups new shortoutputgroup -o name' 'group/shortoutputgroup'
+os::cmd::expect_failure_and_text 'oadm groups new shortoutputgroup' 'Error from server: groups "shortoutputgroup" already exists'
+os::cmd::expect_failure_and_text 'oadm groups new errorgroup -o blah' 'error: output format "blah" not recognized'
+os::cmd::expect_failure_and_text 'oc get groups/errorgroup' 'groups "errorgroup" not found'
+os::cmd::expect_success_and_text 'oadm groups new group1 foo bar' 'group1.*foo, bar'
 os::cmd::expect_success_and_text 'oc get groups/group1 --no-headers' 'foo, bar'
 os::cmd::expect_success 'oadm groups add-users group1 baz'
 os::cmd::expect_success_and_text 'oc get groups/group1 --no-headers' 'baz'
@@ -125,7 +134,7 @@ os::cmd::expect_success_and_text 'oadm policy who-can get PodASDF' "Resource:  P
 os::cmd::expect_success_and_text 'oadm policy who-can get hpa.autoscaling -n default' "Resource:  horizontalpodautoscalers.autoscaling"
 os::cmd::expect_success_and_text 'oadm policy who-can get hpa.v1.autoscaling -n default' "Resource:  horizontalpodautoscalers.autoscaling"
 os::cmd::expect_success_and_text 'oadm policy who-can get hpa.extensions -n default' "Resource:  horizontalpodautoscalers.extensions"
-os::cmd::expect_success_and_text 'oadm policy who-can get hpa -n default' "Resource:  horizontalpodautoscalers.extensions"
+os::cmd::expect_success_and_text 'oadm policy who-can get hpa -n default' "Resource:  horizontalpodautoscalers.autoscaling"
 
 os::cmd::expect_success 'oadm policy add-role-to-group cluster-admin system:unauthenticated'
 os::cmd::expect_success 'oadm policy add-role-to-user cluster-admin system:no-user'
@@ -177,7 +186,7 @@ os::cmd::expect_success 'oadm policy reconcile-cluster-roles clusterrole/cluster
 os::cmd::expect_success 'oc get clusterrole/cluster-status'
 
 # test reconciliation protection by replacing the basic-user role with one that has missing default permissions, and extra non-default permissions
-os::cmd::expect_success 'oc replace --force -f ./test/fixtures/basic-user-with-groups-without-projectrequests.yaml'
+os::cmd::expect_success 'oc replace --force -f ./test/testdata/basic-user-with-groups-without-projectrequests.yaml'
 # 1. mark the role as protected, and ensure the role is skipped by reconciliation
 os::cmd::expect_success 'oc annotate clusterrole/basic-user openshift.io/reconcile-protect=true'
 os::cmd::expect_success_and_text     'oadm policy reconcile-cluster-roles basic-user --additive-only=false --confirm' 'skipped: clusterrole/basic-user'
@@ -193,7 +202,7 @@ os::cmd::expect_success_and_text     'oadm policy reconcile-cluster-roles basic-
 os::cmd::expect_success_and_not_text 'oadm policy reconcile-cluster-roles basic-user --additive-only=false --confirm' 'clusterrole/basic-user'
 
 # test label/annotation reconciliation by replacing the basic-user role with one that has custom labels, annotations, and permissions
-os::cmd::expect_success 'oc replace --force -f ./test/fixtures/basic-user-with-annotations-labels-groups-without-projectrequests.yaml'
+os::cmd::expect_success 'oc replace --force -f ./test/testdata/basic-user-with-annotations-labels-groups-without-projectrequests.yaml'
 # display shows customized labels/annotations
 os::cmd::expect_success_and_text 'oadm policy reconcile-cluster-roles' 'custom-label'
 os::cmd::expect_success_and_text 'oadm policy reconcile-cluster-roles' 'custom-annotation'
@@ -216,7 +225,7 @@ os::cmd::expect_failure 'oc get clusterrolebinding/cluster-status-binding'
 os::cmd::expect_success 'oadm policy reconcile-cluster-role-bindings --confirm'
 os::cmd::expect_success 'oc get clusterrolebinding/cluster-status-binding'
 # Customize a binding
-os::cmd::expect_success 'oc replace --force -f ./test/fixtures/basic-users-binding.json'
+os::cmd::expect_success 'oc replace --force -f ./test/testdata/basic-users-binding.json'
 # display shows customized labels/annotations
 os::cmd::expect_success_and_text 'oadm policy reconcile-cluster-role-bindings' 'custom-label'
 os::cmd::expect_success_and_text 'oadm policy reconcile-cluster-role-bindings' 'custom-annotation'
@@ -241,11 +250,11 @@ echo "admin-reconcile-cluster-role-bindings: ok"
 os::test::junit::declare_suite_end
 
 os::test::junit::declare_suite_start "cmd/admin/role-reapers"
-os::cmd::expect_success "oc create -f test/extended/fixtures/roles/policy-roles.yaml"
+os::cmd::expect_success "oc process -f test/extended/testdata/roles/policy-roles.yaml -v NAMESPACE='${project}' | oc create -f -"
 os::cmd::expect_success "oc get rolebinding/basic-users"
 os::cmd::expect_success "oc delete role/basic-user"
 os::cmd::expect_failure "oc get rolebinding/basic-users"
-os::cmd::expect_success "oc create -f test/extended/fixtures/roles/policy-clusterroles.yaml"
+os::cmd::expect_success "oc create -f test/extended/testdata/roles/policy-clusterroles.yaml"
 os::cmd::expect_success "oc get clusterrolebinding/basic-users2"
 os::cmd::expect_success "oc delete clusterrole/basic-user2"
 os::cmd::expect_failure "oc get clusterrolebinding/basic-users2"
@@ -287,7 +296,7 @@ os::cmd::expect_failure_and_text 'oadm router --dry-run' 'does not exist'
 encoded_json='{"kind":"ServiceAccount","apiVersion":"v1","metadata":{"name":"router"}}'
 os::cmd::expect_success "echo '${encoded_json}' | oc create -f - -n default"
 os::cmd::expect_success "oadm policy add-scc-to-user privileged system:serviceaccount:default:router"
-os::cmd::expect_success_and_text "oadm router -o yaml --credentials=${KUBECONFIG} --service-account=router -n default" 'image:.*-haproxy-router:'
+os::cmd::expect_success_and_text "oadm router -o yaml --credentials=${KUBECONFIG} --service-account=router -n default" 'image:.*\-haproxy\-router:'
 os::cmd::expect_success "oadm router --credentials=${KUBECONFIG} --images='${USE_IMAGES}' --service-account=router -n default"
 os::cmd::expect_success_and_text 'oadm router -n default' 'service exists'
 os::cmd::expect_success_and_text 'oc get dc/router -o yaml -n default' 'readinessProbe'
@@ -295,13 +304,24 @@ echo "router: ok"
 os::test::junit::declare_suite_end
 
 os::test::junit::declare_suite_start "cmd/admin/registry"
+# Test running a registry as a daemonset
+os::cmd::expect_failure_and_text 'oadm registry --daemonset --dry-run' 'does not exist'
+os::cmd::expect_success_and_text "oadm registry --daemonset -o yaml --credentials=${KUBECONFIG}" 'DaemonSet'
+os::cmd::expect_success "oadm registry --daemonset --credentials=${KUBECONFIG} --images='${USE_IMAGES}'"
+os::cmd::expect_success_and_text 'oadm registry --daemonset' 'service exists'
+os::cmd::expect_success_and_text 'oc get ds/docker-registry --template="{{.status.desiredNumberScheduled}}"' '1'
+# clean up so we can test non-daemonset
+os::cmd::expect_success "oc delete ds/docker-registry svc/docker-registry"
+echo "registry daemonset: ok"
+
 # Test running a registry
 os::cmd::expect_failure_and_text 'oadm registry --dry-run' 'does not exist'
-os::cmd::expect_success_and_text "oadm registry -o yaml --credentials=${KUBECONFIG}" 'image:.*-docker-registry'
+os::cmd::expect_success_and_text "oadm registry -o yaml --credentials=${KUBECONFIG}" 'image:.*\-docker\-registry'
 os::cmd::expect_success "oadm registry --credentials=${KUBECONFIG} --images='${USE_IMAGES}'"
 os::cmd::expect_success_and_text 'oadm registry' 'service exists'
 os::cmd::expect_success_and_text 'oc describe svc/docker-registry' 'Session Affinity:\s*ClientIP'
 os::cmd::expect_success_and_text 'oc get dc/docker-registry -o yaml' 'readinessProbe'
+os::cmd::expect_success_and_text 'oc env --list dc/docker-registry' 'REGISTRY_MIDDLEWARE_REPOSITORY_OPENSHIFT_ENFORCEQUOTA=false'
 echo "registry: ok"
 os::test::junit::declare_suite_end
 
@@ -320,18 +340,20 @@ os::cmd::expect_success 'oc process -f examples/sample-app/application-template-
 # Test both the type/name resource syntax and the fact that istag/origin-ruby-sample:latest is still
 # not created but due to a buildConfig pointing to it, we get back its graph of deps.
 os::cmd::expect_success_and_text 'oadm build-chain istag/origin-ruby-sample' 'istag/origin-ruby-sample:latest'
-os::cmd::expect_success_and_text 'oadm build-chain ruby-22-centos7 -o dot' 'digraph'
+os::cmd::expect_success_and_text 'oadm build-chain ruby-22-centos7 -o dot' 'digraph "ruby-22-centos7:latest"'
 os::cmd::expect_success 'oc delete all -l build=sti'
 echo "ex build-chain: ok"
 os::test::junit::declare_suite_end
 
 os::test::junit::declare_suite_start "cmd/admin/complex-scenarios"
+# Make sure no one commits data with allocated values that could flake
+os::cmd::expect_failure 'grep -r "clusterIP.*172" test/testdata/app-scenarios'
 os::cmd::expect_success 'oadm new-project example --admin="createuser"'
 os::cmd::expect_success 'oc project example'
 os::cmd::try_until_success 'oc get serviceaccount default'
-os::cmd::expect_success 'oc create -f test/fixtures/app-scenarios'
+os::cmd::expect_success 'oc create -f test/testdata/app-scenarios'
 os::cmd::expect_success 'oc status'
-os::cmd::expect_success 'oc status -o dot'
+os::cmd::expect_success_and_text 'oc status -o dot' '"example"'
 echo "complex-scenarios: ok"
 os::test::junit::declare_suite_end
 
@@ -373,18 +395,18 @@ os::test::junit::declare_suite_end
 
 os::test::junit::declare_suite_start "cmd/admin/policybinding-required"
 # Admin can't bind local roles without cluster-admin permissions
-os::cmd::expect_success "oc create -f test/extended/fixtures/roles/empty-role.yaml -n cmd-admin"
-os::cmd::expect_success "oc delete policybinding/cmd-admin:default -n cmd-admin"
-os::cmd::expect_success 'oadm policy add-role-to-user admin local-admin  -n cmd-admin'
-os::cmd::try_until_text "oc policy who-can get policybindings -n cmd-admin" "local-admin"
+os::cmd::expect_success "oc create -f test/extended/testdata/roles/empty-role.yaml -n '${project}'"
+os::cmd::expect_success "oc delete 'policybinding/${project}:default' -n '${project}'"
+os::cmd::expect_success 'oadm policy add-role-to-user admin local-admin  -n '${project}''
+os::cmd::try_until_text "oc policy who-can get policybindings -n '${project}'" "local-admin"
 os::cmd::expect_success 'oc login -u local-admin -p pw'
-os::cmd::expect_failure 'oc policy add-role-to-user empty-role other --role-namespace=cmd-admin'
+os::cmd::expect_failure 'oc policy add-role-to-user empty-role other --role-namespace='${project}''
 os::cmd::expect_success 'oc login -u system:admin'
-os::cmd::expect_success "oc create policybinding cmd-admin -n cmd-admin"
+os::cmd::expect_success "oc create policybinding '${project}' -n '${project}'"
 os::cmd::expect_success 'oc login -u local-admin -p pw'
-os::cmd::expect_success 'oc policy add-role-to-user empty-role other --role-namespace=cmd-admin -n cmd-admin'
+os::cmd::expect_success 'oc policy add-role-to-user empty-role other --role-namespace='${project}' -n '${project}''
 os::cmd::expect_success 'oc login -u system:admin'
-os::cmd::expect_success "oc delete role/empty-role -n cmd-admin"
+os::cmd::expect_success "oc delete role/empty-role -n '${project}'"
 echo "policybinding-required: ok"
 os::test::junit::declare_suite_end
 
@@ -394,8 +416,8 @@ os::test::junit::declare_suite_start "cmd/admin/user-group-cascade"
 os::cmd::expect_success 'oc login -u cascaded-user -p pw'
 os::cmd::expect_success 'oc login -u orphaned-user -p pw'
 os::cmd::expect_success 'oc login -u system:admin'
-os::cmd::expect_success 'oadm groups new cascaded-group cascaded-user orphaned-user'
-os::cmd::expect_success 'oadm groups new orphaned-group cascaded-user orphaned-user'
+os::cmd::expect_success_and_text 'oadm groups new cascaded-group cascaded-user orphaned-user' 'cascaded-group.*cascaded-user, orphaned-user'
+os::cmd::expect_success_and_text 'oadm groups new orphaned-group cascaded-user orphaned-user' 'orphaned-group.*cascaded-user, orphaned-user'
 # Add roles, sccs to users/groups
 os::cmd::expect_success 'oadm policy add-scc-to-user           restricted    cascaded-user  orphaned-user'
 os::cmd::expect_success 'oadm policy add-scc-to-group          restricted    cascaded-group orphaned-group'
@@ -461,6 +483,22 @@ os::cmd::expect_success 'oc create identity            test-idp:test-uid'
 os::cmd::expect_success 'oc create useridentitymapping test-idp:test-uid test-cmd-user'
 os::cmd::expect_success_and_text 'oc describe identity test-idp:test-uid' 'test-cmd-user'
 os::cmd::expect_success_and_text 'oc describe user     test-cmd-user' 'test-idp:test-uid'
+os::test::junit::declare_suite_end
+
+# images
+os::test::junit::declare_suite_start "cmd/admin/images"
+
+# import image and check its information
+os::cmd::expect_success "oc create -f ${OS_ROOT}/test/testdata/stable-busybox.yaml"
+os::cmd::expect_success_and_text "oadm top images" "sha256:a59906e33509d14c036c8678d687bd4eec81ed7c4b8ce907b888c607f6a1e0e6\W+default/busybox \(latest\)\W+<none>\W+<none>\W+yes\W+0\.65MiB"
+os::cmd::expect_success_and_text "oadm top imagestreams" "default/busybox\W+0.65MiB\W+1\W+1"
+
+# log in as an image-pruner and test that oadm prune images works against the atomic binary
+os::cmd::expect_success "oadm policy add-cluster-role-to-user system:image-pruner pruner --config='${MASTER_CONFIG_DIR}/admin.kubeconfig'"
+os::cmd::expect_success "oc login --server=${KUBERNETES_MASTER} --certificate-authority='${MASTER_CONFIG_DIR}/ca.crt' -u pruner -p anything"
+os::cmd::expect_success_and_text "oadm prune images" "Dry run enabled - no modifications will be made. Add --confirm to remove images"
+
+echo "images: ok"
 os::test::junit::declare_suite_end
 
 os::test::junit::declare_suite_end

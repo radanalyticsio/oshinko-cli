@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"github.com/openshift/origin/pkg/cmd/flagtypes"
 	"github.com/openshift/origin/pkg/cmd/templates"
-	cmdutil "github.com/openshift/origin/pkg/cmd/util"
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	"github.com/spf13/cobra"
 	"io"
+	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"os"
 	"runtime"
 	"strings"
@@ -51,11 +51,12 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 
 	templates.ActsAsRootCommand(cmds, filters, groups...).
 		ExposeFlags(firstcmd, "server", "client-certificate",
-		"client-key", "certificate-authority", "insecure-skip-tls-verify", "token")
+			"client-key", "certificate-authority", "insecure-skip-tls-verify", "token")
 
 	cmds.AddCommand(NewCmdOptions(out))
 	return cmds
 }
+
 //TODO ensure we can limit the number of options
 func NewCmdOptions(out io.Writer) *cobra.Command {
 	cmd := &cobra.Command{

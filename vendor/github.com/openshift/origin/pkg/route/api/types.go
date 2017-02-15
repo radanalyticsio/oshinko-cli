@@ -6,6 +6,8 @@ import (
 	"k8s.io/kubernetes/pkg/util/intstr"
 )
 
+// +genclient=true
+
 // Route encapsulates the inputs needed to connect an alias to endpoints.
 type Route struct {
 	unversioned.TypeMeta
@@ -25,9 +27,13 @@ type RouteSpec struct {
 	// Path that the router watches for, to route traffic for to the service. Optional
 	Path string
 
-	// An object the route points to. Only the Service kind is allowed, and it will
+	// Objects that the route points to. Only the Service kind is allowed, and it will
 	// be defaulted to Service.
-	To kapi.ObjectReference
+	To RouteTargetReference
+
+	// Alternate objects that the route may want to point to. Use the 'weight' field to
+	// determine which ones of the several get more emphasis
+	AlternateBackends []RouteTargetReference
 
 	// If specified, the port to be used by the router. Most routers will use all
 	// endpoints exposed by the service by default - set this value to instruct routers
@@ -36,6 +42,18 @@ type RouteSpec struct {
 
 	//TLS provides the ability to configure certificates and termination for the route
 	TLS *TLSConfig
+
+	// Wildcard policy if any for the route.
+	// Currently only 'Subdomain' or 'None' is allowed.
+	WildcardPolicy WildcardPolicyType
+}
+
+// RouteTargetReference specifies the target that resolve into endpoints. Only the 'Service'
+// kind is allowed. Use 'weight' field to emphasize one over others.
+type RouteTargetReference struct {
+	Kind   string
+	Name   string
+	Weight *int32
 }
 
 // RoutePort defines a port mapping from a router to an endpoint in the service endpoints.
@@ -63,6 +81,8 @@ type RouteIngress struct {
 	RouterName string
 	// Conditions is the state of the route, may be empty.
 	Conditions []RouteIngressCondition
+	// Wildcard policy is the wildcard policy that was allowed where this route is exposed.
+	WildcardPolicy WildcardPolicyType
 }
 
 // RouteIngressConditionType is a valid value for RouteCondition
@@ -72,6 +92,8 @@ type RouteIngressConditionType string
 const (
 	// RouteAdmitted means the route is able to service requests for the provided Host
 	RouteAdmitted RouteIngressConditionType = "Admitted"
+	// RouteExtendedValidationFailed means the route configuration failed an extended validation check.
+	RouteExtendedValidationFailed RouteIngressConditionType = "ExtendedValidationFailed"
 	// TODO: add other route condition types
 )
 
@@ -163,4 +185,18 @@ const (
 	// As an example, for routers that support HTTP and HTTPS, the
 	// insecure HTTP connections will be redirected to use HTTPS.
 	InsecureEdgeTerminationPolicyRedirect InsecureEdgeTerminationPolicyType = "Redirect"
+)
+
+// WildcardPolicyType indicates the type of wildcard support needed by routes.
+type WildcardPolicyType string
+
+const (
+	// WildcardPolicyNone indicates no wildcard support is needed.
+	WildcardPolicyNone WildcardPolicyType = "None"
+
+	// WildcardPolicySubdomain indicates the host needs wildcard support for the subdomain.
+	// Example: With host = "www.acme.test", indicates that the router
+	//          should support requests for *.acme.test
+	//          Note that this will not match acme.test only *.acme.test
+	WildcardPolicySubdomain WildcardPolicyType = "Subdomain"
 )

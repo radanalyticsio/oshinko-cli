@@ -3,9 +3,11 @@ package validation
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"k8s.io/kubernetes/pkg/api/validation"
+	"k8s.io/kubernetes/pkg/serviceaccount"
 	"k8s.io/kubernetes/pkg/util/validation/field"
 
 	oapi "github.com/openshift/origin/pkg/api"
@@ -16,15 +18,24 @@ import (
 
 const MinTokenLength = 32
 
-func ValidateTokenName(name string, prefix bool) (bool, string) {
-	if ok, reason := oapi.MinimalNameRequirements(name, prefix); !ok {
-		return ok, reason
+// PKCE [RFC7636] code challenge methods supported
+// https://tools.ietf.org/html/rfc7636#section-4.3
+const (
+	codeChallengeMethodPlain  = "plain"
+	codeChallengeMethodSHA256 = "S256"
+)
+
+var CodeChallengeMethodsSupported = []string{codeChallengeMethodPlain, codeChallengeMethodSHA256}
+
+func ValidateTokenName(name string, prefix bool) []string {
+	if reasons := oapi.MinimalNameRequirements(name, prefix); len(reasons) != 0 {
+		return reasons
 	}
 
 	if len(name) < MinTokenLength {
-		return false, fmt.Sprintf("must be at least %d characters long", MinTokenLength)
+		return []string{fmt.Sprintf("must be at least %d characters long", MinTokenLength)}
 	}
-	return true, ""
+	return nil
 }
 
 func ValidateRedirectURI(redirect string) (bool, string) {
@@ -66,6 +77,15 @@ func ValidateAccessToken(accessToken *api.OAuthAccessToken) field.ErrorList {
 	return allErrs
 }
 
+func ValidateAccessTokenUpdate(newToken, oldToken *api.OAuthAccessToken) field.ErrorList {
+	allErrs := validation.ValidateObjectMetaUpdate(&newToken.ObjectMeta, &oldToken.ObjectMeta, field.NewPath("metadata"))
+	copied := *oldToken
+	copied.ObjectMeta = newToken.ObjectMeta
+	return append(allErrs, validation.ValidateImmutableField(newToken, &copied, field.NewPath(""))...)
+}
+
+var codeChallengeRegex = regexp.MustCompile("^[a-zA-Z0-9._~-]{43,128}$")
+
 func ValidateAuthorizeToken(authorizeToken *api.OAuthAuthorizeToken) field.ErrorList {
 	allErrs := validation.ValidateObjectMeta(&authorizeToken.ObjectMeta, false, ValidateTokenName, field.NewPath("metadata"))
 	allErrs = append(allErrs, ValidateClientNameField(authorizeToken.ClientName, field.NewPath("clientName"))...)
@@ -79,7 +99,32 @@ func ValidateAuthorizeToken(authorizeToken *api.OAuthAuthorizeToken) field.Error
 		allErrs = append(allErrs, field.Invalid(field.NewPath("redirectURI"), authorizeToken.RedirectURI, msg))
 	}
 
+	if len(authorizeToken.CodeChallenge) > 0 || len(authorizeToken.CodeChallengeMethod) > 0 {
+		switch {
+		case len(authorizeToken.CodeChallenge) == 0:
+			allErrs = append(allErrs, field.Required(field.NewPath("codeChallenge"), "required if codeChallengeMethod is specified"))
+		case !codeChallengeRegex.MatchString(authorizeToken.CodeChallenge):
+			allErrs = append(allErrs, field.Invalid(field.NewPath("codeChallenge"), authorizeToken.CodeChallenge, "must be 43-128 characters [a-zA-Z0-9.~_-]"))
+		}
+
+		switch authorizeToken.CodeChallengeMethod {
+		case "":
+			allErrs = append(allErrs, field.Required(field.NewPath("codeChallengeMethod"), "required if codeChallenge is specified"))
+		case codeChallengeMethodPlain, codeChallengeMethodSHA256:
+			// no-op, good
+		default:
+			allErrs = append(allErrs, field.NotSupported(field.NewPath("codeChallengeMethod"), authorizeToken.CodeChallengeMethod, CodeChallengeMethodsSupported))
+		}
+	}
+
 	return allErrs
+}
+
+func ValidateAuthorizeTokenUpdate(newToken, oldToken *api.OAuthAuthorizeToken) field.ErrorList {
+	allErrs := validation.ValidateObjectMetaUpdate(&newToken.ObjectMeta, &oldToken.ObjectMeta, field.NewPath("metadata"))
+	copied := *oldToken
+	copied.ObjectMeta = newToken.ObjectMeta
+	return append(allErrs, validation.ValidateImmutableField(newToken, &copied, field.NewPath(""))...)
 }
 
 func ValidateClient(client *api.OAuthClient) field.ErrorList {
@@ -87,6 +132,45 @@ func ValidateClient(client *api.OAuthClient) field.ErrorList {
 	for i, redirect := range client.RedirectURIs {
 		if ok, msg := ValidateRedirectURI(redirect); !ok {
 			allErrs = append(allErrs, field.Invalid(field.NewPath("redirectURIs").Index(i), redirect, msg))
+		}
+	}
+
+	for i, restriction := range client.ScopeRestrictions {
+		allErrs = append(allErrs, ValidateScopeRestriction(restriction, field.NewPath("scopeRestrictions").Index(i))...)
+	}
+
+	return allErrs
+}
+
+func ValidateScopeRestriction(restriction api.ScopeRestriction, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+
+	specifiers := 0
+	if len(restriction.ExactValues) > 0 {
+		specifiers = specifiers + 1
+	}
+	if restriction.ClusterRole != nil {
+		specifiers = specifiers + 1
+	}
+	if specifiers != 1 {
+		allErrs = append(allErrs, field.Invalid(fldPath, restriction, "exactly one of literals, clusterRole is required"))
+		return allErrs
+	}
+
+	switch {
+	case len(restriction.ExactValues) > 0:
+		for i, literal := range restriction.ExactValues {
+			if len(literal) == 0 {
+				allErrs = append(allErrs, field.Invalid(fldPath.Child("literals").Index(i), literal, "may not be empty"))
+			}
+		}
+
+	case restriction.ClusterRole != nil:
+		if len(restriction.ClusterRole.RoleNames) == 0 {
+			allErrs = append(allErrs, field.Required(fldPath.Child("clusterRole", "roleNames"), "won't match anything"))
+		}
+		if len(restriction.ClusterRole.Namespaces) == 0 {
+			allErrs = append(allErrs, field.Required(fldPath.Child("clusterRole", "namespaces"), "won't match anything"))
 		}
 	}
 
@@ -102,23 +186,17 @@ func ValidateClientUpdate(client *api.OAuthClient, oldClient *api.OAuthClient) f
 	return allErrs
 }
 
-func ValidateClientAuthorizationName(name string, prefix bool) (bool, string) {
-	if ok, reason := oapi.MinimalNameRequirements(name, prefix); !ok {
-		return ok, reason
+func ValidateClientAuthorizationName(name string, prefix bool) []string {
+	if reasons := oapi.MinimalNameRequirements(name, prefix); len(reasons) != 0 {
+		return reasons
 	}
 
-	parts := strings.Split(name, ":")
-	if len(parts) != 2 {
-		return false, "must be in the format <userName>:<clientName>"
+	lastColon := strings.Index(name, ":")
+	if lastColon <= 0 || lastColon >= len(name)-1 {
+		return []string{"must be in the format <userName>:<clientName>"}
 	}
 
-	userName := parts[0]
-	clientName := parts[1]
-	if len(userName) == 0 || len(clientName) == 0 {
-		return false, "must be in the format <userName>:<clientName>"
-	}
-
-	return true, ""
+	return nil
 }
 
 func ValidateClientAuthorization(clientAuthorization *api.OAuthClientAuthorization) field.ErrorList {
@@ -165,8 +243,12 @@ func ValidateClientAuthorizationUpdate(newAuth *api.OAuthClientAuthorization, ol
 func ValidateClientNameField(value string, fldPath *field.Path) field.ErrorList {
 	if len(value) == 0 {
 		return field.ErrorList{field.Required(fldPath, "")}
-	} else if ok, msg := validation.NameIsDNSSubdomain(value, false); !ok {
-		return field.ErrorList{field.Invalid(fldPath, value, msg)}
+	} else if _, saName, err := serviceaccount.SplitUsername(value); err == nil {
+		if reasons := validation.ValidateServiceAccountName(saName, false); len(reasons) != 0 {
+			return field.ErrorList{field.Invalid(fldPath, value, strings.Join(reasons, ", "))}
+		}
+	} else if reasons := validation.NameIsDNSSubdomain(value, false); len(reasons) != 0 {
+		return field.ErrorList{field.Invalid(fldPath, value, strings.Join(reasons, ", "))}
 	}
 	return field.ErrorList{}
 }
@@ -174,8 +256,8 @@ func ValidateClientNameField(value string, fldPath *field.Path) field.ErrorList 
 func ValidateUserNameField(value string, fldPath *field.Path) field.ErrorList {
 	if len(value) == 0 {
 		return field.ErrorList{field.Required(fldPath, "")}
-	} else if ok, msg := uservalidation.ValidateUserName(value, false); !ok {
-		return field.ErrorList{field.Invalid(fldPath, value, msg)}
+	} else if reasons := uservalidation.ValidateUserName(value, false); len(reasons) != 0 {
+		return field.ErrorList{field.Invalid(fldPath, value, strings.Join(reasons, ", "))}
 	}
 	return field.ErrorList{}
 }
@@ -189,9 +271,9 @@ func ValidateScopes(scopes []string, fldPath *field.Path) field.ErrorList {
 		// for those without an ascii table, that's `!`, `#-[`, `]-~` inclusive.
 		for _, ch := range scope {
 			switch {
-			case ch == rune("!"[0]):
-			case ch >= rune("#"[0]) && ch <= rune("]"[0]):
-			case ch >= rune("]"[0]) && ch <= rune("~"[0]):
+			case ch == '!':
+			case ch >= '#' && ch <= '[':
+			case ch >= ']' && ch <= '~':
 			default:
 				allErrs = append(allErrs, field.Invalid(fldPath.Index(i), scope, fmt.Sprintf("%v not allowed", ch)))
 				illegalCharacter = true
@@ -219,5 +301,31 @@ func ValidateScopes(scopes []string, fldPath *field.Path) field.ErrorList {
 		}
 	}
 
+	return allErrs
+}
+
+func ValidateOAuthRedirectReference(sref *api.OAuthRedirectReference) field.ErrorList {
+	allErrs := validation.ValidateObjectMeta(&sref.ObjectMeta, true, oapi.MinimalNameRequirements, field.NewPath("metadata"))
+	return append(allErrs, validateRedirectReference(&sref.Reference)...)
+}
+
+func validateRedirectReference(ref *api.RedirectReference) field.ErrorList {
+	allErrs := field.ErrorList{}
+	if len(ref.Name) == 0 {
+		allErrs = append(allErrs, field.Required(field.NewPath("name"), "may not be empty"))
+	} else {
+		for _, msg := range oapi.MinimalNameRequirements(ref.Name, false) {
+			allErrs = append(allErrs, field.Invalid(field.NewPath("name"), ref.Name, msg))
+		}
+	}
+	switch ref.Kind {
+	case "":
+		allErrs = append(allErrs, field.Required(field.NewPath("kind"), "may not be empty"))
+	case "Route":
+		// Valid, TODO add ingress once we support it and update error message
+	default:
+		allErrs = append(allErrs, field.Invalid(field.NewPath("kind"), ref.Kind, "must be Route"))
+	}
+	// TODO validate group once we start using it
 	return allErrs
 }

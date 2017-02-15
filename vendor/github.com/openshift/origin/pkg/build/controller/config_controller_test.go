@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"testing"
 
+	"k8s.io/kubernetes/pkg/client/record"
+
 	buildapi "github.com/openshift/origin/pkg/build/api"
 )
 
@@ -44,6 +46,7 @@ func TestHandleBuildConfig(t *testing.T) {
 		}
 		controller := &BuildConfigController{
 			BuildConfigInstantiator: instantiator,
+			Recorder:                &record.FakeRecorder{},
 		}
 		err := controller.HandleBuildConfig(tc.bc)
 		if err != nil {
@@ -82,9 +85,9 @@ func (i *testInstantiator) Instantiate(namespace string, request *buildapi.Build
 func baseBuildConfig() *buildapi.BuildConfig {
 	bc := &buildapi.BuildConfig{}
 	bc.Name = "testBuildConfig"
-	bc.Spec.BuildSpec.Strategy.SourceStrategy = &buildapi.SourceBuildStrategy{}
-	bc.Spec.BuildSpec.Strategy.SourceStrategy.From.Name = "builderimage:latest"
-	bc.Spec.BuildSpec.Strategy.SourceStrategy.From.Kind = "ImageStreamTag"
+	bc.Spec.Strategy.SourceStrategy = &buildapi.SourceBuildStrategy{}
+	bc.Spec.Strategy.SourceStrategy.From.Name = "builderimage:latest"
+	bc.Spec.Strategy.SourceStrategy.From.Kind = "ImageStreamTag"
 	return bc
 }
 

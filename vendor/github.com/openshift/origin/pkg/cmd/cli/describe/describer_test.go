@@ -13,7 +13,6 @@ import (
 	"k8s.io/kubernetes/pkg/api/unversioned"
 	ktestclient "k8s.io/kubernetes/pkg/client/unversioned/testclient"
 	"k8s.io/kubernetes/pkg/kubectl"
-	"k8s.io/kubernetes/pkg/labels"
 
 	api "github.com/openshift/origin/pkg/api"
 	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
@@ -21,16 +20,16 @@ import (
 	"github.com/openshift/origin/pkg/client"
 	"github.com/openshift/origin/pkg/client/testclient"
 	deployapi "github.com/openshift/origin/pkg/deploy/api"
-	deployapitest "github.com/openshift/origin/pkg/deploy/api/test"
-	deployutil "github.com/openshift/origin/pkg/deploy/util"
 	imageapi "github.com/openshift/origin/pkg/image/api"
 	oauthapi "github.com/openshift/origin/pkg/oauth/api"
 	projectapi "github.com/openshift/origin/pkg/project/api"
-	sdnapi "github.com/openshift/origin/pkg/sdn/api"
+	securityapi "github.com/openshift/origin/pkg/security/api"
 
 	// install all APIs
 	_ "github.com/openshift/origin/pkg/api/install"
 	_ "k8s.io/kubernetes/pkg/api/install"
+	_ "k8s.io/kubernetes/pkg/apis/autoscaling/install"
+	_ "k8s.io/kubernetes/pkg/apis/batch/install"
 	_ "k8s.io/kubernetes/pkg/apis/extensions/install"
 )
 
@@ -52,6 +51,7 @@ var DescriberCoverageExceptions = []reflect.Type{
 	reflect.TypeOf(&deployapi.DeploymentConfigRollback{}),             // normal users don't ever look at these
 	reflect.TypeOf(&deployapi.DeploymentLog{}),                        // normal users don't ever look at these
 	reflect.TypeOf(&deployapi.DeploymentLogOptions{}),                 // normal users don't ever look at these
+	reflect.TypeOf(&deployapi.DeploymentRequest{}),                    // normal users don't ever look at these
 	reflect.TypeOf(&imageapi.DockerImage{}),                           // not a top level resource
 	reflect.TypeOf(&imageapi.ImageStreamImport{}),                     // normal users don't ever look at these
 	reflect.TypeOf(&oauthapi.OAuthAccessToken{}),                      // normal users don't ever look at these
@@ -59,6 +59,8 @@ var DescriberCoverageExceptions = []reflect.Type{
 	reflect.TypeOf(&oauthapi.OAuthClientAuthorization{}),              // normal users don't ever look at these
 	reflect.TypeOf(&projectapi.ProjectRequest{}),                      // normal users don't ever look at these
 	reflect.TypeOf(&authorizationapi.IsPersonalSubjectAccessReview{}), // not a top level resource
+	// ATM image signature doesn't provide any human readable information
+	reflect.TypeOf(&imageapi.ImageSignature{}),
 
 	// these resources can't be "GET"ed, so you can't make a describer for them
 	reflect.TypeOf(&authorizationapi.SubjectAccessReviewResponse{}),
@@ -68,6 +70,11 @@ var DescriberCoverageExceptions = []reflect.Type{
 	reflect.TypeOf(&authorizationapi.LocalSubjectAccessReview{}),
 	reflect.TypeOf(&authorizationapi.LocalResourceAccessReview{}),
 	reflect.TypeOf(&authorizationapi.SelfSubjectRulesReview{}),
+	reflect.TypeOf(&authorizationapi.SubjectRulesReview{}),
+	reflect.TypeOf(&securityapi.PodSecurityPolicySubjectReview{}),
+	reflect.TypeOf(&securityapi.PodSecurityPolicySelfSubjectReview{}),
+	reflect.TypeOf(&securityapi.PodSecurityPolicyReview{}),
+	reflect.TypeOf(&oauthapi.OAuthRedirectReference{}),
 }
 
 // MissingDescriberCoverageExceptions is the list of types that were missing describer methods when I started
@@ -76,9 +83,6 @@ var DescriberCoverageExceptions = []reflect.Type{
 var MissingDescriberCoverageExceptions = []reflect.Type{
 	reflect.TypeOf(&imageapi.ImageStreamMapping{}),
 	reflect.TypeOf(&oauthapi.OAuthClient{}),
-	reflect.TypeOf(&sdnapi.ClusterNetwork{}),
-	reflect.TypeOf(&sdnapi.HostSubnet{}),
-	reflect.TypeOf(&sdnapi.NetNamespace{}),
 }
 
 func TestDescriberCoverage(t *testing.T) {
@@ -86,7 +90,7 @@ func TestDescriberCoverage(t *testing.T) {
 
 main:
 	for _, apiType := range kapi.Scheme.KnownTypes(api.SchemeGroupVersion) {
-		if !strings.Contains(apiType.PkgPath(), "openshift/origin") {
+		if !strings.HasPrefix(apiType.PkgPath(), "github.com/openshift/origin") || strings.HasPrefix(apiType.PkgPath(), "github.com/openshift/origin/vendor/") {
 			continue
 		}
 		// we don't describe lists
@@ -108,7 +112,7 @@ main:
 
 		_, ok := DescriberFor(api.SchemeGroupVersion.WithKind(apiType.Name()).GroupKind(), c, &ktestclient.Fake{}, "")
 		if !ok {
-			t.Errorf("missing printer for %v.  Check pkg/cmd/cli/describe/describer.go", apiType)
+			t.Errorf("missing describer for %v.  Check pkg/cmd/cli/describe/describer.go", apiType)
 		}
 	}
 }
@@ -118,108 +122,32 @@ func TestDescribers(t *testing.T) {
 	fakeKube := &ktestclient.Fake{}
 	c := &describeClient{T: t, Namespace: "foo", Fake: fake}
 
-	testDescriberList := []kubectl.Describer{
-		&BuildDescriber{c, fakeKube},
-		&BuildConfigDescriber{c, ""},
-		&ImageDescriber{c},
-		&ImageStreamDescriber{c},
-		&ImageStreamTagDescriber{c},
-		&ImageStreamImageDescriber{c},
-		&RouteDescriber{c, fakeKube},
-		&ProjectDescriber{c, fakeKube},
-		&PolicyDescriber{c},
-		&PolicyBindingDescriber{c},
-		&TemplateDescriber{c, nil, nil, nil},
+	testCases := []struct {
+		d    kubectl.Describer
+		name string
+	}{
+		{&BuildDescriber{c, fakeKube}, "bar"},
+		{&BuildConfigDescriber{c, fakeKube, ""}, "bar"},
+		{&ImageDescriber{c}, "bar"},
+		{&ImageStreamDescriber{c}, "bar"},
+		{&ImageStreamTagDescriber{c}, "bar:latest"},
+		{&ImageStreamImageDescriber{c}, "bar@sha256:other"},
+		{&RouteDescriber{c, fakeKube}, "bar"},
+		{&ProjectDescriber{c, fakeKube}, "bar"},
+		{&PolicyDescriber{c}, "bar"},
+		{&PolicyBindingDescriber{c}, "bar"},
+		{&TemplateDescriber{c, nil, nil, nil}, "bar"},
 	}
 
-	for _, d := range testDescriberList {
-		out, err := d.Describe("foo", "bar")
+	for _, test := range testCases {
+		out, err := test.d.Describe("foo", test.name, kubectl.DescriberSettings{})
 		if err != nil {
-			t.Errorf("unexpected error for %v: %v", d, err)
+			t.Errorf("unexpected error for %v: %v", test.d, err)
 		}
 		if !strings.Contains(out, "Name:") || !strings.Contains(out, "Labels:") {
 			t.Errorf("unexpected out: %s", out)
 		}
 	}
-}
-
-func TestDeploymentConfigDescriber(t *testing.T) {
-	config := deployapitest.OkDeploymentConfig(1)
-	deployment, _ := deployutil.MakeDeployment(config, kapi.Codecs.LegacyCodec(deployapi.SchemeGroupVersion))
-	podList := &kapi.PodList{}
-	eventList := &kapi.EventList{}
-	deploymentList := &kapi.ReplicationControllerList{}
-
-	d := &DeploymentConfigDescriber{
-		client: &genericDeploymentDescriberClient{
-			getDeploymentConfigFunc: func(namespace, name string) (*deployapi.DeploymentConfig, error) {
-				return config, nil
-			},
-			getDeploymentFunc: func(namespace, name string) (*kapi.ReplicationController, error) {
-				return deployment, nil
-			},
-			listDeploymentsFunc: func(namespace string, selector labels.Selector) (*kapi.ReplicationControllerList, error) {
-				return deploymentList, nil
-			},
-			listPodsFunc: func(namespace string, selector labels.Selector) (*kapi.PodList, error) {
-				return podList, nil
-			},
-			listEventsFunc: func(deploymentConfig *deployapi.DeploymentConfig) (*kapi.EventList, error) {
-				return eventList, nil
-			},
-		},
-	}
-
-	describe := func() {
-		if output, err := d.Describe("test", "deployment"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		} else {
-			t.Logf("describer output:\n%s\n", output)
-		}
-	}
-
-	podList.Items = []kapi.Pod{*mkPod(kapi.PodRunning, 0)}
-	describe()
-
-	config.Spec.Triggers = append(config.Spec.Triggers, deployapitest.OkConfigChangeTrigger())
-	describe()
-
-	config.Spec.Strategy = deployapitest.OkCustomStrategy()
-	describe()
-
-	config.Spec.Triggers[0].ImageChangeParams.From = kapi.ObjectReference{Name: "imageRepo"}
-	describe()
-
-	config.Spec.Strategy = deployapitest.OkStrategy()
-	config.Spec.Strategy.RecreateParams = &deployapi.RecreateDeploymentStrategyParams{
-		Pre: &deployapi.LifecycleHook{
-			FailurePolicy: deployapi.LifecycleHookFailurePolicyAbort,
-			ExecNewPod: &deployapi.ExecNewPodHook{
-				ContainerName: "container",
-				Command:       []string{"/command1", "args"},
-				Env: []kapi.EnvVar{
-					{
-						Name:  "KEY1",
-						Value: "value1",
-					},
-				},
-			},
-		},
-		Post: &deployapi.LifecycleHook{
-			FailurePolicy: deployapi.LifecycleHookFailurePolicyIgnore,
-			ExecNewPod: &deployapi.ExecNewPodHook{
-				ContainerName: "container",
-				Command:       []string{"/command2", "args"},
-				Env: []kapi.EnvVar{
-					{
-						Name:  "KEY2",
-						Value: "value2",
-					},
-				},
-			},
-		},
-	}
-	describe()
 }
 
 func TestDescribeBuildDuration(t *testing.T) {
@@ -245,7 +173,7 @@ func TestDescribeBuildDuration(t *testing.T) {
 					Duration: zeroDuration,
 				},
 			},
-			"waiting for 1m0s",
+			"waiting for 1m",
 		},
 		{ // 1 - build pending
 			&buildapi.Build{
@@ -255,7 +183,7 @@ func TestDescribeBuildDuration(t *testing.T) {
 					Duration: zeroDuration,
 				},
 			},
-			"waiting for 1m0s",
+			"waiting for 1m",
 		},
 		{ // 2 - build running
 			&buildapi.Build{
@@ -266,7 +194,7 @@ func TestDescribeBuildDuration(t *testing.T) {
 					Duration:       duration,
 				},
 			},
-			"running for 1m0s",
+			"running for 1m",
 		},
 		{ // 3 - build completed
 			&buildapi.Build{
@@ -278,7 +206,7 @@ func TestDescribeBuildDuration(t *testing.T) {
 					Duration:            duration,
 				},
 			},
-			"1m0s",
+			"1m",
 		},
 		{ // 4 - build failed
 			&buildapi.Build{
@@ -290,7 +218,7 @@ func TestDescribeBuildDuration(t *testing.T) {
 					Duration:            duration,
 				},
 			},
-			"1m0s",
+			"1m",
 		},
 		{ // 5 - build error
 			&buildapi.Build{
@@ -302,7 +230,7 @@ func TestDescribeBuildDuration(t *testing.T) {
 					Duration:            duration,
 				},
 			},
-			"1m0s",
+			"1m",
 		},
 		{ // 6 - build cancelled before running, start time wasn't set yet
 			&buildapi.Build{
@@ -313,7 +241,7 @@ func TestDescribeBuildDuration(t *testing.T) {
 					Duration:            duration,
 				},
 			},
-			"waited for 2m0s",
+			"waited for 2m",
 		},
 		{ // 7 - build cancelled while running, start time is set already
 			&buildapi.Build{
@@ -325,7 +253,7 @@ func TestDescribeBuildDuration(t *testing.T) {
 					Duration:            duration,
 				},
 			},
-			"1m0s",
+			"1m",
 		},
 		{ // 8 - build failed before running, start time wasn't set yet
 			&buildapi.Build{
@@ -336,7 +264,7 @@ func TestDescribeBuildDuration(t *testing.T) {
 					Duration:            duration,
 				},
 			},
-			"waited for 2m0s",
+			"waited for 2m",
 		},
 		{ // 9 - build error before running, start time wasn't set yet
 			&buildapi.Build{
@@ -347,12 +275,12 @@ func TestDescribeBuildDuration(t *testing.T) {
 					Duration:            duration,
 				},
 			},
-			"waited for 2m0s",
+			"waited for 2m",
 		},
 	}
 
 	for i, tc := range tests {
-		if actual, expected := describeBuildDuration(tc.build), tc.output; actual != expected {
+		if actual, expected := describeBuildDuration(tc.build), tc.output; !strings.Contains(actual, expected) {
 			t.Errorf("(%d) expected duration output %s, got %s", i, expected, actual)
 		}
 	}
@@ -366,7 +294,7 @@ func mkPod(status kapi.PodPhase, exitCode int) *kapi.Pod {
 			ContainerStatuses: []kapi.ContainerStatus{
 				{
 					State: kapi.ContainerState{
-						Terminated: &kapi.ContainerStateTerminated{ExitCode: exitCode},
+						Terminated: &kapi.ContainerStateTerminated{ExitCode: int32(exitCode)},
 					},
 				},
 			},
@@ -449,19 +377,21 @@ func TestDescribeBuildSpec(t *testing.T) {
 	}{
 		{
 			spec: buildapi.BuildSpec{
-				Source: buildapi.BuildSource{
-					Git: &buildapi.GitBuildSource{
-						URI: "http://github.com/my/repository",
+				CommonSpec: buildapi.CommonSpec{
+					Source: buildapi.BuildSource{
+						Git: &buildapi.GitBuildSource{
+							URI: "http://github.com/my/repository",
+						},
+						ContextDir: "context",
 					},
-					ContextDir: "context",
-				},
-				Strategy: buildapi.BuildStrategy{
-					DockerStrategy: &buildapi.DockerBuildStrategy{},
-				},
-				Output: buildapi.BuildOutput{
-					To: &kapi.ObjectReference{
-						Kind: "DockerImage",
-						Name: "repository/data",
+					Strategy: buildapi.BuildStrategy{
+						DockerStrategy: &buildapi.DockerBuildStrategy{},
+					},
+					Output: buildapi.BuildOutput{
+						To: &kapi.ObjectReference{
+							Kind: "DockerImage",
+							Name: "repository/data",
+						},
 					},
 				},
 			},
@@ -469,19 +399,21 @@ func TestDescribeBuildSpec(t *testing.T) {
 		},
 		{
 			spec: buildapi.BuildSpec{
-				Source: buildapi.BuildSource{},
-				Strategy: buildapi.BuildStrategy{
-					SourceStrategy: &buildapi.SourceBuildStrategy{
-						From: kapi.ObjectReference{
-							Kind: "DockerImage",
-							Name: "myimage:tag",
+				CommonSpec: buildapi.CommonSpec{
+					Source: buildapi.BuildSource{},
+					Strategy: buildapi.BuildStrategy{
+						SourceStrategy: &buildapi.SourceBuildStrategy{
+							From: kapi.ObjectReference{
+								Kind: "DockerImage",
+								Name: "myimage:tag",
+							},
 						},
 					},
-				},
-				Output: buildapi.BuildOutput{
-					To: &kapi.ObjectReference{
-						Kind: "DockerImage",
-						Name: "repository/data",
+					Output: buildapi.BuildOutput{
+						To: &kapi.ObjectReference{
+							Kind: "DockerImage",
+							Name: "repository/data",
+						},
 					},
 				},
 			},
@@ -489,29 +421,44 @@ func TestDescribeBuildSpec(t *testing.T) {
 		},
 		{
 			spec: buildapi.BuildSpec{
-				Source: buildapi.BuildSource{},
-				Strategy: buildapi.BuildStrategy{
-					CustomStrategy: &buildapi.CustomBuildStrategy{
-						From: kapi.ObjectReference{
-							Kind: "DockerImage",
-							Name: "myimage:tag",
+				CommonSpec: buildapi.CommonSpec{
+					Source: buildapi.BuildSource{},
+					Strategy: buildapi.BuildStrategy{
+						CustomStrategy: &buildapi.CustomBuildStrategy{
+							From: kapi.ObjectReference{
+								Kind: "DockerImage",
+								Name: "myimage:tag",
+							},
 						},
 					},
-				},
-				Output: buildapi.BuildOutput{
-					To: &kapi.ObjectReference{
-						Kind: "DockerImage",
-						Name: "repository/data",
+					Output: buildapi.BuildOutput{
+						To: &kapi.ObjectReference{
+							Kind: "DockerImage",
+							Name: "repository/data",
+						},
 					},
 				},
 			},
 			want: "Empty Source",
 		},
+		{
+			spec: buildapi.BuildSpec{
+				CommonSpec: buildapi.CommonSpec{
+					Source: buildapi.BuildSource{},
+					Strategy: buildapi.BuildStrategy{
+						JenkinsPipelineStrategy: &buildapi.JenkinsPipelineBuildStrategy{
+							Jenkinsfile: "openshiftBuild",
+						},
+					},
+				},
+			},
+			want: "openshiftBuild",
+		},
 	}
 	for _, tt := range tests {
 		var b bytes.Buffer
 		out := tabwriter.NewWriter(&b, 0, 8, 0, '\t', 0)
-		describeBuildSpec(tt.spec, out)
+		describeCommonSpec(tt.spec.CommonSpec, out)
 		if err := out.Flush(); err != nil {
 			t.Fatalf("%+v: flush error: %v", tt.spec, err)
 		}

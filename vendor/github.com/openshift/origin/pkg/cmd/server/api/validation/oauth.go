@@ -86,6 +86,9 @@ func ValidateOAuthConfig(config *api.OAuthConfig, fldPath *field.Path) Validatio
 		}
 	}
 
+	if len(redirectingIdentityProviders) == 0 {
+		validationResults.AddWarnings(field.Invalid(fldPath.Child("identityProviders"), "login", "no identity providers are configured to handle logins"))
+	}
 	if len(challengeRedirectingIdentityProviders) > 1 {
 		validationResults.AddErrors(field.Invalid(fldPath.Child("identityProviders"), "challenge", fmt.Sprintf("only one identity provider can redirect clients requesting an authentication challenge, found: %v", strings.Join(challengeRedirectingIdentityProviders, ", "))))
 	}
@@ -149,8 +152,8 @@ func ValidateIdentityProvider(identityProvider api.IdentityProvider, fldPath *fi
 	if len(identityProvider.Name) == 0 {
 		validationResults.AddErrors(field.Required(fldPath.Child("name"), ""))
 	}
-	if ok, err := validation.ValidateIdentityProviderName(identityProvider.Name); !ok {
-		validationResults.AddErrors(field.Invalid(fldPath.Child("name"), identityProvider.Name, err))
+	if reasons := validation.ValidateIdentityProviderName(identityProvider.Name); len(reasons) != 0 {
+		validationResults.AddErrors(field.Invalid(fldPath.Child("name"), identityProvider.Name, strings.Join(reasons, ", ")))
 	}
 
 	if len(identityProvider.MappingMethod) == 0 {
@@ -243,13 +246,11 @@ func ValidateRequestHeaderIdentityProvider(provider *api.RequestHeaderIdentityPr
 		validationResults.AddErrors(field.Required(fieldPath.Child("provider", "headers"), ""))
 	}
 	if identityProvider.UseAsChallenger && len(provider.ChallengeURL) == 0 {
-		err := field.Required(fieldPath.Child("provider", "challengeURL"), "")
-		err.Detail = "challengeURL is required if challenge=true"
+		err := field.Required(fieldPath.Child("provider", "challengeURL"), "challengeURL is required if challenge is true")
 		validationResults.AddErrors(err)
 	}
 	if identityProvider.UseAsLogin && len(provider.LoginURL) == 0 {
-		err := field.Required(fieldPath.Child("provider", "loginURL"), "")
-		err.Detail = "loginURL is required if login=true"
+		err := field.Required(fieldPath.Child("provider", "loginURL"), "loginURL is required if login=true")
 		validationResults.AddErrors(err)
 	}
 
@@ -387,7 +388,10 @@ func validateGrantConfig(config api.GrantConfig, fldPath *field.Path) field.Erro
 	allErrs := field.ErrorList{}
 
 	if !api.ValidGrantHandlerTypes.Has(string(config.Method)) {
-		allErrs = append(allErrs, field.Invalid(fldPath.Child("method"), config.Method, fmt.Sprintf("must be one of: %v", api.ValidGrantHandlerTypes.List())))
+		allErrs = append(allErrs, field.NotSupported(fldPath.Child("method"), config.Method, api.ValidGrantHandlerTypes.List()))
+	}
+	if !api.ValidServiceAccountGrantHandlerTypes.Has(string(config.ServiceAccountMethod)) {
+		allErrs = append(allErrs, field.NotSupported(fldPath.Child("serviceAccountMethod"), config.ServiceAccountMethod, api.ValidServiceAccountGrantHandlerTypes.List()))
 	}
 
 	return allErrs

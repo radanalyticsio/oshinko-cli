@@ -1,21 +1,9 @@
 #!/bin/bash
 #
 # This scripts starts the OpenShift server with custom TLS certs, and verifies generated kubeconfig files can be used to talk to it.
-
-set -o errexit
-set -o nounset
-set -o pipefail
-
-OS_ROOT=$(dirname "${BASH_SOURCE}")/../..
-cd "${OS_ROOT}"
-source "${OS_ROOT}/hack/util.sh"
-source "${OS_ROOT}/hack/lib/log.sh"
-source "${OS_ROOT}/hack/lib/util/environment.sh"
-source "${OS_ROOT}/hack/cmd_util.sh"
-os::log::install_errexit
+source "$(dirname "${BASH_SOURCE}")/../../hack/lib/init.sh"
 
 os::util::environment::setup_all_server_vars "test-extended-alternate-certs/"
-reset_tmp_dir
 
 export EXTENDED_TEST_PATH="${OS_ROOT}/test/extended"
 
@@ -23,7 +11,7 @@ function cleanup()
 {
 	out=$?
     kill $OS_PID
-	echo "[INFO] Exiting"
+	os::log::info "Exiting"
 	exit $out
 }
 
@@ -31,15 +19,15 @@ trap "exit" INT TERM
 trap "cleanup" EXIT
 
 
-echo "[INFO] Starting server as distinct processes"
-echo "[INFO] `openshift version`"
-echo "[INFO] Server logs will be at:    ${LOG_DIR}/openshift.log"
-echo "[INFO] Test artifacts will be in: ${ARTIFACT_DIR}"
-echo "[INFO] Config dir is:             ${SERVER_CONFIG_DIR}"
+os::log::info "Starting server as distinct processes"
+os::log::info "`openshift version`"
+os::log::info "Server logs will be at:    ${LOG_DIR}/openshift.log"
+os::log::info "Test artifacts will be in: ${ARTIFACT_DIR}"
+os::log::info "Config dir is:             ${SERVER_CONFIG_DIR}"
 
 mkdir -p ${LOG_DIR}
 
-echo "[INFO] Scan of OpenShift related processes already up via ps -ef	| grep openshift : "
+os::log::info "Scan of OpenShift related processes already up via ps -ef	| grep openshift : "
 ps -ef | grep openshift
 
 mkdir -p "${SERVER_CONFIG_DIR}"
@@ -55,8 +43,8 @@ os::cmd::expect_success "openshift start --master=https://localhost:${API_PORT} 
 # Don't try this at home.  We don't have flags for setting etcd ports in the config, but we want deconflicted ones.  Use sed to replace defaults in a completely unsafe way
 os::util::sed "s/:4001$/:${ETCD_PORT}/g" master/master-config.yaml
 os::util::sed "s/:7001$/:${ETCD_PEER_PORT}/g" master/master-config.yaml
-# replace top-level namedCertificates config 
-os::util::sed 's#^  namedCertificates: null#  namedCertificates: [{"certFile":"custom.crt","keyFile":"custom.key","names":["localhost"]}]#' master/master-config.yaml 
+# replace top-level namedCertificates config
+os::util::sed 's#^  namedCertificates: null#  namedCertificates: [{"certFile":"custom.crt","keyFile":"custom.key","names":["localhost"]}]#' master/master-config.yaml
 
 # Start master
 OPENSHIFT_PROFILE=web OPENSHIFT_ON_PANIC=crash openshift start master \

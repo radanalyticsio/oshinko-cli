@@ -13,9 +13,9 @@ import (
 var _ = g.Describe("[builds][Slow] result image should have proper labels set", func() {
 	defer g.GinkgoRecover()
 	var (
-		imageStreamFixture = exutil.FixturePath("..", "integration", "fixtures", "test-image-stream.json")
-		stiBuildFixture    = exutil.FixturePath("fixtures", "test-s2i-build.json")
-		dockerBuildFixture = exutil.FixturePath("fixtures", "test-docker-build.json")
+		imageStreamFixture = exutil.FixturePath("..", "integration", "testdata", "test-image-stream.json")
+		stiBuildFixture    = exutil.FixturePath("testdata", "test-s2i-build.json")
+		dockerBuildFixture = exutil.FixturePath("testdata", "test-docker-build.json")
 		oc                 = exutil.NewCLI("build-sti-labels", exutil.KubeConfigPath())
 	)
 
@@ -38,15 +38,8 @@ var _ = g.Describe("[builds][Slow] result image should have proper labels set", 
 			o.Expect(err).NotTo(o.HaveOccurred())
 
 			g.By("starting a test build")
-			buildName, err := oc.Run("start-build").Args("test").Output()
-			o.Expect(err).NotTo(o.HaveOccurred())
-
-			g.By("o.Expecting the S2I build is in Complete phase")
-			err = exutil.WaitForABuild(oc.REST().Builds(oc.Namespace()), buildName, exutil.CheckBuildSuccessFn, exutil.CheckBuildFailedFn)
-			if err != nil {
-				exutil.DumpBuildLogs("test", oc)
-			}
-			o.Expect(err).NotTo(o.HaveOccurred())
+			br, err := exutil.StartBuildAndWait(oc, "test")
+			br.AssertSuccess()
 
 			g.By("getting the Docker image reference from ImageStream")
 			imageRef, err := exutil.GetDockerImageReference(oc.REST().ImageStreams(oc.Namespace()), "test", "latest")
@@ -74,15 +67,8 @@ var _ = g.Describe("[builds][Slow] result image should have proper labels set", 
 			o.Expect(err).NotTo(o.HaveOccurred())
 
 			g.By("starting a test build")
-			buildName, err := oc.Run("start-build").Args("test").Output()
-			o.Expect(err).NotTo(o.HaveOccurred())
-
-			g.By("o.Expecting the Docker build is in Complete phase")
-			err = exutil.WaitForABuild(oc.REST().Builds(oc.Namespace()), buildName, exutil.CheckBuildSuccessFn, exutil.CheckBuildFailedFn)
-			if err != nil {
-				exutil.DumpBuildLogs("test", oc)
-			}
-			o.Expect(err).NotTo(o.HaveOccurred())
+			br, err := exutil.StartBuildAndWait(oc, "test")
+			br.AssertSuccess()
 
 			g.By("getting the Docker image reference from ImageStream")
 			imageRef, err := exutil.GetDockerImageReference(oc.REST().ImageStreams(oc.Namespace()), "test", "latest")
@@ -98,7 +84,7 @@ var _ = g.Describe("[builds][Slow] result image should have proper labels set", 
 	})
 })
 
-// ExpectOpenShiftLabels tests if builded Docker image contains appropriate
+// ExpectOpenShiftLabels tests if built Docker image contains appropriate
 // labels.
 func ExpectOpenShiftLabels(labels map[string]string) error {
 	ExpectedLabels := []string{
@@ -109,11 +95,12 @@ func ExpectOpenShiftLabels(labels map[string]string) error {
 		"io.openshift.build.commit.message",
 		"io.openshift.build.source-location",
 		"io.openshift.build.source-context-dir",
+		"user-specified-label",
 	}
 
 	for _, label := range ExpectedLabels {
 		if labels[label] == "" {
-			return fmt.Errorf("Builded image doesn't contain proper Docker image labels. Missing %q label", label)
+			return fmt.Errorf("Built image doesn't contain proper Docker image labels. Missing %q label", label)
 		}
 	}
 

@@ -10,14 +10,17 @@ import (
 	kapi "k8s.io/kubernetes/pkg/api"
 	kapierrors "k8s.io/kubernetes/pkg/api/errors"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+	kerrors "k8s.io/kubernetes/pkg/util/errors"
 	"k8s.io/kubernetes/pkg/util/sets"
 
 	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
 	"github.com/openshift/origin/pkg/authorization/rulevalidation"
 	"github.com/openshift/origin/pkg/client"
 	"github.com/openshift/origin/pkg/cmd/server/bootstrappolicy"
+	"github.com/openshift/origin/pkg/cmd/templates"
 	cmdutil "github.com/openshift/origin/pkg/cmd/util"
 	osutil "github.com/openshift/origin/pkg/cmd/util"
+
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 )
 
@@ -42,30 +45,31 @@ type ReconcileClusterRolesOptions struct {
 	RoleClient client.ClusterRoleInterface
 }
 
-const (
-	reconcileLong = `
-Update cluster roles to match the recommended bootstrap policy
+var (
+	reconcileLong = templates.LongDesc(`
+		Update cluster roles to match the recommended bootstrap policy
 
-This command will compare cluster roles against the recommended bootstrap policy.  Any cluster role
-that does not match will be replaced by the recommended bootstrap role.  This command will not remove
-any additional cluster role.
+		This command will compare cluster roles against the recommended bootstrap policy.  Any cluster role
+		that does not match will be replaced by the recommended bootstrap role.  This command will not remove
+		any additional cluster role.
 
-Cluster roles with the annotation %s set to "true" are skipped.
+		Cluster roles with the annotation %s set to "true" are skipped.
 
-You can see which cluster roles have recommended changed by choosing an output type.`
+		You can see which cluster roles have recommended changed by choosing an output type.`)
 
-	reconcileExample = `  # Display the names of cluster roles that would be modified
-  $ %[1]s -o name
+	reconcileExample = templates.Examples(`
+		# Display the names of cluster roles that would be modified
+	  %[1]s -o name
 
-  # Add missing permissions to cluster roles that don't match the current defaults
-  $ %[1]s --confirm
+	  # Add missing permissions to cluster roles that don't match the current defaults
+	  %[1]s --confirm
 
-  # Add missing permissions and remove extra permissions from 
-  # cluster roles that don't match the current defaults
-  $ %[1]s --additive-only=false --confirm
+	  # Add missing permissions and remove extra permissions from
+	  # cluster roles that don't match the current defaults
+	  %[1]s --additive-only=false --confirm
 
-  # Display the union of the default and modified cluster roles
-  $ %[1]s --additive-only`
+	  # Display the union of the default and modified cluster roles
+	  %[1]s --additive-only`)
 )
 
 // NewCmdReconcileClusterRoles implements the OpenShift cli reconcile-cluster-roles command
@@ -237,16 +241,19 @@ func (o *ReconcileClusterRolesOptions) ChangedClusterRoles() ([]*authorizationap
 
 // ReplaceChangedRoles will reconcile all the changed roles back to the recommended bootstrap policy
 func (o *ReconcileClusterRolesOptions) ReplaceChangedRoles(changedRoles []*authorizationapi.ClusterRole) error {
+	errs := []error{}
 	for i := range changedRoles {
 		role, err := o.RoleClient.Get(changedRoles[i].Name)
 		if err != nil && !kapierrors.IsNotFound(err) {
-			return err
+			errs = append(errs, err)
+			continue
 		}
 
 		if kapierrors.IsNotFound(err) {
 			createdRole, err := o.RoleClient.Create(changedRoles[i])
 			if err != nil {
-				return err
+				errs = append(errs, err)
+				continue
 			}
 
 			fmt.Fprintf(o.Out, "clusterrole/%s\n", createdRole.Name)
@@ -256,11 +263,12 @@ func (o *ReconcileClusterRolesOptions) ReplaceChangedRoles(changedRoles []*autho
 		role.Rules = changedRoles[i].Rules
 		updatedRole, err := o.RoleClient.Update(role)
 		if err != nil {
-			return err
+			errs = append(errs, err)
+			continue
 		}
 
 		fmt.Fprintf(o.Out, "clusterrole/%s\n", updatedRole.Name)
 	}
 
-	return nil
+	return kerrors.NewAggregate(errs)
 }

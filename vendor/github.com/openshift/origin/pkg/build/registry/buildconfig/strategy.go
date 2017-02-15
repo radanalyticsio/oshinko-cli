@@ -37,7 +37,7 @@ func (strategy) AllowUnconditionalUpdate() bool {
 }
 
 // PrepareForCreate clears fields that are not allowed to be set by end users on creation.
-func (strategy) PrepareForCreate(obj runtime.Object) {
+func (strategy) PrepareForCreate(ctx kapi.Context, obj runtime.Object) {
 	bc := obj.(*api.BuildConfig)
 	dropUnknownTriggers(bc)
 }
@@ -47,9 +47,15 @@ func (strategy) Canonicalize(obj runtime.Object) {
 }
 
 // PrepareForUpdate clears fields that are not allowed to be set by end users on update.
-func (strategy) PrepareForUpdate(obj, old runtime.Object) {
-	bc := obj.(*api.BuildConfig)
-	dropUnknownTriggers(bc)
+func (strategy) PrepareForUpdate(ctx kapi.Context, obj, old runtime.Object) {
+	newBC := obj.(*api.BuildConfig)
+	oldBC := old.(*api.BuildConfig)
+	dropUnknownTriggers(newBC)
+	// Do not allow the build version to go backwards or we'll
+	// get conflicts with existing builds.
+	if newBC.Status.LastVersion < oldBC.Status.LastVersion {
+		newBC.Status.LastVersion = oldBC.Status.LastVersion
+	}
 }
 
 // Validate validates a new policy.
@@ -63,7 +69,7 @@ func (strategy) ValidateUpdate(ctx kapi.Context, obj, old runtime.Object) field.
 }
 
 // Matcher returns a generic matcher for a given label and field selector.
-func Matcher(label labels.Selector, field fields.Selector) generic.Matcher {
+func Matcher(label labels.Selector, field fields.Selector) *generic.SelectionPredicate {
 	return &generic.SelectionPredicate{
 		Label: label,
 		Field: field,

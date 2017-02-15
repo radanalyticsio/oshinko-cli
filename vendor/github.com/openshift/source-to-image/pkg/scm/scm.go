@@ -3,7 +3,8 @@ package scm
 import (
 	"fmt"
 
-	"github.com/golang/glog"
+	"github.com/openshift/source-to-image/pkg/errors"
+	utilglog "github.com/openshift/source-to-image/pkg/util/glog"
 
 	"github.com/openshift/source-to-image/pkg/build"
 	"github.com/openshift/source-to-image/pkg/scm/empty"
@@ -11,6 +12,8 @@ import (
 	"github.com/openshift/source-to-image/pkg/scm/git"
 	"github.com/openshift/source-to-image/pkg/util"
 )
+
+var glog = utilglog.StderrLog
 
 // DownloaderForSource determines what SCM plugin should be used for downloading
 // the sources from the repository.
@@ -21,8 +24,13 @@ func DownloaderForSource(s string, forceCopy bool) (build.Downloader, string, er
 		return &empty.Noop{}, s, nil
 	}
 
-	details, mods := git.ParseFile(s)
+	details, mods, err := git.ParseFile(s)
 	glog.V(4).Infof("return from ParseFile file exists %v proto specified %v use copy %v", details.FileExists, details.ProtoSpecified, details.UseCopy)
+	if err != nil {
+		if e, ok := err.(errors.Error); !forceCopy || !(ok && (e.ErrorCode == errors.EmptyGitRepositoryError)) {
+			return nil, s, err
+		}
+	}
 
 	if details.FileExists && details.BadRef {
 		return nil, s, fmt.Errorf("local location referenced by %s exists but the input after the # is malformed", s)
@@ -41,14 +49,19 @@ func DownloaderForSource(s string, forceCopy bool) (build.Downloader, string, er
 	}
 
 	if details.FileExists && (details.UseCopy || forceCopy) {
-		return &file.File{util.NewFileSystem()}, s, nil
+		return &file.File{FileSystem: util.NewFileSystem()}, s, nil
 	}
 
 	// If the source is valid  Git protocol (file://, ssh://, git://, git@, etc..) use Git
 	// binary to download the sources
 	g := git.New()
-	if g.ValidCloneSpec(s) {
-		return &git.Clone{g, util.NewFileSystem()}, s, nil
+	ok, err := g.ValidCloneSpec(s)
+	if err != nil {
+		return nil, s, err
+	}
+
+	if ok {
+		return &git.Clone{Git: g, FileSystem: util.NewFileSystem()}, s, nil
 	}
 
 	return nil, s, fmt.Errorf("no downloader defined for location: %q", s)

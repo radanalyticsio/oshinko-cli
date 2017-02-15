@@ -1,48 +1,42 @@
 package etcd
 
 import (
-	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/labels"
 	"k8s.io/kubernetes/pkg/registry/generic"
-	etcdgeneric "k8s.io/kubernetes/pkg/registry/generic/etcd"
+	"k8s.io/kubernetes/pkg/registry/generic/registry"
 	"k8s.io/kubernetes/pkg/runtime"
 	"k8s.io/kubernetes/pkg/storage"
 
 	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
 	"github.com/openshift/origin/pkg/authorization/registry/policybinding"
+	"github.com/openshift/origin/pkg/util/restoptions"
 )
 
-const PolicyBindingPath = "/authorization/local/policybindings"
-
 type REST struct {
-	*etcdgeneric.Etcd
+	*registry.Store
 }
 
 // NewStorage returns a RESTStorage object that will work against nodes.
-func NewStorage(s storage.Interface) *REST {
-	store := &etcdgeneric.Etcd{
+func NewStorage(optsGetter restoptions.Getter) (*REST, error) {
+	store := &registry.Store{
 		NewFunc:           func() runtime.Object { return &authorizationapi.PolicyBinding{} },
 		NewListFunc:       func() runtime.Object { return &authorizationapi.PolicyBindingList{} },
-		QualifiedResource: authorizationapi.Resource("policybinding"),
-		KeyRootFunc: func(ctx kapi.Context) string {
-			return etcdgeneric.NamespaceKeyRootFunc(ctx, PolicyBindingPath)
-		},
-		KeyFunc: func(ctx kapi.Context, id string) (string, error) {
-			return etcdgeneric.NamespaceKeyFunc(ctx, PolicyBindingPath, id)
-		},
+		QualifiedResource: authorizationapi.Resource("policybindings"),
 		ObjectNameFunc: func(obj runtime.Object) (string, error) {
 			return obj.(*authorizationapi.PolicyBinding).Name, nil
 		},
-		PredicateFunc: func(label labels.Selector, field fields.Selector) generic.Matcher {
+		PredicateFunc: func(label labels.Selector, field fields.Selector) *generic.SelectionPredicate {
 			return policybinding.Matcher(label, field)
 		},
 
 		CreateStrategy: policybinding.Strategy,
 		UpdateStrategy: policybinding.Strategy,
-
-		Storage: s,
 	}
 
-	return &REST{store}
+	if err := restoptions.ApplyOptions(optsGetter, store, true, storage.NoTriggerPublisher); err != nil {
+		return nil, err
+	}
+
+	return &REST{store}, nil
 }
