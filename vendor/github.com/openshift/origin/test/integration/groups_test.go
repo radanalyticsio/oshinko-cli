@@ -1,12 +1,12 @@
-// +build integration
-
 package integration
 
 import (
+	"io"
 	"reflect"
 	"testing"
 
 	kapi "k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/runtime"
 
 	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
 	groupscmd "github.com/openshift/origin/pkg/cmd/admin/groups"
@@ -19,6 +19,7 @@ import (
 
 func TestBasicUserBasedGroupManipulation(t *testing.T) {
 	testutil.RequireEtcd(t)
+	defer testutil.DumpEtcdOnFailure(t)
 	_, clusterAdminKubeConfig, err := testserver.StartTestMasterAPI()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -107,6 +108,7 @@ func TestBasicUserBasedGroupManipulation(t *testing.T) {
 
 func TestBasicGroupManipulation(t *testing.T) {
 	testutil.RequireEtcd(t)
+	defer testutil.DumpEtcdOnFailure(t)
 	_, clusterAdminKubeConfig, err := testserver.StartTestMasterAPI()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -177,6 +179,7 @@ func TestBasicGroupManipulation(t *testing.T) {
 
 func TestGroupCommands(t *testing.T) {
 	testutil.RequireEtcd(t)
+	defer testutil.DumpEtcdOnFailure(t)
 	_, clusterAdminKubeConfig, err := testserver.StartTestMasterAPI()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -187,7 +190,14 @@ func TestGroupCommands(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	newGroup := &groupscmd.NewGroupOptions{clusterAdminClient.Groups(), "group1", []string{"first", "second", "third", "first"}}
+	newGroup := &groupscmd.NewGroupOptions{
+		GroupClient: clusterAdminClient.Groups(),
+		Group:       "group1",
+		Users:       []string{"first", "second", "third", "first"},
+		Printer: func(runtime.Object, io.Writer) error {
+			return nil
+		},
+	}
 	if err := newGroup.AddGroup(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -199,7 +209,11 @@ func TestGroupCommands(t *testing.T) {
 		t.Errorf("expected %v, actual %v", e, a)
 	}
 
-	modifyUsers := &groupscmd.GroupModificationOptions{clusterAdminClient.Groups(), "group1", []string{"second", "fourth", "fifth"}}
+	modifyUsers := &groupscmd.GroupModificationOptions{
+		GroupClient: clusterAdminClient.Groups(),
+		Group:       "group1",
+		Users:       []string{"second", "fourth", "fifth"},
+	}
 	if err := modifyUsers.AddUsers(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

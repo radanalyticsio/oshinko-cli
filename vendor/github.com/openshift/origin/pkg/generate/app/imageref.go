@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/docker/docker/builder/parser"
+	"github.com/docker/docker/builder/dockerfile/parser"
 	"github.com/fsouza/go-dockerclient"
 
 	kapi "k8s.io/kubernetes/pkg/api"
@@ -89,7 +89,7 @@ func (g *imageRefGenerator) FromDockerfile(name string, dir string, context stri
 	if err != nil {
 		return nil, err
 	}
-
+	defer file.Close()
 	node, err := parser.Parse(file)
 	if err != nil {
 		return nil, err
@@ -385,7 +385,7 @@ func (r *ImageRef) DeployableContainer() (container *kapi.Container, triggers []
 			}
 
 			container.Ports = append(container.Ports, kapi.ContainerPort{
-				ContainerPort: port,
+				ContainerPort: int32(port),
 				Protocol:      kapi.Protocol(strings.ToUpper(p.Proto())),
 			})
 		}

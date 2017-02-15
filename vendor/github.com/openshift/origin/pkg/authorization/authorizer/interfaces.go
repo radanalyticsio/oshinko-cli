@@ -4,20 +4,25 @@ import (
 	"net/http"
 
 	kapi "k8s.io/kubernetes/pkg/api"
+	kapiserver "k8s.io/kubernetes/pkg/apiserver"
 	"k8s.io/kubernetes/pkg/auth/user"
 	"k8s.io/kubernetes/pkg/util/sets"
 )
 
 type Authorizer interface {
-	Authorize(ctx kapi.Context, a AuthorizationAttributes) (allowed bool, reason string, err error)
-	GetAllowedSubjects(ctx kapi.Context, attributes AuthorizationAttributes) (sets.String, sets.String, error)
+	Authorize(ctx kapi.Context, a Action) (allowed bool, reason string, err error)
+	GetAllowedSubjects(ctx kapi.Context, attributes Action) (sets.String, sets.String, error)
 }
 
 type AuthorizationAttributeBuilder interface {
-	GetAttributes(request *http.Request) (AuthorizationAttributes, error)
+	GetAttributes(request *http.Request) (Action, error)
 }
 
-type AuthorizationAttributes interface {
+type RequestInfoResolver interface {
+	GetRequestInfo(req *http.Request) (kapiserver.RequestInfo, error)
+}
+
+type Action interface {
 	GetVerb() string
 	GetAPIVersion() string
 	GetAPIGroup() string
@@ -41,5 +46,5 @@ type ForbiddenMessageMaker interface {
 type MessageContext struct {
 	User       user.Info
 	Namespace  string
-	Attributes AuthorizationAttributes
+	Attributes Action
 }

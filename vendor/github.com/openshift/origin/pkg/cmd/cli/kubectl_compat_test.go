@@ -20,10 +20,13 @@ var MissingCommands = sets.NewString(
 	"namespace", "rolling-update",
 	"cluster-info", "api-versions",
 	"stop",
+
+	// are on admin commands
 	"cordon",
 	"drain",
 	"uncordon",
-	"rollout",
+	"taint",
+	"top",
 )
 
 // WhitelistedCommands is the list of commands we're never going to have in oc
@@ -57,7 +60,6 @@ kubectlLoop:
 
 		t.Errorf("missing %q in oc", kubecmd.Name())
 	}
-
 }
 
 // this only checks one level deep for nested commands, but it does ensure that we've gotten several

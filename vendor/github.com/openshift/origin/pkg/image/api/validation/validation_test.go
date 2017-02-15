@@ -1,14 +1,16 @@
 package validation
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/openshift/origin/pkg/image/api"
 	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/util/diff"
 	"k8s.io/kubernetes/pkg/util/validation/field"
+
+	"github.com/openshift/origin/pkg/image/api"
 )
 
 func TestValidateImageOK(t *testing.T) {
@@ -66,6 +68,180 @@ func TestValidateImageMissingFields(t *testing.T) {
 			t.Errorf("%s: expected errors to have field %s and type %s: %v", k, v.F, v.T, errs)
 		}
 	}
+}
+
+func TestValidateImageSignature(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		signature api.ImageSignature
+		expected  field.ErrorList
+	}{
+		{
+			name: "valid",
+			signature: api.ImageSignature{
+				ObjectMeta: kapi.ObjectMeta{
+					Name: "imgname@valid",
+				},
+				Type:    "valid",
+				Content: []byte("blob"),
+			},
+			expected: field.ErrorList{},
+		},
+
+		{
+			name: "valid trusted",
+			signature: api.ImageSignature{
+				ObjectMeta: kapi.ObjectMeta{
+					Name: "imgname@trusted",
+				},
+				Type:    "valid",
+				Content: []byte("blob"),
+				Conditions: []api.SignatureCondition{
+					{
+						Type:   api.SignatureTrusted,
+						Status: kapi.ConditionTrue,
+					},
+					{
+						Type:   api.SignatureForImage,
+						Status: kapi.ConditionTrue,
+					},
+				},
+				ImageIdentity: "registry.company.ltd/app/core:v1.2",
+			},
+			expected: field.ErrorList{},
+		},
+
+		{
+			name: "valid untrusted",
+			signature: api.ImageSignature{
+				ObjectMeta: kapi.ObjectMeta{
+					Name: "imgname@untrusted",
+				},
+				Type:    "valid",
+				Content: []byte("blob"),
+				Conditions: []api.SignatureCondition{
+					{
+						Type:   api.SignatureTrusted,
+						Status: kapi.ConditionTrue,
+					},
+					{
+						Type:   api.SignatureForImage,
+						Status: kapi.ConditionFalse,
+					},
+					// compare the latest condition
+					{
+						Type:   api.SignatureTrusted,
+						Status: kapi.ConditionFalse,
+					},
+				},
+				ImageIdentity: "registry.company.ltd/app/core:v1.2",
+			},
+			expected: field.ErrorList{},
+		},
+
+		{
+			name: "invalid name and missing type",
+			signature: api.ImageSignature{
+				ObjectMeta: kapi.ObjectMeta{Name: "notype"},
+				Content:    []byte("blob"),
+			},
+			expected: field.ErrorList{
+				field.Invalid(field.NewPath("metadata").Child("name"), "notype", "name must be of format <imageName>@<signatureName>"),
+				field.Required(field.NewPath("type"), ""),
+			},
+		},
+
+		{
+			name: "missing content",
+			signature: api.ImageSignature{
+				ObjectMeta: kapi.ObjectMeta{Name: "img@nocontent"},
+				Type:       "invalid",
+			},
+			expected: field.ErrorList{
+				field.Required(field.NewPath("content"), ""),
+			},
+		},
+
+		{
+			name: "missing ForImage condition",
+			signature: api.ImageSignature{
+				ObjectMeta: kapi.ObjectMeta{Name: "img@noforimage"},
+				Type:       "invalid",
+				Content:    []byte("blob"),
+				Conditions: []api.SignatureCondition{
+					{
+						Type:   api.SignatureTrusted,
+						Status: kapi.ConditionTrue,
+					},
+				},
+				ImageIdentity: "registry.company.ltd/app/core:v1.2",
+			},
+			expected: field.ErrorList{field.Invalid(field.NewPath("conditions"),
+				[]api.SignatureCondition{
+					{
+						Type:   api.SignatureTrusted,
+						Status: kapi.ConditionTrue,
+					},
+				},
+				fmt.Sprintf("missing %q condition type", api.SignatureForImage))},
+		},
+
+		{
+			name: "adding labels and anotations",
+			signature: api.ImageSignature{
+				ObjectMeta: kapi.ObjectMeta{
+					Name:        "img@annotated",
+					Annotations: map[string]string{"key": "value"},
+					Labels:      map[string]string{"label": "value"},
+				},
+				Type:    "valid",
+				Content: []byte("blob"),
+			},
+			expected: field.ErrorList{
+				field.Forbidden(field.NewPath("metadata").Child("labels"), "signature labels cannot be set"),
+				field.Forbidden(field.NewPath("metadata").Child("annotations"), "signature annotations cannot be set"),
+			},
+		},
+
+		{
+			name: "filled metadata for unknown signature state",
+			signature: api.ImageSignature{
+				ObjectMeta: kapi.ObjectMeta{Name: "img@metadatafilled"},
+				Type:       "invalid",
+				Content:    []byte("blob"),
+				Conditions: []api.SignatureCondition{
+					{
+						Type:   api.SignatureTrusted,
+						Status: kapi.ConditionUnknown,
+					},
+					{
+						Type:   api.SignatureForImage,
+						Status: kapi.ConditionUnknown,
+					},
+				},
+				ImageIdentity: "registry.company.ltd/app/core:v1.2",
+				SignedClaims:  map[string]string{"claim": "value"},
+				IssuedBy: &api.SignatureIssuer{
+					SignatureGenericEntity: api.SignatureGenericEntity{Organization: "org"},
+				},
+				IssuedTo: &api.SignatureSubject{PublicKeyID: "id"},
+			},
+			expected: field.ErrorList{
+				field.Invalid(field.NewPath("imageIdentity"), "registry.company.ltd/app/core:v1.2", "must be unset for unknown signature state"),
+				field.Invalid(field.NewPath("signedClaims"), map[string]string{"claim": "value"}, "must be unset for unknown signature state"),
+				field.Invalid(field.NewPath("issuedBy"), &api.SignatureIssuer{
+					SignatureGenericEntity: api.SignatureGenericEntity{Organization: "org"},
+				}, "must be unset for unknown signature state"),
+				field.Invalid(field.NewPath("issuedTo"), &api.SignatureSubject{PublicKeyID: "id"}, "must be unset for unknown signature state"),
+			},
+		},
+	} {
+		errs := validateImageSignature(&tc.signature, nil)
+		if e, a := tc.expected, errs; !reflect.DeepEqual(a, e) {
+			t.Errorf("[%s] unexpected errors: %s", tc.name, diff.ObjectDiff(e, a))
+		}
+	}
+
 }
 
 func TestValidateImageStreamMappingNotOK(t *testing.T) {
@@ -144,7 +320,7 @@ func TestValidateImageStreamMappingNotOK(t *testing.T) {
 				ObjectMeta: kapi.ObjectMeta{
 					Namespace: "default",
 				},
-				DockerImageRepository: "registry/extra/openshift/ruby-19-centos",
+				DockerImageRepository: "registry/extra/openshift//ruby-19-centos",
 				Tag: api.DefaultImageTag,
 				Image: api.Image{
 					ObjectMeta: kapi.ObjectMeta{
@@ -232,7 +408,7 @@ func TestValidateImageStream(t *testing.T) {
 			namespace: "!$",
 			name:      "foo",
 			expected: field.ErrorList{
-				field.Invalid(field.NewPath("metadata", "namespace"), "!$", `must be a DNS label (at most 63 characters, matching regex [a-z0-9]([-a-z0-9]*[a-z0-9])?): e.g. "my-name"`),
+				field.Invalid(field.NewPath("metadata", "namespace"), "!$", `must match the regex [a-z0-9]([-a-z0-9]*[a-z0-9])? (e.g. 'my-name' or '123-abc')`),
 			},
 		},
 		"invalid dockerImageRepository": {
@@ -240,7 +416,7 @@ func TestValidateImageStream(t *testing.T) {
 			name:      "foo",
 			dockerImageRepository: "a-|///bbb",
 			expected: field.ErrorList{
-				field.Invalid(field.NewPath("spec", "dockerImageRepository"), "a-|///bbb", "the docker pull spec \"a-|///bbb\" must be two or three segments separated by slashes"),
+				field.Invalid(field.NewPath("spec", "dockerImageRepository"), "a-|///bbb", "invalid reference format"),
 			},
 		},
 		"invalid dockerImageRepository with tag": {
@@ -256,7 +432,7 @@ func TestValidateImageStream(t *testing.T) {
 			name:      "foo",
 			dockerImageRepository: "a/b@sha256:something",
 			expected: field.ErrorList{
-				field.Invalid(field.NewPath("spec", "dockerImageRepository"), "a/b@sha256:something", "the repository name may not contain an ID"),
+				field.Invalid(field.NewPath("spec", "dockerImageRepository"), "a/b@sha256:something", "invalid reference format"),
 			},
 		},
 		"status tag missing dockerImageReference": {
@@ -312,7 +488,7 @@ func TestValidateImageStream(t *testing.T) {
 				},
 			},
 			expected: field.ErrorList{
-				field.Invalid(field.NewPath("spec", "tags").Key("badid").Child("from", "name"), "abc@badid", "only tags can be scheduled for import"),
+				field.Invalid(field.NewPath("spec", "tags").Key("badid").Child("from", "name"), "abc@badid", "invalid reference format"),
 			},
 		},
 		"ImageStreamImages can't be scheduled": {
@@ -537,13 +713,13 @@ func TestValidateImageStreamImport(t *testing.T) {
 		"invalid namespace": {
 			isi: &api.ImageStreamImport{ObjectMeta: kapi.ObjectMeta{Namespace: "!$", Name: "foo"}, Spec: validSpec},
 			expected: field.ErrorList{
-				field.Invalid(field.NewPath("metadata", "namespace"), "!$", `must be a DNS label (at most 63 characters, matching regex [a-z0-9]([-a-z0-9]*[a-z0-9])?): e.g. "my-name"`),
+				field.Invalid(field.NewPath("metadata", "namespace"), "!$", `must match the regex [a-z0-9]([-a-z0-9]*[a-z0-9])? (e.g. 'my-name' or '123-abc')`),
 			},
 		},
 		"invalid dockerImageRepository": {
 			isi: &api.ImageStreamImport{ObjectMeta: validMeta, Spec: repoFn("a-|///bbb")},
 			expected: field.ErrorList{
-				field.Invalid(field.NewPath("spec", "repository", "from", "name"), "a-|///bbb", "the docker pull spec \"a-|///bbb\" must be two or three segments separated by slashes"),
+				field.Invalid(field.NewPath("spec", "repository", "from", "name"), "a-|///bbb", "invalid reference format"),
 			},
 		},
 		"invalid dockerImageRepository with tag": {
@@ -555,7 +731,7 @@ func TestValidateImageStreamImport(t *testing.T) {
 		"invalid dockerImageRepository with ID": {
 			isi: &api.ImageStreamImport{ObjectMeta: validMeta, Spec: repoFn("a/b@sha256:something")},
 			expected: field.ErrorList{
-				field.Invalid(field.NewPath("spec", "repository", "from", "name"), "a/b@sha256:something", "you must specify an image repository, not a tag or ID"),
+				field.Invalid(field.NewPath("spec", "repository", "from", "name"), "a/b@sha256:something", "invalid reference format"),
 			},
 		},
 		"only DockerImage tags can be scheduled": {
@@ -578,6 +754,13 @@ func TestValidateImageStreamImport(t *testing.T) {
 						},
 						{
 							From: kapi.ObjectReference{
+								Kind: "DockerImage",
+								Name: "abc@sha256:3c87c572822935df60f0f5d3665bd376841a7fcfeb806b5f212de6a00e9a7b25",
+							},
+							ImportPolicy: api.TagImportPolicy{Scheduled: true},
+						},
+						{
+							From: kapi.ObjectReference{
 								Kind: "ImageStreamTag",
 								Name: "other:latest",
 							},
@@ -594,9 +777,10 @@ func TestValidateImageStreamImport(t *testing.T) {
 				},
 			},
 			expected: field.ErrorList{
-				field.Invalid(field.NewPath("spec", "images").Index(1).Child("from", "name"), "abc@badid", "only tags can be scheduled for import"),
-				field.Invalid(field.NewPath("spec", "images").Index(2).Child("from", "kind"), "ImageStreamTag", "only DockerImage is supported"),
-				field.Invalid(field.NewPath("spec", "images").Index(3).Child("from", "kind"), "ImageStreamImage", "only DockerImage is supported"),
+				field.Invalid(field.NewPath("spec", "images").Index(1).Child("from", "name"), "abc@badid", "invalid reference format"),
+				field.Invalid(field.NewPath("spec", "images").Index(2).Child("from", "name"), "abc@sha256:3c87c572822935df60f0f5d3665bd376841a7fcfeb806b5f212de6a00e9a7b25", "only tags can be scheduled for import"),
+				field.Invalid(field.NewPath("spec", "images").Index(3).Child("from", "kind"), "ImageStreamTag", "only DockerImage is supported"),
+				field.Invalid(field.NewPath("spec", "images").Index(4).Child("from", "kind"), "ImageStreamImage", "only DockerImage is supported"),
 			},
 		},
 		"valid": {

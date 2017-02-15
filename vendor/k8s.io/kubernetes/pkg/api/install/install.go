@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@ import (
 	"k8s.io/kubernetes/pkg/api/meta"
 	"k8s.io/kubernetes/pkg/api/unversioned"
 	"k8s.io/kubernetes/pkg/api/v1"
-	"k8s.io/kubernetes/pkg/api/v1beta3"
 	"k8s.io/kubernetes/pkg/apimachinery"
 	"k8s.io/kubernetes/pkg/apimachinery/registered"
 	"k8s.io/kubernetes/pkg/runtime"
@@ -39,7 +38,7 @@ const importPrefix = "k8s.io/kubernetes/pkg/api"
 var accessor = meta.NewAccessor()
 
 // availableVersions lists all known external versions for this group from most preferred to least preferred
-var availableVersions = []unversioned.GroupVersion{v1.SchemeGroupVersion, v1beta3.SchemeGroupVersion}
+var availableVersions = []unversioned.GroupVersion{v1.SchemeGroupVersion}
 
 func init() {
 	registered.RegisterVersions(availableVersions)
@@ -127,11 +126,6 @@ func newRESTMapper(externalVersions []unversioned.GroupVersion) meta.RESTMapper 
 // string, or an error if the version is not known.
 func interfacesFor(version unversioned.GroupVersion) (*meta.VersionInterfaces, error) {
 	switch version {
-	case v1beta3.SchemeGroupVersion:
-		return &meta.VersionInterfaces{
-			ObjectConvertor:  api.Scheme,
-			MetadataAccessor: accessor,
-		}, nil
 	case v1.SchemeGroupVersion:
 		return &meta.VersionInterfaces{
 			ObjectConvertor:  api.Scheme,
@@ -145,7 +139,10 @@ func interfacesFor(version unversioned.GroupVersion) (*meta.VersionInterfaces, e
 
 func addVersionsToScheme(externalVersions ...unversioned.GroupVersion) {
 	// add the internal version to Scheme
-	api.AddToScheme(api.Scheme)
+	if err := api.AddToScheme(api.Scheme); err != nil {
+		// Programmer error, detect immediately
+		panic(err)
+	}
 	// add the enabled external versions to Scheme
 	for _, v := range externalVersions {
 		if !registered.IsEnabledVersion(v) {
@@ -154,9 +151,10 @@ func addVersionsToScheme(externalVersions ...unversioned.GroupVersion) {
 		}
 		switch v {
 		case v1.SchemeGroupVersion:
-			v1.AddToScheme(api.Scheme)
-		case v1beta3.SchemeGroupVersion:
-			v1beta3.AddToScheme(api.Scheme)
+			if err := v1.AddToScheme(api.Scheme); err != nil {
+				// Programmer error, detect immediately
+				panic(err)
+			}
 		}
 	}
 }

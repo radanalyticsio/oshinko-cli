@@ -45,31 +45,60 @@ func (w *WebHook) ServeHTTP(writer http.ResponseWriter, req *http.Request, ctx k
 
 	config, err := w.registry.GetBuildConfig(ctx, name)
 	if err != nil {
-		// clients should not be able to find information about build configs in the system unless the config exists
-		// and the secret matches
+		// clients should not be able to find information about build configs in
+		// the system unless the config exists and the secret matches
 		return errors.NewUnauthorized(fmt.Sprintf("the webhook %q for %q did not accept your secret", hookType, name))
 	}
 
 	revision, envvars, proceed, err := plugin.Extract(config, secret, "", req)
-	switch err {
-	case webhook.ErrSecretMismatch, webhook.ErrHookNotEnabled:
-		return errors.NewUnauthorized(fmt.Sprintf("the webhook %q for %q did not accept your secret", hookType, name))
-	case nil:
-	default:
-		return errors.NewInternalError(fmt.Errorf("hook failed: %v", err))
-	}
-
 	if !proceed {
-		return nil
+		switch err {
+		case webhook.ErrSecretMismatch, webhook.ErrHookNotEnabled:
+			return errors.NewUnauthorized(fmt.Sprintf("the webhook %q for %q did not accept your secret", hookType, name))
+		case webhook.MethodNotSupported:
+			return errors.NewMethodNotSupported(buildapi.Resource("buildconfighook"), req.Method)
+		}
+		if _, ok := err.(*errors.StatusError); !ok && err != nil {
+			return errors.NewInternalError(fmt.Errorf("hook failed: %v", err))
+		}
+		return err
 	}
+	warning := err
 
+	buildTriggerCauses := generateBuildTriggerInfo(revision, hookType, secret)
 	request := &buildapi.BuildRequest{
-		ObjectMeta: kapi.ObjectMeta{Name: name},
-		Revision:   revision,
-		Env:        envvars,
+		TriggeredBy: buildTriggerCauses,
+		ObjectMeta:  kapi.ObjectMeta{Name: name},
+		Revision:    revision,
+		Env:         envvars,
 	}
 	if _, err := w.instantiator.Instantiate(config.Namespace, request); err != nil {
 		return errors.NewInternalError(fmt.Errorf("could not generate a build: %v", err))
 	}
-	return nil
+	return warning
+}
+
+func generateBuildTriggerInfo(revision *buildapi.SourceRevision, hookType, secret string) (buildTriggerCauses []buildapi.BuildTriggerCause) {
+	hiddenSecret := fmt.Sprintf("%s***", secret[:(len(secret)/2)])
+	switch {
+	case hookType == "generic":
+		buildTriggerCauses = append(buildTriggerCauses,
+			buildapi.BuildTriggerCause{
+				Message: buildapi.BuildTriggerCauseGenericMsg,
+				GenericWebHook: &buildapi.GenericWebHookCause{
+					Revision: revision,
+					Secret:   hiddenSecret,
+				},
+			})
+	case hookType == "github":
+		buildTriggerCauses = append(buildTriggerCauses,
+			buildapi.BuildTriggerCause{
+				Message: buildapi.BuildTriggerCauseGithubMsg,
+				GitHubWebHook: &buildapi.GitHubWebHookCause{
+					Revision: revision,
+					Secret:   hiddenSecret,
+				},
+			})
+	}
+	return buildTriggerCauses
 }

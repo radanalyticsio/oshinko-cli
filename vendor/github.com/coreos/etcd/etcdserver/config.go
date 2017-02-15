@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,12 +50,15 @@ type ServerConfig struct {
 	ElectionTicks    int
 	BootstrapTimeout time.Duration
 
-	V3demo                  bool
 	AutoCompactionRetention int
+	QuotaBackendBytes       int64
 
 	StrictReconfigCheck bool
 
 	EnablePprof bool
+
+	// ClientCertAuthEnabled is true when cert has been signed by the client CA.
+	ClientCertAuthEnabled bool
 }
 
 // VerifyBootstrap sanity-checks the initial config for bootstrap case
@@ -101,11 +104,11 @@ func (c *ServerConfig) verifyLocalMember(strict bool) error {
 		return fmt.Errorf("couldn't find local name %q in the initial cluster configuration", c.Name)
 	}
 
-	// Advertised peer URLs must match those in the cluster peer list
-	apurls := c.PeerURLs.StringSlice()
-	sort.Strings(apurls)
-	urls.Sort()
 	if strict {
+		// Advertised peer URLs must match those in the cluster peer list
+		apurls := c.PeerURLs.StringSlice()
+		sort.Strings(apurls)
+		urls.Sort()
 		if !netutil.URLStringsEqual(apurls, urls.StringSlice()) {
 			umap := map[string]types.URLs{c.Name: c.PeerURLs}
 			return fmt.Errorf("--initial-cluster must include %s given --initial-advertise-peer-urls=%s", types.URLsMap(umap).String(), strings.Join(apurls, ","))

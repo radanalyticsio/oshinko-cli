@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/openshift/origin/pkg/cmd/templates"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 
@@ -15,20 +16,22 @@ import (
 	"github.com/openshift/origin/pkg/gitserver/autobuild"
 )
 
-const longCommandDesc = `
-Start a Git server
-
-This command launches a Git HTTP/HTTPS server that supports push and pull, mirroring,
-and automatic creation of applications on push.
-
-%[1]s
-`
 const LogLevelEnv = "LOGLEVEL"
-const repositoryBuildConfigsDesc = `
-Retrieve build configs for a gitserver repository
 
-This command lists build configurations in the current namespace that correspond to a given git repository.
-`
+var (
+	longCommandDesc = templates.LongDesc(`
+		Start a Git server
+
+		This command launches a Git HTTP/HTTPS server that supports push and pull, mirroring,
+		and automatic creation of applications on push.
+
+		%[1]s`)
+
+	repositoryBuildConfigsDesc = templates.LongDesc(`
+		Retrieve build configs for a gitserver repository
+
+		This command lists build configurations in the current namespace that correspond to a given git repository.`)
+)
 
 // CommandFor returns the appropriate command for this base name,
 // or the global OpenShift command
@@ -64,7 +67,7 @@ func NewCommandGitServer(name string) *cobra.Command {
 }
 
 func RunGitServer() error {
-	config, err := gitserver.NewEnviromentConfig()
+	config, err := gitserver.NewEnvironmentConfig()
 	if err != nil {
 		return err
 	}
@@ -98,7 +101,9 @@ func NewCommandRepositoryBuildConfigs(name string, out io.Writer) *cobra.Command
 				cmdutil.CheckErr(err)
 			}
 			repoName := args[0]
-			err := gitserver.GetRepositoryBuildConfigs(repoName, out)
+			client, err := gitserver.GetClient()
+			cmdutil.CheckErr(err)
+			err = gitserver.GetRepositoryBuildConfigs(client, repoName, out)
 			cmdutil.CheckErr(err)
 		},
 	}

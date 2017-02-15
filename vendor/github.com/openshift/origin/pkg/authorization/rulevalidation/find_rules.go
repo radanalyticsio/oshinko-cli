@@ -1,8 +1,6 @@
 package rulevalidation
 
 import (
-	"errors"
-
 	kapi "k8s.io/kubernetes/pkg/api"
 	kapierror "k8s.io/kubernetes/pkg/api/errors"
 	"k8s.io/kubernetes/pkg/auth/user"
@@ -11,85 +9,81 @@ import (
 
 	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
 	authorizationinterfaces "github.com/openshift/origin/pkg/authorization/interfaces"
+	"github.com/openshift/origin/pkg/client"
 )
 
 type DefaultRuleResolver struct {
-	policyGetter  PolicyGetter
-	bindingLister BindingLister
+	policyGetter  client.PoliciesListerNamespacer
+	bindingLister client.PolicyBindingsListerNamespacer
 
-	clusterPolicyGetter  ClusterPolicyGetter
-	clusterBindingLister ClusterBindingLister
+	clusterPolicyGetter  client.ClusterPolicyLister
+	clusterBindingLister client.ClusterPolicyBindingLister
 }
 
-func NewDefaultRuleResolver(policyGetter PolicyGetter, bindingLister BindingLister, clusterPolicyGetter ClusterPolicyGetter, clusterBindingLister ClusterBindingLister) *DefaultRuleResolver {
+func NewDefaultRuleResolver(policyGetter client.PoliciesListerNamespacer, bindingLister client.PolicyBindingsListerNamespacer, clusterPolicyGetter client.ClusterPolicyLister, clusterBindingLister client.ClusterPolicyBindingLister) *DefaultRuleResolver {
 	return &DefaultRuleResolver{policyGetter, bindingLister, clusterPolicyGetter, clusterBindingLister}
 }
 
 type AuthorizationRuleResolver interface {
-	GetRoleBindings(ctx kapi.Context) ([]authorizationinterfaces.RoleBinding, error)
+	GetRoleBindings(namespace string) ([]authorizationinterfaces.RoleBinding, error)
 	GetRole(roleBinding authorizationinterfaces.RoleBinding) (authorizationinterfaces.Role, error)
-	// GetEffectivePolicyRules returns the list of rules that apply to a given user in a given namespace and error.  If an error is returned, the slice of
+	// RulesFor returns the list of rules that apply to a given user in a given namespace and error.  If an error is returned, the slice of
 	// PolicyRules may not be complete, but it contains all retrievable rules.  This is done because policy rules are purely additive and policy determinations
 	// can be made on the basis of those rules that are found.
-	GetEffectivePolicyRules(ctx kapi.Context) ([]authorizationapi.PolicyRule, error)
+	RulesFor(info user.Info, namespace string) ([]authorizationapi.PolicyRule, error)
 }
 
-type PolicyGetter interface {
-	GetPolicy(ctx kapi.Context, id string) (*authorizationapi.Policy, error)
-}
+func (a *DefaultRuleResolver) GetRoleBindings(namespace string) ([]authorizationinterfaces.RoleBinding, error) {
+	clusterBindings, clusterErr := a.clusterBindingLister.List(kapi.ListOptions{})
 
-type BindingLister interface {
-	ListPolicyBindings(ctx kapi.Context, options *kapi.ListOptions) (*authorizationapi.PolicyBindingList, error)
-}
+	var namespaceBindings *authorizationapi.PolicyBindingList
+	var namespaceErr error
+	if a.bindingLister != nil && len(namespace) > 0 {
+		namespaceBindings, namespaceErr = a.bindingLister.PolicyBindings(namespace).List(kapi.ListOptions{})
+	}
 
-type ClusterPolicyGetter interface {
-	GetClusterPolicy(ctx kapi.Context, id string) (*authorizationapi.ClusterPolicy, error)
-}
-
-type ClusterBindingLister interface {
-	ListClusterPolicyBindings(ctx kapi.Context, options *kapi.ListOptions) (*authorizationapi.ClusterPolicyBindingList, error)
-}
-
-func (a *DefaultRuleResolver) GetRoleBindings(ctx kapi.Context) ([]authorizationinterfaces.RoleBinding, error) {
-	namespace := kapi.NamespaceValue(ctx)
-
-	if len(namespace) == 0 {
-		policyBindingList, err := a.clusterBindingLister.ListClusterPolicyBindings(ctx, &kapi.ListOptions{})
-		if err != nil {
-			return nil, err
-		}
-
-		ret := make([]authorizationinterfaces.RoleBinding, 0, len(policyBindingList.Items))
-		for _, policyBinding := range policyBindingList.Items {
+	// return all loaded bindings
+	expect := 0
+	if clusterBindings != nil {
+		expect += len(clusterBindings.Items)
+	}
+	if namespaceBindings != nil {
+		expect += len(namespaceBindings.Items)
+	}
+	bindings := make([]authorizationinterfaces.RoleBinding, 0, expect)
+	if clusterBindings != nil {
+		for _, policyBinding := range clusterBindings.Items {
 			for _, value := range policyBinding.RoleBindings {
-				ret = append(ret, authorizationinterfaces.NewClusterRoleBindingAdapter(value))
+				bindings = append(bindings, authorizationinterfaces.NewClusterRoleBindingAdapter(value))
 			}
 		}
-		return ret, nil
 	}
-
-	policyBindingList, err := a.bindingLister.ListPolicyBindings(ctx, &kapi.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	ret := make([]authorizationinterfaces.RoleBinding, 0, len(policyBindingList.Items))
-	for _, policyBinding := range policyBindingList.Items {
-		for _, value := range policyBinding.RoleBindings {
-			ret = append(ret, authorizationinterfaces.NewLocalRoleBindingAdapter(value))
+	if namespaceBindings != nil {
+		for _, policyBinding := range namespaceBindings.Items {
+			for _, value := range policyBinding.RoleBindings {
+				bindings = append(bindings, authorizationinterfaces.NewLocalRoleBindingAdapter(value))
+			}
 		}
 	}
-	return ret, nil
+
+	// return all errors
+	var errs []error
+	if clusterErr != nil {
+		errs = append(errs, clusterErr)
+	}
+	if namespaceErr != nil {
+		errs = append(errs, namespaceErr)
+	}
+
+	return bindings, kerrors.NewAggregate(errs)
 }
 
 func (a *DefaultRuleResolver) GetRole(roleBinding authorizationinterfaces.RoleBinding) (authorizationinterfaces.Role, error) {
 	namespace := roleBinding.RoleRef().Namespace
 	name := roleBinding.RoleRef().Name
-	ctx := kapi.WithNamespace(kapi.NewContext(), namespace)
 
 	if len(namespace) == 0 {
-
-		policy, err := a.clusterPolicyGetter.GetClusterPolicy(ctx, authorizationapi.PolicyName)
+		policy, err := a.clusterPolicyGetter.Get(authorizationapi.PolicyName)
 		if kapierror.IsNotFound(err) {
 			return nil, kapierror.NewNotFound(authorizationapi.Resource("role"), name)
 		}
@@ -105,7 +99,11 @@ func (a *DefaultRuleResolver) GetRole(roleBinding authorizationinterfaces.RoleBi
 		return authorizationinterfaces.NewClusterRoleAdapter(role), nil
 	}
 
-	policy, err := a.policyGetter.GetPolicy(ctx, authorizationapi.PolicyName)
+	if a.policyGetter == nil {
+		return nil, kapierror.NewNotFound(authorizationapi.Resource("role"), name)
+	}
+
+	policy, err := a.policyGetter.Policies(namespace).Get(authorizationapi.PolicyName)
 	if kapierror.IsNotFound(err) {
 		return nil, kapierror.NewNotFound(authorizationapi.Resource("role"), name)
 	}
@@ -122,23 +120,20 @@ func (a *DefaultRuleResolver) GetRole(roleBinding authorizationinterfaces.RoleBi
 
 }
 
-// GetEffectivePolicyRules returns the list of rules that apply to a given user in a given namespace and error.  If an error is returned, the slice of
+// RulesFor returns the list of rules that apply to a given user in a given namespace and error.  If an error is returned, the slice of
 // PolicyRules may not be complete, but it contains all retrievable rules.  This is done because policy rules are purely additive and policy determinations
 // can be made on the basis of those rules that are found.
-func (a *DefaultRuleResolver) GetEffectivePolicyRules(ctx kapi.Context) ([]authorizationapi.PolicyRule, error) {
-	roleBindings, err := a.GetRoleBindings(ctx)
+func (a *DefaultRuleResolver) RulesFor(user user.Info, namespace string) ([]authorizationapi.PolicyRule, error) {
+	var errs []error
+
+	roleBindings, err := a.GetRoleBindings(namespace)
 	if err != nil {
-		return nil, err
-	}
-	user, exists := kapi.UserFrom(ctx)
-	if !exists {
-		return nil, errors.New("user missing from context")
+		errs = append(errs, err)
 	}
 
-	errs := []error{}
 	rules := make([]authorizationapi.PolicyRule, 0, len(roleBindings))
 	for _, roleBinding := range roleBindings {
-		if !appliesToUser(roleBinding.Users(), roleBinding.Groups(), user) {
+		if !roleBinding.AppliesToUser(user) {
 			continue
 		}
 
@@ -155,6 +150,7 @@ func (a *DefaultRuleResolver) GetEffectivePolicyRules(ctx kapi.Context) ([]autho
 
 	return rules, kerrors.NewAggregate(errs)
 }
+
 func appliesToUser(ruleUsers, ruleGroups sets.String, user user.Info) bool {
 	if ruleUsers.Has(user.GetName()) {
 		return true

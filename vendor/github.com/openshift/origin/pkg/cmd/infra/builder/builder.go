@@ -1,38 +1,44 @@
 package builder
 
 import (
+	"os"
+
 	"github.com/spf13/cobra"
 
+	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+
 	"github.com/openshift/origin/pkg/build/builder/cmd"
-	"github.com/openshift/origin/pkg/version"
+	ocmd "github.com/openshift/origin/pkg/cmd/cli/cmd"
+	"github.com/openshift/origin/pkg/cmd/templates"
 )
 
-const (
-	stiBuilderLong = `
-Perform a Source-to-Image build
+var (
+	s2iBuilderLong = templates.LongDesc(`
+		Perform a Source-to-Image build
 
-This command executes a Source-to-Image build using arguments passed via the environment.
-It expects to be run inside of a container.`
+		This command executes a Source-to-Image build using arguments passed via the environment.
+		It expects to be run inside of a container.`)
 
-	dockerBuilderLong = `
-Perform a Docker build
+	dockerBuilderLong = templates.LongDesc(`
+		Perform a Docker build
 
-This command executes a Docker build using arguments passed via the environment.
-It expects to be run inside of a container.`
+		This command executes a Docker build using arguments passed via the environment.
+		It expects to be run inside of a container.`)
 )
 
-// NewCommandSTIBuilder provides a CLI handler for STI build type
-func NewCommandSTIBuilder(name string) *cobra.Command {
+// NewCommandS2IBuilder provides a CLI handler for S2I build type
+func NewCommandS2IBuilder(name string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   name,
 		Short: "Run a Source-to-Image build",
-		Long:  stiBuilderLong,
+		Long:  s2iBuilderLong,
 		Run: func(c *cobra.Command, args []string) {
-			cmd.RunSTIBuild()
+			err := cmd.RunS2IBuild(c.OutOrStderr())
+			kcmdutil.CheckErr(err)
 		},
 	}
 
-	cmd.AddCommand(version.NewVersionCommand(name, false))
+	cmd.AddCommand(ocmd.NewCmdVersion(name, nil, os.Stdout, ocmd.VersionOptions{}))
 	return cmd
 }
 
@@ -43,9 +49,10 @@ func NewCommandDockerBuilder(name string) *cobra.Command {
 		Short: "Run a Docker build",
 		Long:  dockerBuilderLong,
 		Run: func(c *cobra.Command, args []string) {
-			cmd.RunDockerBuild()
+			err := cmd.RunDockerBuild(c.OutOrStderr())
+			kcmdutil.CheckErr(err)
 		},
 	}
-	cmd.AddCommand(version.NewVersionCommand(name, false))
+	cmd.AddCommand(ocmd.NewCmdVersion(name, nil, os.Stdout, ocmd.VersionOptions{}))
 	return cmd
 }

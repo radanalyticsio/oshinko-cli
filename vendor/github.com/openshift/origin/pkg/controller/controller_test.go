@@ -121,7 +121,7 @@ func TestRetryController_realFifoEventOrdering(t *testing.T) {
 		return obj.(testObj).id, nil
 	}
 
-	fifo := kcache.NewFIFO(keyFunc)
+	fifo := kcache.NewResyncableFIFO(keyFunc)
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
@@ -144,13 +144,13 @@ func TestRetryController_realFifoEventOrdering(t *testing.T) {
 	}
 
 	fifo.Add(testObj{"a", 1})
-	controller.handleOne(fifo.Pop())
+	controller.handleOne(kcache.Pop(fifo))
 
 	if e, a := 1, len(fifo.List()); e != a {
 		t.Fatalf("expected queue length %d, got %d", e, a)
 	}
 
-	obj := fifo.Pop()
+	obj := kcache.Pop(fifo)
 	if e, a := 2, obj.(testObj).value; e != a {
 		t.Fatalf("expected queued value %d, got %d", e, a)
 	}
@@ -163,7 +163,7 @@ func TestRetryController_ratelimit(t *testing.T) {
 	keyFunc := func(obj interface{}) (string, error) {
 		return "key", nil
 	}
-	fifo := kcache.NewFIFO(keyFunc)
+	fifo := kcache.NewResyncableFIFO(keyFunc)
 	limiter := &mockLimiter{}
 	retryManager := NewQueueRetryManager(fifo,
 		keyFunc,
@@ -195,8 +195,12 @@ func (l *mockLimiter) Accept() {
 
 func (l *mockLimiter) Stop() {}
 
-func (t *mockLimiter) Saturation() float64 {
-	return float64(0.0)
+func (l *mockLimiter) Saturation() float64 {
+	return 0.0
+}
+
+func (l *mockLimiter) QPS() float32 {
+	return 0.0
 }
 
 type testObj struct {
@@ -213,8 +217,10 @@ func (t *testFifo) AddIfNotPresent(obj interface{}) error {
 	return t.AddIfNotPresentFunc(obj)
 }
 
-func (t *testFifo) Pop() interface{} {
-	return t.PopFunc()
+func (t *testFifo) Pop(fn kcache.PopProcessFunc) (interface{}, error) {
+	obj := t.PopFunc()
+	err := fn(obj)
+	return obj, err
 }
 
 type testRetryManager struct {

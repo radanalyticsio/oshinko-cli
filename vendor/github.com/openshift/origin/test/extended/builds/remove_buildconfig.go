@@ -14,7 +14,7 @@ import (
 var _ = g.Describe("[builds][Conformance] remove all builds when build configuration is removed", func() {
 	defer g.GinkgoRecover()
 	var (
-		buildFixture = exutil.FixturePath("..", "extended", "fixtures", "test-build.json")
+		buildFixture = exutil.FixturePath("testdata", "test-build.json")
 		oc           = exutil.NewCLI("cli-remove-build", exutil.KubeConfigPath())
 	)
 
@@ -34,8 +34,9 @@ var _ = g.Describe("[builds][Conformance] remove all builds when build configura
 
 			g.By("starting multiple builds")
 			for i := range builds {
-				builds[i], err = oc.Run("start-build").Args("sample-build").Output()
+				stdout, _, err := exutil.StartBuild(oc, "sample-build", "-o=name")
 				o.Expect(err).NotTo(o.HaveOccurred())
+				builds[i] = stdout
 			}
 
 			g.By("deleting the buildconfig")
@@ -46,7 +47,7 @@ var _ = g.Describe("[builds][Conformance] remove all builds when build configura
 			err = wait.Poll(3*time.Second, 3*time.Minute, func() (bool, error) {
 				out, err := oc.Run("get").Args("-o", "name", "builds").Output()
 				o.Expect(err).NotTo(o.HaveOccurred())
-				if len(out) == 0 {
+				if out == "No resources found." {
 					return true, nil
 				}
 				return false, nil

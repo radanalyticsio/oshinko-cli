@@ -141,6 +141,19 @@ func (c *AssetConfig) buildAssetHandler() (http.Handler, error) {
 	return handler, nil
 }
 
+// Have to convert to arrays because go templates are limited and we need to be able to know
+// if we are on the last index for trailing commas in JSON
+func extensionPropertyArray(extensionProperties map[string]string) []assets.WebConsoleExtensionProperty {
+	extensionPropsArray := []assets.WebConsoleExtensionProperty{}
+	for key, value := range extensionProperties {
+		extensionPropsArray = append(extensionPropsArray, assets.WebConsoleExtensionProperty{
+			Key:   key,
+			Value: value,
+		})
+	}
+	return extensionPropsArray
+}
+
 func (c *AssetConfig) addHandlers(mux *http.ServeMux) error {
 	assetHandler, err := c.buildAssetHandler()
 	if err != nil {
@@ -207,6 +220,7 @@ func (c *AssetConfig) addHandlers(mux *http.ServeMux) error {
 		KubernetesPrefix:      KubernetesAPIPrefix,
 		KubernetesResources:   k8sResources.List(),
 		OAuthAuthorizeURI:     OpenShiftOAuthAuthorizeURL(masterURL.String()),
+		OAuthTokenURI:         OpenShiftOAuthTokenURL(masterURL.String()),
 		OAuthRedirectBase:     c.Options.PublicURL,
 		OAuthClientID:         OpenShiftWebConsoleClientID,
 		LogoutURI:             c.Options.LogoutURL,
@@ -220,8 +234,12 @@ func (c *AssetConfig) addHandlers(mux *http.ServeMux) error {
 		KubernetesVersion: kVersionInfo.GitVersion,
 		OpenShiftVersion:  oVersionInfo.GitVersion,
 	}
+
+	extensionProps := assets.WebConsoleExtensionProperties{
+		ExtensionProperties: extensionPropertyArray(c.Options.ExtensionProperties),
+	}
 	configPath := path.Join(publicURL.Path, "config.js")
-	configHandler, err := assets.GeneratedConfigHandler(config, versionInfo)
+	configHandler, err := assets.GeneratedConfigHandler(config, versionInfo, extensionProps)
 	if err != nil {
 		return err
 	}
@@ -245,9 +263,10 @@ func (c *AssetConfig) addHandlers(mux *http.ServeMux) error {
 
 	// Extension files
 	for _, extConfig := range c.Options.Extensions {
-		extPath := path.Join(publicURL.Path, "extensions", extConfig.Name) + "/"
+		extBasePath := path.Join(publicURL.Path, "extensions", extConfig.Name)
+		extPath := extBasePath + "/"
 		extHandler := assets.AssetExtensionHandler(extConfig.SourceDirectory, extPath, extConfig.HTML5Mode)
-		mux.Handle(extPath, http.StripPrefix(extPath, extHandler))
+		mux.Handle(extPath, http.StripPrefix(extBasePath, extHandler))
 	}
 
 	return nil

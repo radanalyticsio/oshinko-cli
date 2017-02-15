@@ -2,16 +2,31 @@ package admission
 
 import (
 	"k8s.io/kubernetes/pkg/admission"
+	"k8s.io/kubernetes/pkg/client/restclient"
+	"k8s.io/kubernetes/pkg/quota"
 
 	"github.com/openshift/origin/pkg/authorization/authorizer"
+	"github.com/openshift/origin/pkg/authorization/authorizer/adapter"
 	"github.com/openshift/origin/pkg/client"
+	configapi "github.com/openshift/origin/pkg/cmd/server/api"
+	"github.com/openshift/origin/pkg/controller/shared"
+	imageapi "github.com/openshift/origin/pkg/image/api"
 	"github.com/openshift/origin/pkg/project/cache"
+	"github.com/openshift/origin/pkg/quota/controller/clusterquotamapping"
+	usercache "github.com/openshift/origin/pkg/user/cache"
 )
 
 type PluginInitializer struct {
-	OpenshiftClient client.Interface
-	ProjectCache    *cache.ProjectCache
-	Authorizer      authorizer.Authorizer
+	OpenshiftClient       client.Interface
+	ProjectCache          *cache.ProjectCache
+	OriginQuotaRegistry   quota.Registry
+	Authorizer            authorizer.Authorizer
+	JenkinsPipelineConfig configapi.JenkinsPipelineConfig
+	RESTClientConfig      restclient.Config
+	Informers             shared.InformerFactory
+	ClusterQuotaMapper    clusterquotamapping.ClusterQuotaMapper
+	DefaultRegistryFn     imageapi.DefaultRegistryFunc
+	GroupCache            *usercache.GroupCache
 }
 
 // Initialize will check the initialization interfaces implemented by each plugin
@@ -24,8 +39,40 @@ func (i *PluginInitializer) Initialize(plugins []admission.Interface) {
 		if wantsProjectCache, ok := plugin.(WantsProjectCache); ok {
 			wantsProjectCache.SetProjectCache(i.ProjectCache)
 		}
+		if wantsOriginQuotaRegistry, ok := plugin.(WantsOriginQuotaRegistry); ok {
+			wantsOriginQuotaRegistry.SetOriginQuotaRegistry(i.OriginQuotaRegistry)
+		}
 		if wantsAuthorizer, ok := plugin.(WantsAuthorizer); ok {
 			wantsAuthorizer.SetAuthorizer(i.Authorizer)
+		}
+		if kubeWantsAuthorizer, ok := plugin.(admission.WantsAuthorizer); ok {
+			kubeAuthorizer, err := adapter.NewAuthorizer(i.Authorizer)
+			// this shouldn't happen
+			if err != nil {
+				panic(err)
+			}
+			kubeWantsAuthorizer.SetAuthorizer(kubeAuthorizer)
+		}
+		if wantsJenkinsPipelineConfig, ok := plugin.(WantsJenkinsPipelineConfig); ok {
+			wantsJenkinsPipelineConfig.SetJenkinsPipelineConfig(i.JenkinsPipelineConfig)
+		}
+		if wantsRESTClientConfig, ok := plugin.(WantsRESTClientConfig); ok {
+			wantsRESTClientConfig.SetRESTClientConfig(i.RESTClientConfig)
+		}
+		if wantsInformers, ok := plugin.(WantsInformers); ok {
+			wantsInformers.SetInformers(i.Informers)
+		}
+		if wantsInformerFactory, ok := plugin.(admission.WantsInformerFactory); ok {
+			wantsInformerFactory.SetInformerFactory(i.Informers.KubernetesInformers())
+		}
+		if wantsClusterQuotaMapper, ok := plugin.(WantsClusterQuotaMapper); ok {
+			wantsClusterQuotaMapper.SetClusterQuotaMapper(i.ClusterQuotaMapper)
+		}
+		if wantsDefaultRegistryFunc, ok := plugin.(WantsDefaultRegistryFunc); ok {
+			wantsDefaultRegistryFunc.SetDefaultRegistryFunc(i.DefaultRegistryFn)
+		}
+		if wantsGroupCache, ok := plugin.(WantsGroupCache); ok {
+			wantsGroupCache.SetGroupCache(i.GroupCache)
 		}
 	}
 }

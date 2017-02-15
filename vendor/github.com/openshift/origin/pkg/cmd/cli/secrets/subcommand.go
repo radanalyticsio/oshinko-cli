@@ -4,9 +4,10 @@ import (
 	"io"
 
 	"github.com/spf13/cobra"
+	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 
 	"github.com/openshift/origin/pkg/build/builder/cmd/scmauth"
-	cmdutil "github.com/openshift/origin/pkg/cmd/util"
+	"github.com/openshift/origin/pkg/cmd/templates"
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 )
 
@@ -25,23 +26,23 @@ const (
 	SourceGitConfig = scmauth.GitConfigName
 )
 
-const (
-	secretsLong = `
-Manage secrets in your project
+var (
+	secretsLong = templates.LongDesc(`
+    Manage secrets in your project
 
-Secrets are used to store confidential information that should not be contained inside of an image.
-They are commonly used to hold things like keys for authentication to other internal systems like 
-Docker registries.`
+    Secrets are used to store confidential information that should not be contained inside of an image.
+    They are commonly used to hold things like keys for authentication to other internal systems like
+    Docker registries.`)
 )
 
-func NewCmdSecrets(name, fullName string, f *clientcmd.Factory, reader io.Reader, out io.Writer, ocEditFullName string) *cobra.Command {
+func NewCmdSecrets(name, fullName string, f *clientcmd.Factory, reader io.Reader, out, errOut io.Writer, ocEditFullName string) *cobra.Command {
 	// Parent command to which all subcommands are added.
 	cmds := &cobra.Command{
 		Use:     name,
 		Short:   "Manage secrets",
 		Long:    secretsLong,
 		Aliases: []string{"secret"},
-		Run:     cmdutil.DefaultSubCommandRun(out),
+		Run:     cmdutil.DefaultSubCommandRun(errOut),
 	}
 
 	newSecretFullName := fullName + " " + NewSecretRecommendedCommandName
@@ -49,7 +50,8 @@ func NewCmdSecrets(name, fullName string, f *clientcmd.Factory, reader io.Reader
 	cmds.AddCommand(NewCmdCreateDockerConfigSecret(CreateDockerConfigSecretRecommendedName, fullName+" "+CreateDockerConfigSecretRecommendedName, f.Factory, out, newSecretFullName, ocEditFullName))
 	cmds.AddCommand(NewCmdCreateBasicAuthSecret(CreateBasicAuthSecretRecommendedCommandName, fullName+" "+CreateBasicAuthSecretRecommendedCommandName, f.Factory, reader, out, newSecretFullName, ocEditFullName))
 	cmds.AddCommand(NewCmdCreateSSHAuthSecret(CreateSSHAuthSecretRecommendedCommandName, fullName+" "+CreateSSHAuthSecretRecommendedCommandName, f.Factory, out, newSecretFullName, ocEditFullName))
-	cmds.AddCommand(NewCmdAddSecret(AddSecretRecommendedName, fullName+" "+AddSecretRecommendedName, f.Factory, out))
+	cmds.AddCommand(NewCmdLinkSecret(LinkSecretRecommendedName, fullName+" "+LinkSecretRecommendedName, f.Factory, out))
+	cmds.AddCommand(NewCmdUnlinkSecret(UnlinkSecretRecommendedName, fullName+" "+UnlinkSecretRecommendedName, f.Factory, out))
 
 	return cmds
 }

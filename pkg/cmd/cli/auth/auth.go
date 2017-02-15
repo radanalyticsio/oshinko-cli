@@ -12,8 +12,8 @@ import (
 	"k8s.io/kubernetes/pkg/api/unversioned"
 	"k8s.io/kubernetes/pkg/client/restclient"
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
+	kclientcmd "k8s.io/kubernetes/pkg/client/unversioned/clientcmd"
 	kclientcmdapi "k8s.io/kubernetes/pkg/client/unversioned/clientcmd/api"
-	kcmdconfig "k8s.io/kubernetes/pkg/kubectl/cmd/config"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/util/sets"
 
@@ -22,7 +22,6 @@ import (
 	"github.com/openshift/origin/pkg/cmd/flagtypes"
 	osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	"github.com/openshift/origin/pkg/user/api"
-
 )
 
 //=====================================
@@ -52,7 +51,7 @@ type AuthOptions struct {
 
 	Token string
 
-	PathOptions *kcmdconfig.PathOptions
+	PathOptions *kclientcmd.PathOptions
 }
 
 func (o *AuthOptions) tokenProvided() bool {
@@ -226,7 +225,7 @@ func (o *AuthOptions) getClientConfig() (*restclient.Config, error) {
 	}
 
 	// check for matching api version
-	if !o.APIVersion.IsEmpty() {
+	if !o.APIVersion.Empty() {
 		clientConfig.GroupVersion = &o.APIVersion
 	}
 
@@ -280,7 +279,7 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 				o.Username = me.Name
 				o.Config = clientConfig
 
-				msg+=fmt.Sprintf("Logged into %q as %q using the token provided.\n\n", o.Config.Host, o.Username)
+				msg += fmt.Sprintf("Logged into %q as %q using the token provided.\n\n", o.Config.Host, o.Username)
 				return msg, nil
 			}
 
@@ -294,12 +293,12 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 		return "", fmt.Errorf("The token is not provided.\n\n")
 	}
 
-	msg+=fmt.Sprintf("Login successful.\n\n")
+	msg += fmt.Sprintf("Login successful.\n\n")
 
 	return msg, nil
 }
 
-func (o *AuthOptions) GatherProjectInfo() (string,error) {
+func (o *AuthOptions) GatherProjectInfo() (string, error) {
 	var msg string
 	me, err := o.whoAmI()
 	if err != nil {
@@ -319,7 +318,7 @@ func (o *AuthOptions) GatherProjectInfo() (string,error) {
 
 	switch len(projectsItems) {
 	case 0:
-		msg+=fmt.Sprintf(`You don't have any projects. You can try to create a new project, by running
+		msg += fmt.Sprintf(`You don't have any projects. You can try to create a new project, by running
 
     $ oc new-project <projectname>
 
@@ -328,7 +327,7 @@ func (o *AuthOptions) GatherProjectInfo() (string,error) {
 
 	case 1:
 		o.Project = projectsItems[0].Name
-		msg+=fmt.Sprintf("Using project %q.\n", o.Project)
+		msg += fmt.Sprintf("Using project %q.\n", o.Project)
 
 	default:
 		projects := sets.String{}
@@ -351,16 +350,16 @@ func (o *AuthOptions) GatherProjectInfo() (string,error) {
 		}
 		o.Project = current.Name
 
-		msg+=fmt.Sprintf( "You have access to the following projects and can switch between them with 'oc project <projectname>':\n\n")
+		msg += fmt.Sprintf("You have access to the following projects and can switch between them with 'oc project <projectname>':\n\n")
 		for _, p := range projects.List() {
 			if o.Project == p {
-				msg+=fmt.Sprintf("  * %s (current)\n", p)
+				msg += fmt.Sprintf("  * %s (current)\n", p)
 			} else {
-				msg+=fmt.Sprintf("  * %s\n", p)
+				msg += fmt.Sprintf("  * %s\n", p)
 			}
 		}
-		msg+=fmt.Sprintf("\n")
-		msg+=fmt.Sprintf("Using project %q.\n", o.Project)
+		msg += fmt.Sprintf("\n")
+		msg += fmt.Sprintf("Using project %q.\n", o.Project)
 	}
 
 	return msg, nil

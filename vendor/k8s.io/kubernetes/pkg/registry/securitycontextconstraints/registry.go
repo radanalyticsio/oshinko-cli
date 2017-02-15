@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -75,7 +75,7 @@ func (s *storage) CreateSecurityContextConstraint(ctx api.Context, scc *api.Secu
 }
 
 func (s *storage) UpdateSecurityContextConstraint(ctx api.Context, scc *api.SecurityContextConstraints) error {
-	_, _, err := s.Update(ctx, scc)
+	_, _, err := s.Update(ctx, scc.Name, rest.DefaultUpdatedObjectInfo(scc, api.Scheme))
 	return err
 }
 

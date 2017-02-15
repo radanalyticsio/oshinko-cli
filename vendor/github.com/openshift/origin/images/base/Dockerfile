@@ -1,6 +1,6 @@
 #
 # This is the base image from which all OpenShift Origin images inherit. Only packages
-# common to all downstream images should be here. Depends on Centos 7.2+
+# common to all downstream images should be here. Depends on Centos 7.2+.
 #
 # The standard name for this image is openshift/origin-base
 #

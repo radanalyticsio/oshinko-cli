@@ -1,5 +1,5 @@
 /*
-Copyright 2015 The Kubernetes Authors All rights reserved.
+Copyright 2015 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -51,6 +51,8 @@ func (handler *osIOHandler) WriteFile(filename string, data []byte, perm os.File
 }
 
 // given a disk path like /dev/sdx, find the devicemapper parent
+// TODO #23192 Convert this code to use the generic code in ../util
+// which is used by the iSCSI implementation
 func findMultipathDeviceMapper(disk string, io ioHandler) string {
 	sys_path := "/sys/block/"
 	if dirs, err := io.ReadDir(sys_path); err == nil {

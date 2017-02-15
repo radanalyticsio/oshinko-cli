@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,16 +18,16 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/etcdserver"
+	"github.com/coreos/etcd/etcdserver/api"
 	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
+	"github.com/coreos/etcd/etcdserver/membership"
 	"github.com/coreos/etcd/pkg/types"
 	"golang.org/x/net/context"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 )
 
 type ClusterServer struct {
-	cluster   etcdserver.Cluster
+	cluster   api.Cluster
 	server    etcdserver.Server
 	raftTimer etcdserver.RaftTimer
 }
@@ -43,56 +43,36 @@ func NewClusterServer(s *etcdserver.EtcdServer) *ClusterServer {
 func (cs *ClusterServer) MemberAdd(ctx context.Context, r *pb.MemberAddRequest) (*pb.MemberAddResponse, error) {
 	urls, err := types.NewURLs(r.PeerURLs)
 	if err != nil {
-		return nil, rpctypes.ErrMemberBadURLs
+		return nil, rpctypes.ErrGRPCMemberBadURLs
 	}
 
 	now := time.Now()
-	m := etcdserver.NewMember("", urls, "", &now)
-	err = cs.server.AddMember(ctx, *m)
-	switch {
-	case err == etcdserver.ErrIDExists:
-		return nil, rpctypes.ErrMemberExist
-	case err == etcdserver.ErrPeerURLexists:
-		return nil, rpctypes.ErrPeerURLExist
-	case err != nil:
-		return nil, grpc.Errorf(codes.Internal, err.Error())
+	m := membership.NewMember("", urls, "", &now)
+	if err = cs.server.AddMember(ctx, *m); err != nil {
+		return nil, togRPCError(err)
 	}
 
 	return &pb.MemberAddResponse{
 		Header: cs.header(),
-		Member: &pb.Member{ID: uint64(m.ID), IsLeader: m.ID == cs.server.Leader(), PeerURLs: m.PeerURLs},
+		Member: &pb.Member{ID: uint64(m.ID), PeerURLs: m.PeerURLs},
 	}, nil
 }
 
 func (cs *ClusterServer) MemberRemove(ctx context.Context, r *pb.MemberRemoveRequest) (*pb.MemberRemoveResponse, error) {
-	err := cs.server.RemoveMember(ctx, r.ID)
-	switch {
-	case err == etcdserver.ErrIDRemoved:
-		fallthrough
-	case err == etcdserver.ErrIDNotFound:
-		return nil, rpctypes.ErrMemberNotFound
-	case err != nil:
-		return nil, grpc.Errorf(codes.Internal, err.Error())
+	if err := cs.server.RemoveMember(ctx, r.ID); err != nil {
+		return nil, togRPCError(err)
 	}
-
 	return &pb.MemberRemoveResponse{Header: cs.header()}, nil
 }
 
 func (cs *ClusterServer) MemberUpdate(ctx context.Context, r *pb.MemberUpdateRequest) (*pb.MemberUpdateResponse, error) {
-	m := etcdserver.Member{
+	m := membership.Member{
 		ID:             types.ID(r.ID),
-		RaftAttributes: etcdserver.RaftAttributes{PeerURLs: r.PeerURLs},
+		RaftAttributes: membership.RaftAttributes{PeerURLs: r.PeerURLs},
 	}
-	err := cs.server.UpdateMember(ctx, m)
-	switch {
-	case err == etcdserver.ErrPeerURLexists:
-		return nil, rpctypes.ErrPeerURLExist
-	case err == etcdserver.ErrIDNotFound:
-		return nil, rpctypes.ErrMemberNotFound
-	case err != nil:
-		return nil, grpc.Errorf(codes.Internal, err.Error())
+	if err := cs.server.UpdateMember(ctx, m); err != nil {
+		return nil, togRPCError(err)
 	}
-
 	return &pb.MemberUpdateResponse{Header: cs.header()}, nil
 }
 
@@ -104,7 +84,6 @@ func (cs *ClusterServer) MemberList(ctx context.Context, r *pb.MemberListRequest
 		protoMembs[i] = &pb.Member{
 			Name:       membs[i].Name,
 			ID:         uint64(membs[i].ID),
-			IsLeader:   membs[i].ID == cs.server.Leader(),
 			PeerURLs:   membs[i].PeerURLs,
 			ClientURLs: membs[i].ClientURLs,
 		}

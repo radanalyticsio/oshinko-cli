@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -376,7 +376,7 @@ func TestMigratingFileSourceMissingSkip(t *testing.T) {
 	}
 }
 
-func ExampleNoMergingOnExplicitPaths() {
+func Example_noMergingOnExplicitPaths() {
 	commandLineFile, _ := ioutil.TempFile("", "")
 	defer os.Remove(commandLineFile.Name())
 	envVarFile, _ := ioutil.TempFile("", "")
@@ -423,7 +423,7 @@ func ExampleNoMergingOnExplicitPaths() {
 	//     token: red-token
 }
 
-func ExampleMergingSomeWithConflict() {
+func Example_mergingSomeWithConflict() {
 	commandLineFile, _ := ioutil.TempFile("", "")
 	defer os.Remove(commandLineFile.Name())
 	envVarFile, _ := ioutil.TempFile("", "")
@@ -476,7 +476,7 @@ func ExampleMergingSomeWithConflict() {
 	//     token: yellow-token
 }
 
-func ExampleMergingEverythingNoConflicts() {
+func Example_mergingEverythingNoConflicts() {
 	commandLineFile, _ := ioutil.TempFile("", "")
 	defer os.Remove(commandLineFile.Name())
 	envVarFile, _ := ioutil.TempFile("", "")

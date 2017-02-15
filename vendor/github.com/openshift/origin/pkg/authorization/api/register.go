@@ -6,6 +6,7 @@ import (
 )
 
 const GroupName = ""
+const FutureGroupName = "authorization.openshift.io"
 
 // SchemeGroupVersion is group version used to register these objects
 var SchemeGroupVersion = unversioned.GroupVersion{Group: GroupName, Version: runtime.APIVersionInternal}
@@ -20,13 +21,13 @@ func Resource(resource string) unversioned.GroupResource {
 	return SchemeGroupVersion.WithResource(resource).GroupResource()
 }
 
-func AddToScheme(scheme *runtime.Scheme) {
-	// Add the API to Scheme.
-	addKnownTypes(scheme)
-}
+var (
+	SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
+	AddToScheme   = SchemeBuilder.AddToScheme
+)
 
 // Adds the list of known types to api.Scheme.
-func addKnownTypes(scheme *runtime.Scheme) {
+func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
 		&Role{},
 		&RoleBinding{},
@@ -38,6 +39,7 @@ func addKnownTypes(scheme *runtime.Scheme) {
 		&RoleList{},
 
 		&SelfSubjectRulesReview{},
+		&SubjectRulesReview{},
 		&ResourceAccessReview{},
 		&SubjectAccessReview{},
 		&LocalResourceAccessReview{},
@@ -54,32 +56,9 @@ func addKnownTypes(scheme *runtime.Scheme) {
 		&ClusterPolicyBindingList{},
 		&ClusterRoleBindingList{},
 		&ClusterRoleList{},
+
+		&RoleBindingRestriction{},
+		&RoleBindingRestrictionList{},
 	)
+	return nil
 }
-
-func (obj *ClusterRoleList) GetObjectKind() unversioned.ObjectKind          { return &obj.TypeMeta }
-func (obj *ClusterRoleBindingList) GetObjectKind() unversioned.ObjectKind   { return &obj.TypeMeta }
-func (obj *ClusterPolicyBindingList) GetObjectKind() unversioned.ObjectKind { return &obj.TypeMeta }
-func (obj *ClusterPolicyList) GetObjectKind() unversioned.ObjectKind        { return &obj.TypeMeta }
-func (obj *ClusterPolicyBinding) GetObjectKind() unversioned.ObjectKind     { return &obj.TypeMeta }
-func (obj *ClusterPolicy) GetObjectKind() unversioned.ObjectKind            { return &obj.TypeMeta }
-func (obj *ClusterRoleBinding) GetObjectKind() unversioned.ObjectKind       { return &obj.TypeMeta }
-func (obj *ClusterRole) GetObjectKind() unversioned.ObjectKind              { return &obj.TypeMeta }
-
-func (obj *IsPersonalSubjectAccessReview) GetObjectKind() unversioned.ObjectKind { return &obj.TypeMeta }
-func (obj *SubjectAccessReviewResponse) GetObjectKind() unversioned.ObjectKind   { return &obj.TypeMeta }
-func (obj *ResourceAccessReviewResponse) GetObjectKind() unversioned.ObjectKind  { return &obj.TypeMeta }
-func (obj *LocalSubjectAccessReview) GetObjectKind() unversioned.ObjectKind      { return &obj.TypeMeta }
-func (obj *LocalResourceAccessReview) GetObjectKind() unversioned.ObjectKind     { return &obj.TypeMeta }
-func (obj *SubjectAccessReview) GetObjectKind() unversioned.ObjectKind           { return &obj.TypeMeta }
-func (obj *ResourceAccessReview) GetObjectKind() unversioned.ObjectKind          { return &obj.TypeMeta }
-func (obj *SelfSubjectRulesReview) GetObjectKind() unversioned.ObjectKind        { return &obj.TypeMeta }
-
-func (obj *RoleList) GetObjectKind() unversioned.ObjectKind          { return &obj.TypeMeta }
-func (obj *RoleBindingList) GetObjectKind() unversioned.ObjectKind   { return &obj.TypeMeta }
-func (obj *PolicyBindingList) GetObjectKind() unversioned.ObjectKind { return &obj.TypeMeta }
-func (obj *PolicyList) GetObjectKind() unversioned.ObjectKind        { return &obj.TypeMeta }
-func (obj *PolicyBinding) GetObjectKind() unversioned.ObjectKind     { return &obj.TypeMeta }
-func (obj *Policy) GetObjectKind() unversioned.ObjectKind            { return &obj.TypeMeta }
-func (obj *RoleBinding) GetObjectKind() unversioned.ObjectKind       { return &obj.TypeMeta }
-func (obj *Role) GetObjectKind() unversioned.ObjectKind              { return &obj.TypeMeta }

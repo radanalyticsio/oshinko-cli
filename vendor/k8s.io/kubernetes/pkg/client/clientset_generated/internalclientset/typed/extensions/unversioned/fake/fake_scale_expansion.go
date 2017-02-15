@@ -1,5 +1,5 @@
 /*
-Copyright 2015 The Kubernetes Authors All rights reserved.
+Copyright 2015 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package fake
 
 import (
+	"k8s.io/kubernetes/pkg/api/unversioned"
 	"k8s.io/kubernetes/pkg/apis/extensions"
 	"k8s.io/kubernetes/pkg/client/testing/core"
 )
@@ -25,7 +26,7 @@ func (c *FakeScales) Get(kind string, name string) (result *extensions.Scale, er
 	action := core.GetActionImpl{}
 	action.Verb = "get"
 	action.Namespace = c.ns
-	action.Resource = kind
+	action.Resource = unversioned.GroupVersionResource{Resource: kind}
 	action.Subresource = "scale"
 	action.Name = name
 	obj, err := c.Fake.Invokes(action, &extensions.Scale{})
@@ -37,7 +38,7 @@ func (c *FakeScales) Update(kind string, scale *extensions.Scale) (result *exten
 	action := core.UpdateActionImpl{}
 	action.Verb = "update"
 	action.Namespace = c.ns
-	action.Resource = kind
+	action.Resource = unversioned.GroupVersionResource{Resource: kind}
 	action.Subresource = "scale"
 	action.Object = scale
 	obj, err := c.Fake.Invokes(action, scale)

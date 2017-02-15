@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ import (
 func (c *FakeDeployments) Rollback(deploymentRollback *extensions.DeploymentRollback) error {
 	action := core.CreateActionImpl{}
 	action.Verb = "create"
-	action.Resource = "deployments"
+	action.Resource = deploymentsResource
 	action.Subresource = "rollback"
 	action.Object = deploymentRollback
 

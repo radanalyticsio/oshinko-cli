@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -62,7 +62,7 @@ func testScheme(t *testing.T) (*runtime.Scheme, runtime.Codec) {
 }
 
 func newEtcdHelper(client etcd.Client, codec runtime.Codec, prefix string) etcdHelper {
-	return *NewEtcdStorage(client, codec, prefix, false).(*etcdHelper)
+	return *NewEtcdStorage(client, codec, prefix, false, etcdtest.DeserializationCacheSize).(*etcdHelper)
 }
 
 // Returns an encoded version of api.Pod with the given name.
@@ -154,10 +154,11 @@ func TestListFiltered(t *testing.T) {
 	}
 
 	createPodList(t, helper, &list)
-	filter := func(obj runtime.Object) bool {
+	filterFunc := func(obj runtime.Object) bool {
 		pod := obj.(*api.Pod)
 		return pod.Name == "bar"
 	}
+	filter := storage.NewSimpleFilter(filterFunc, storage.NoTriggerFunc)
 
 	var got api.PodList
 	err := helper.List(context.TODO(), key, "", filter, &got)
@@ -229,7 +230,7 @@ func TestGet(t *testing.T) {
 		Spec:       apitesting.DeepEqualSafePodSpec(),
 	}
 	var got api.Pod
-	if err := helper.Set(context.TODO(), key, &expect, &got, 0); err != nil {
+	if err := helper.Create(context.TODO(), key, &expect, &got, 0); err != nil {
 		t.Errorf("Unexpected error %#v", err)
 	}
 	expect = got
@@ -288,76 +289,6 @@ func TestCreateNilOutParam(t *testing.T) {
 	defer server.Terminate(t)
 	helper := newEtcdHelper(server.Client, testapi.Default.Codec(), etcdtest.PathPrefix())
 	err := helper.Create(context.TODO(), "/some/key", obj, nil, 5)
-	if err != nil {
-		t.Errorf("Unexpected error %#v", err)
-	}
-}
-
-func TestSet(t *testing.T) {
-	obj := &api.Pod{ObjectMeta: api.ObjectMeta{Name: "foo"}}
-	server := etcdtesting.NewEtcdTestClientServer(t)
-	defer server.Terminate(t)
-	helper := newEtcdHelper(server.Client, testapi.Default.Codec(), etcdtest.PathPrefix())
-	returnedObj := &api.Pod{}
-	err := helper.Set(context.TODO(), "/some/key", obj, returnedObj, 5)
-	if err != nil {
-		t.Errorf("Unexpected error %#v", err)
-	}
-
-	if obj.ObjectMeta.Name == returnedObj.ObjectMeta.Name {
-		// Set worked, now override the values.
-		obj = returnedObj
-	}
-
-	err = helper.Get(context.TODO(), "/some/key", returnedObj, false)
-	if err != nil {
-		t.Errorf("Unexpected error %#v", err)
-	}
-	if !reflect.DeepEqual(obj, returnedObj) {
-		t.Errorf("Wanted %#v, got %#v", obj, returnedObj)
-	}
-}
-
-func TestSetFailCAS(t *testing.T) {
-	obj := &api.Pod{ObjectMeta: api.ObjectMeta{Name: "foo", ResourceVersion: "1"}}
-	server := etcdtesting.NewEtcdTestClientServer(t)
-	defer server.Terminate(t)
-	helper := newEtcdHelper(server.Client, testapi.Default.Codec(), etcdtest.PathPrefix())
-	err := helper.Set(context.TODO(), "/some/key", obj, nil, 5)
-	if err == nil {
-		t.Errorf("Expecting error.")
-	}
-}
-
-func TestSetWithVersion(t *testing.T) {
-	obj := &api.Pod{ObjectMeta: api.ObjectMeta{Name: "foo"}}
-	server := etcdtesting.NewEtcdTestClientServer(t)
-	defer server.Terminate(t)
-	helper := newEtcdHelper(server.Client, testapi.Default.Codec(), etcdtest.PathPrefix())
-
-	returnedObj := &api.Pod{}
-	err := helper.Set(context.TODO(), "/some/key", obj, returnedObj, 7)
-	if err != nil {
-		t.Fatalf("Unexpected error %#v", err)
-	}
-	// resource revision is now set, try to set again with new value to test CAS
-	obj = returnedObj
-	obj.Name = "bar"
-	err = helper.Set(context.TODO(), "/some/key", obj, returnedObj, 7)
-	if err != nil {
-		t.Fatalf("Unexpected error %#v", err)
-	}
-	if returnedObj.Name != "bar" {
-		t.Fatalf("Unexpected error %#v", returnedObj)
-	}
-}
-
-func TestSetNilOutParam(t *testing.T) {
-	obj := &api.Pod{ObjectMeta: api.ObjectMeta{Name: "foo"}}
-	server := etcdtesting.NewEtcdTestClientServer(t)
-	defer server.Terminate(t)
-	helper := newEtcdHelper(server.Client, testapi.Default.Codec(), etcdtest.PathPrefix())
-	err := helper.Set(context.TODO(), "/some/key", obj, nil, 3)
 	if err != nil {
 		t.Errorf("Unexpected error %#v", err)
 	}
@@ -529,7 +460,7 @@ func TestGuaranteedUpdateUIDMismatch(t *testing.T) {
 	err = helper.GuaranteedUpdate(context.TODO(), "/some/key", podPtr, true, storage.NewUIDPreconditions("B"), storage.SimpleUpdate(func(in runtime.Object) (runtime.Object, error) {
 		return obj, nil
 	}))
-	if !storage.IsTestFailed(err) {
+	if !storage.IsInvalidObj(err) {
 		t.Fatalf("Expect a Test Failed (write conflict) error, got: %v", err)
 	}
 }
@@ -568,7 +499,7 @@ func TestDeleteUIDMismatch(t *testing.T) {
 		t.Fatalf("Unexpected error %#v", err)
 	}
 	err = helper.Delete(context.TODO(), "/some/key", obj, storage.NewUIDPreconditions("B"))
-	if !storage.IsTestFailed(err) {
+	if !storage.IsInvalidObj(err) {
 		t.Fatalf("Expect a Test Failed (write conflict) error, got: %v", err)
 	}
 }

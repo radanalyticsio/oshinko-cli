@@ -11,8 +11,12 @@ import (
 
 	"github.com/golang/glog"
 
-	"github.com/openshift/origin/pkg/cmd/util"
+	"github.com/openshift/origin/pkg/cmd/util/term"
 )
+
+func BasicEnabled() bool {
+	return true
+}
 
 type BasicChallengeHandler struct {
 	// Host is the server being authenticated to. Used only for displaying messages when prompting for username/password
@@ -38,7 +42,7 @@ func (c *BasicChallengeHandler) CanHandle(headers http.Header) bool {
 	isBasic, _ := basicRealm(headers)
 	return isBasic
 }
-func (c *BasicChallengeHandler) HandleChallenge(headers http.Header) (http.Header, bool, error) {
+func (c *BasicChallengeHandler) HandleChallenge(requestURL string, headers http.Header) (http.Header, bool, error) {
 	if c.prompted {
 		glog.V(2).Info("already prompted for challenge, won't prompt again")
 		return nil, false, nil
@@ -66,12 +70,12 @@ func (c *BasicChallengeHandler) HandleChallenge(headers http.Header) (http.Heade
 			fmt.Fprintf(w, "Authentication required for %s\n", c.Host)
 		}
 		if missingUsername {
-			username = util.PromptForString(c.Reader, w, "Username: ")
+			username = term.PromptForString(c.Reader, w, "Username: ")
 		} else {
 			fmt.Fprintf(w, "Username: %s\n", username)
 		}
 		if missingPassword {
-			password = util.PromptForPasswordString(c.Reader, w, "Password: ")
+			password = term.PromptForPasswordString(c.Reader, w, "Password: ")
 		}
 		// remember so we don't re-prompt
 		c.prompted = true
@@ -92,6 +96,13 @@ func (c *BasicChallengeHandler) HandleChallenge(headers http.Header) (http.Heade
 
 	glog.V(2).Info("no username or password available")
 	return nil, false, nil
+}
+func (c *BasicChallengeHandler) CompleteChallenge(requestURL string, headers http.Header) error {
+	return nil
+}
+
+func (c *BasicChallengeHandler) Release() error {
+	return nil
 }
 
 // if any of these match a WWW-Authenticate header, it is a basic challenge

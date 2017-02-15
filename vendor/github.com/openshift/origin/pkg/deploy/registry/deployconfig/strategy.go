@@ -13,7 +13,6 @@ import (
 
 	"github.com/openshift/origin/pkg/deploy/api"
 	"github.com/openshift/origin/pkg/deploy/api/validation"
-	deployutil "github.com/openshift/origin/pkg/deploy/util"
 )
 
 // strategy implements behavior for DeploymentConfig objects
@@ -39,48 +38,42 @@ func (strategy) AllowUnconditionalUpdate() bool {
 	return false
 }
 
+func (s strategy) Export(ctx kapi.Context, obj runtime.Object, exact bool) error {
+	s.PrepareForCreate(ctx, obj)
+	return nil
+}
+
 // PrepareForCreate clears fields that are not allowed to be set by end users on creation.
-func (strategy) PrepareForCreate(obj runtime.Object) {
+func (strategy) PrepareForCreate(ctx kapi.Context, obj runtime.Object) {
 	dc := obj.(*api.DeploymentConfig)
 	dc.Generation = 1
 	dc.Status = api.DeploymentConfigStatus{}
+
+	for i := range dc.Spec.Triggers {
+		if params := dc.Spec.Triggers[i].ImageChangeParams; params != nil {
+			params.LastTriggeredImage = ""
+		}
+	}
 }
 
 // PrepareForUpdate clears fields that are not allowed to be set by end users on update.
-func (strategy) PrepareForUpdate(obj, old runtime.Object) {
+func (strategy) PrepareForUpdate(ctx kapi.Context, obj, old runtime.Object) {
 	newDc := obj.(*api.DeploymentConfig)
 	oldDc := old.(*api.DeploymentConfig)
 
 	newVersion := newDc.Status.LatestVersion
 	oldVersion := oldDc.Status.LatestVersion
 
-	// Check for imagechange controller change
-	isImageControllerChange := deployutil.IsImageChangeControllerChange(*newDc, *oldDc)
-
 	// Persist status
-	newStatus := newDc.Status
 	newDc.Status = oldDc.Status
-
-	// If this update comes from the imagechange controller, tolerate status detail updates.
-	// TODO: Make the config change controller detect this change and update latestVersion.
-	// Then the main controller should detect there is a change coming from the image change
-	// controller and update status details accordingly.
-	if isImageControllerChange {
-		newDc.Status.Details = newStatus.Details
-	}
-
-	// oc deploy --latest from new clients
-	if newVersion == oldVersion && deployutil.IsInstantiated(newDc) {
-		// TODO: Have an endpoint for this and avoid hacking it here.
-		newDc.Status.LatestVersion = oldVersion + 1
-		delete(newDc.Annotations, api.DeploymentInstantiatedAnnotation)
-	}
 
 	// oc deploy --latest from old clients
 	// TODO: Remove once we drop support for older clients
 	if newVersion == oldVersion+1 {
 		newDc.Status.LatestVersion = newVersion
 	}
+
+	// TODO: Disallow lastTriggeredImage updates from this update path.
 
 	// Any changes to the spec or labels, increment the generation number, any changes
 	// to the status should reflect the generation number of the corresponding object
@@ -117,7 +110,7 @@ type statusStrategy struct {
 var StatusStrategy = statusStrategy{Strategy}
 
 // PrepareForUpdate clears fields that are not allowed to be set by end users on update of status.
-func (statusStrategy) PrepareForUpdate(obj, old runtime.Object) {
+func (statusStrategy) PrepareForUpdate(ctx kapi.Context, obj, old runtime.Object) {
 	newDc := obj.(*api.DeploymentConfig)
 	oldDc := old.(*api.DeploymentConfig)
 	newDc.Spec = oldDc.Spec
@@ -130,7 +123,7 @@ func (statusStrategy) ValidateUpdate(ctx kapi.Context, obj, old runtime.Object) 
 }
 
 // Matcher returns a generic matcher for a given label and field selector.
-func Matcher(label labels.Selector, field fields.Selector) generic.Matcher {
+func Matcher(label labels.Selector, field fields.Selector) *generic.SelectionPredicate {
 	return &generic.SelectionPredicate{
 		Label: label,
 		Field: field,

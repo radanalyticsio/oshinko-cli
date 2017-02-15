@@ -5,13 +5,16 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path"
 	"runtime"
 
-	"github.com/golang/glog"
+	utilglog "github.com/openshift/source-to-image/pkg/util/glog"
 
 	"github.com/openshift/source-to-image/pkg/errors"
 )
+
+var glog = utilglog.StderrLog
 
 // FileSystem allows STI to work with the file system and
 // perform tasks such as creating and deleting directories
@@ -91,18 +94,18 @@ func (h *fs) Copy(source string, dest string) (err error) {
 	if err != nil {
 		return err
 	}
+	defer sourcefile.Close()
 	sourceinfo, err := os.Stat(source)
 	if err != nil {
 		return err
 	}
-	defer sourcefile.Close()
 
 	if sourceinfo.IsDir() {
 		glog.V(5).Infof("D %q -> %q", source, dest)
 		return h.CopyContents(source, dest)
 	}
 
-	destinfo, err := os.Stat(dest)
+	destinfo, _ := os.Stat(dest)
 	if destinfo != nil && destinfo.IsDir() {
 		return fmt.Errorf("destination must be full path to a file, not directory")
 	}
@@ -129,7 +132,7 @@ func (h *fs) CopyContents(src string, dest string) (err error) {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dest, sourceinfo.Mode()); err != nil {
+	if err = os.MkdirAll(dest, sourceinfo.Mode()); err != nil {
 		return err
 	}
 	directory, err := os.Open(src)
@@ -154,6 +157,19 @@ func (h *fs) CopyContents(src string, dest string) (err error) {
 // RemoveDirectory removes the specified directory and all its contents
 func (h *fs) RemoveDirectory(dir string) error {
 	glog.V(2).Infof("Removing directory '%s'", dir)
+
+	// HACK: If deleting a directory in windows, call out to the system to do the deletion
+	// TODO: Remove this workaround when we switch to go 1.7 -- os.RemoveAll should
+	// be fixed for Windows in that release.
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("cmd.exe", "/c", fmt.Sprintf("rd /s /q %s", dir))
+		output, err := cmd.Output()
+		if err != nil {
+			glog.Errorf("Error removing directory %q: %v %s", dir, err, string(output))
+			return err
+		}
+		return nil
+	}
 
 	err := os.RemoveAll(dir)
 	if err != nil {

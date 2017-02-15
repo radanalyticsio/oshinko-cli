@@ -1,5 +1,5 @@
 /*
-Copyright 2015 The Kubernetes Authors All rights reserved.
+Copyright 2015 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,14 +17,15 @@ limitations under the License.
 package flowcontrol
 
 import (
-	"k8s.io/kubernetes/pkg/util"
 	"testing"
 	"time"
+
+	"k8s.io/kubernetes/pkg/util/clock"
 )
 
 func TestSlowBackoff(t *testing.T) {
 	id := "_idSlow"
-	tc := util.NewFakeClock(time.Now())
+	tc := clock.NewFakeClock(time.Now())
 	step := time.Second
 	maxDuration := 50 * step
 
@@ -50,7 +51,7 @@ func TestSlowBackoff(t *testing.T) {
 
 func TestBackoffReset(t *testing.T) {
 	id := "_idReset"
-	tc := util.NewFakeClock(time.Now())
+	tc := clock.NewFakeClock(time.Now())
 	step := time.Second
 	maxDuration := step * 5
 	b := NewFakeBackOff(step, maxDuration, tc)
@@ -70,13 +71,13 @@ func TestBackoffReset(t *testing.T) {
 	lastUpdate := tc.Now()
 	tc.Step(2*maxDuration + step) // time += 11s, 11 > 2*maxDuration
 	if b.IsInBackOffSince(id, lastUpdate) {
-		t.Errorf("now=%s lastUpdate=%s (%s) expected Backoff reset got %s b.lastUpdate=%s", tc.Now(), startTime, tc.Now().Sub(lastUpdate), b.Get(id))
+		t.Errorf("expected to not be in Backoff after reset (start=%s, now=%s, lastUpdate=%s), got %s", startTime, tc.Now(), lastUpdate, b.Get(id))
 	}
 }
 
 func TestBackoffHightWaterMark(t *testing.T) {
 	id := "_idHiWaterMark"
-	tc := util.NewFakeClock(time.Now())
+	tc := clock.NewFakeClock(time.Now())
 	step := time.Second
 	maxDuration := 5 * step
 	b := NewFakeBackOff(step, maxDuration, tc)
@@ -98,7 +99,7 @@ func TestBackoffHightWaterMark(t *testing.T) {
 
 func TestBackoffGC(t *testing.T) {
 	id := "_idGC"
-	tc := util.NewFakeClock(time.Now())
+	tc := clock.NewFakeClock(time.Now())
 	step := time.Second
 	maxDuration := 5 * step
 
@@ -126,7 +127,7 @@ func TestBackoffGC(t *testing.T) {
 
 func TestIsInBackOffSinceUpdate(t *testing.T) {
 	id := "_idIsInBackOffSinceUpdate"
-	tc := util.NewFakeClock(time.Now())
+	tc := clock.NewFakeClock(time.Now())
 	step := time.Second
 	maxDuration := 10 * step
 	b := NewFakeBackOff(step, maxDuration, tc)

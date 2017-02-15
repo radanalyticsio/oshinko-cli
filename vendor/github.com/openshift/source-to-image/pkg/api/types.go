@@ -6,11 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	docker "github.com/fsouza/go-dockerclient"
-	"github.com/golang/glog"
+	utilglog "github.com/openshift/source-to-image/pkg/util/glog"
 
 	"github.com/openshift/source-to-image/pkg/util/user"
 )
+
+var glog = utilglog.StderrLog
 
 // Image label namespace constants
 const (
@@ -34,6 +35,9 @@ const (
 
 	// DefaultBuilderPullPolicy specifies the default pull policy to use
 	DefaultBuilderPullPolicy = PullIfNotPresent
+
+	// DefaultRuntimeImagePullPolicy specifies the default pull policy to use.
+	DefaultRuntimeImagePullPolicy = PullIfNotPresent
 
 	// DefaultPreviousImagePullPolicy specifies policy for pulling the previously
 	// build Docker image when doing incremental build
@@ -59,6 +63,28 @@ type Config struct {
 	// BuilderBaseImageVersion provides optional version information about the builder base image.
 	BuilderBaseImageVersion string
 
+	// RuntimeImage specifies the image that will be a base for resulting image
+	// and will be used for running an application. By default, BuilderImage is
+	// used for building and running, but the latter may be overridden.
+	RuntimeImage string
+
+	// RuntimeImagePullPolicy specifies when to pull a runtime image.
+	RuntimeImagePullPolicy PullPolicy
+
+	// RuntimeAuthentication holds the authentication information for pulling the
+	// runtime Docker images from private repositories.
+	RuntimeAuthentication AuthConfig
+
+	// RuntimeArtifacts specifies a list of source/destination pairs that will
+	// be copied from builder to a runtime image. Source can be a file or
+	// directory. Destination must be a directory. Regardless whether it
+	// is an absolute or relative path, it will be placed into image's WORKDIR.
+	// Destination also can be empty or equals to ".", in this case it just
+	// refers to a root of WORKDIR.
+	// In case it's empty, S2I will try to get this list from
+	// io.openshift.s2i.assemble-input-files label on a RuntimeImage.
+	RuntimeArtifacts VolumeList
+
 	// DockerConfig describes how to access host docker daemon.
 	DockerConfig *DockerConfig
 
@@ -67,11 +93,11 @@ type Config struct {
 
 	// PullAuthentication holds the authentication information for pulling the
 	// Docker images from private repositories
-	PullAuthentication docker.AuthConfiguration
+	PullAuthentication AuthConfig
 
 	// IncrementalAuthentication holds the authentication information for pulling the
 	// previous image from private repositories
-	IncrementalAuthentication docker.AuthConfiguration
+	IncrementalAuthentication AuthConfig
 
 	// DockerNetworkMode is used to set the docker network setting to --net=container:<id>
 	// when the builder is invoked from a container.
@@ -80,9 +106,9 @@ type Config struct {
 	// PreserveWorkingDir describes if working directory should be left after processing.
 	PreserveWorkingDir bool
 
-	// DisableRecursive disables the --recursive option for the git clone that
-	// allows to use the Git without requiring the git submodule to be called.
-	DisableRecursive bool
+	// IgnoreSubmodules determines whether we will attempt to pull in submodules
+	// (via --recursive or submodule init)
+	IgnoreSubmodules bool
 
 	// Source URL describing the location of sources used to build the result image.
 	Source string
@@ -130,7 +156,7 @@ type Config struct {
 	// CallbackURL is a URL which is called upon successful build to inform about that fact.
 	CallbackURL string
 
-	// ScriptsURL is a URL describing the localization of STI scripts used during build process.
+	// ScriptsURL is a URL describing the localization of S2I scripts used during build process.
 	ScriptsURL string
 
 	// Destination specifies a location where the untar operation will place its artifacts.
@@ -160,8 +186,8 @@ type Config struct {
 	ContextDir string
 
 	// AllowedUIDs is a list of user ranges of users allowed to run the builder image.
-	// If a range is specified and the builder image uses a non-numeric user or a user
-	// that is outside the specified range, then the build fails.
+	// If a range is specified and the builder (or runtime) image uses a non-numeric
+	// user or a user that is outside the specified range, then the build fails.
 	AllowedUIDs user.RangeList
 
 	// AssembleUser specifies the user to run the assemble script in container
@@ -206,6 +232,11 @@ type Config struct {
 	// BuildVolumes specifies a list of volumes to mount to container running the
 	// build.
 	BuildVolumes VolumeList
+
+	// Labels specify labels and their values to be applied to the resulting image. Label keys
+	// must have non-zero length. The labels defined here override generated labels in case
+	// they have the same name.
+	Labels map[string]string
 }
 
 // EnvironmentSpec specifies a single environment variable.
@@ -217,11 +248,13 @@ type EnvironmentSpec struct {
 // EnvironmentList contains list of environment variables.
 type EnvironmentList []EnvironmentSpec
 
+// ProxyConfig holds proxy configuration.
 type ProxyConfig struct {
 	HTTPProxy  *url.URL
 	HTTPSProxy *url.URL
 }
 
+// CGroupLimits holds limits used to constrain container resources.
 type CGroupLimits struct {
 	MemoryLimitBytes int64
 	CPUShares        int64
@@ -230,7 +263,7 @@ type CGroupLimits struct {
 	MemorySwap       int64
 }
 
-// Volume represents a single volume mount point
+// VolumeSpec represents a single volume mount point.
 type VolumeSpec struct {
 	Source      string
 	Destination string
@@ -252,6 +285,36 @@ type DockerConfig struct {
 
 	// CAFile is the certificate authority file path for a TLS connection
 	CAFile string
+
+	// UseTLS indicates if TLS must be used
+	UseTLS bool
+
+	// TLSVerify indicates if TLS peer must be verified
+	TLSVerify bool
+}
+
+// AuthConfig is our abstraction of the Registry authorization information for whatever
+// docker client we happen to be based on
+type AuthConfig struct {
+	Username      string
+	Password      string
+	Email         string
+	ServerAddress string
+}
+
+// ContainerConfig is the abstraction of the docker client provider (formerly go-dockerclient, now either
+// engine-api or kube docker client) container.Config type that is leveraged by s2i or origin
+type ContainerConfig struct {
+	Labels map[string]string
+	Env    []string
+}
+
+// Image is the abstraction of the docker client provider (formerly go-dockerclient, now either
+// engine-api or kube docker client) Image type that is leveraged by s2i or origin
+type Image struct {
+	ID string
+	*ContainerConfig
+	Config *ContainerConfig
 }
 
 // Result structure contains information from build process.
@@ -268,6 +331,31 @@ type Result struct {
 
 	// ImageID describes resulting image ID.
 	ImageID string
+
+	// BuildInfo holds information about the result of a build.
+	BuildInfo BuildInfo
+}
+
+// BuildInfo holds information about a particular step in the build process.
+type BuildInfo struct {
+	// FailureReason is a camel case reason that is used by the machine to reply
+	// back to the OpenShift builder with information why any of the steps in the
+	// build, failed.
+	FailureReason FailureReason
+}
+
+// StepFailureReason holds the type of failure that occurred during the build
+// process.
+type StepFailureReason string
+
+// StepFailureMessage holds the detailed message of a failure.
+type StepFailureMessage string
+
+// FailureReason holds the type of failure that occurred during the build
+// process.
+type FailureReason struct {
+	Reason  StepFailureReason
+	Message StepFailureMessage
 }
 
 // InstallResult structure describes the result of install operation
@@ -408,10 +496,11 @@ func IsInvalidFilename(name string) bool {
 // When the destination is not specified, the source get copied into current
 // working directory in container.
 func (l *VolumeList) Set(value string) error {
+	if len(value) == 0 {
+		return fmt.Errorf("invalid format, must be source:destination")
+	}
 	mount := strings.Split(value, ":")
 	switch len(mount) {
-	case 0:
-		return fmt.Errorf("invalid format, must be source:destination")
 	case 1:
 		mount = append(mount, "")
 		fallthrough
@@ -450,7 +539,7 @@ func (e *EnvironmentList) Set(value string) error {
 		return fmt.Errorf("invalid environment format %q, must be NAME=VALUE", value)
 	}
 	if strings.Contains(parts[1], ",") && strings.Contains(parts[1], "=") {
-		glog.Warningf("DEPRECATED: Use multiple -e flags to specify multiple environment variables instead of comma (%q)", parts[1])
+		glog.Warningf("DEPRECATED: Use multiple -e flags to specify multiple environment variables instead of comma (%q)", value)
 	}
 	*e = append(*e, EnvironmentSpec{
 		Name:  strings.TrimSpace(parts[0]),

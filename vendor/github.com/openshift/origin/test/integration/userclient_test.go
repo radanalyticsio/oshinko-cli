@@ -1,5 +1,3 @@
-// +build integration
-
 package integration
 
 import (
@@ -8,16 +6,18 @@ import (
 	"sync"
 	"testing"
 
+	etcdclient "github.com/coreos/etcd/client"
+	"golang.org/x/net/context"
+
 	kapi "k8s.io/kubernetes/pkg/api"
 	kerrs "k8s.io/kubernetes/pkg/api/errors"
-	"k8s.io/kubernetes/pkg/api/unversioned"
 	etcdutil "k8s.io/kubernetes/pkg/storage/etcd/util"
 	"k8s.io/kubernetes/pkg/types"
 
 	authapi "github.com/openshift/origin/pkg/auth/api"
 	"github.com/openshift/origin/pkg/auth/userregistry/identitymapper"
 	"github.com/openshift/origin/pkg/cmd/server/etcd"
-	"github.com/openshift/origin/pkg/cmd/server/origin"
+	originrest "github.com/openshift/origin/pkg/cmd/server/origin/rest"
 	"github.com/openshift/origin/pkg/user/api"
 	identityregistry "github.com/openshift/origin/pkg/user/registry/identity"
 	identityetcd "github.com/openshift/origin/pkg/user/registry/identity/etcd"
@@ -68,6 +68,7 @@ func makeMapping(user, identity string) *api.UserIdentityMapping {
 
 func TestUserInitialization(t *testing.T) {
 	testutil.RequireEtcd(t)
+	defer testutil.DumpEtcdOnFailure(t)
 	masterConfig, clusterAdminKubeConfig, err := testserver.StartTestMasterAPI()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -78,19 +79,19 @@ func TestUserInitialization(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	etcdClient, err := etcd.MakeNewEtcdClient(masterConfig.EtcdClientInfo)
+	optsGetter := originrest.StorageOptions(*masterConfig)
+
+	userStorage, err := useretcd.NewREST(optsGetter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	userRegistry := userregistry.NewRegistry(userStorage)
 
-	storageVersion := unversioned.GroupVersion{Group: "", Version: masterConfig.EtcdStorageConfig.OpenShiftStorageVersion}
-	etcdHelper, err := origin.NewEtcdStorage(etcdClient, storageVersion, masterConfig.EtcdStorageConfig.OpenShiftStoragePrefix)
+	identityStorage, err := identityetcd.NewREST(optsGetter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	userRegistry := userregistry.NewRegistry(useretcd.NewREST(etcdHelper))
-	identityRegistry := identityregistry.NewRegistry(identityetcd.NewREST(etcdHelper))
+	identityRegistry := identityregistry.NewRegistry(identityStorage)
 
 	lookup, err := identitymapper.NewIdentityUserMapper(identityRegistry, userRegistry, identitymapper.MappingMethodLookup)
 	if err != nil {
@@ -398,17 +399,18 @@ func TestUserInitialization(t *testing.T) {
 		},
 	}
 
-	oldEtcdClient, err := etcd.GetAndTestEtcdClient(masterConfig.EtcdClientInfo)
+	oldEtcdClient, err := etcd.MakeEtcdClient(masterConfig.EtcdClientInfo)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	etcdClient := etcdclient.NewKeysAPI(oldEtcdClient)
 
 	for k, testcase := range testcases {
 		// Cleanup
-		if _, err := oldEtcdClient.Delete(path.Join(masterConfig.EtcdStorageConfig.OpenShiftStoragePrefix, useretcd.EtcdPrefix), true); err != nil && !etcdutil.IsEtcdNotFound(err) {
+		if _, err := etcdClient.Delete(context.Background(), path.Join(masterConfig.EtcdStorageConfig.OpenShiftStoragePrefix, "/users"), &etcdclient.DeleteOptions{Recursive: true}); err != nil && !etcdutil.IsEtcdNotFound(err) {
 			t.Fatalf("Could not clean up users: %v", err)
 		}
-		if _, err := oldEtcdClient.Delete(path.Join(masterConfig.EtcdStorageConfig.OpenShiftStoragePrefix, identityetcd.EtcdPrefix), true); err != nil && !etcdutil.IsEtcdNotFound(err) {
+		if _, err := etcdClient.Delete(context.Background(), path.Join(masterConfig.EtcdStorageConfig.OpenShiftStoragePrefix, "/useridentities"), &etcdclient.DeleteOptions{Recursive: true}); err != nil && !etcdutil.IsEtcdNotFound(err) {
 			t.Fatalf("Could not clean up identities: %v", err)
 		}
 

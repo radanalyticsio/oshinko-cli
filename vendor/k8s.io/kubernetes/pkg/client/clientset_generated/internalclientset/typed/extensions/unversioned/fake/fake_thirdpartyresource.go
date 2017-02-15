@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors All rights reserved.
+Copyright 2016 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package fake
 
 import (
 	api "k8s.io/kubernetes/pkg/api"
+	unversioned "k8s.io/kubernetes/pkg/api/unversioned"
 	extensions "k8s.io/kubernetes/pkg/apis/extensions"
 	core "k8s.io/kubernetes/pkg/client/testing/core"
 	labels "k8s.io/kubernetes/pkg/labels"
@@ -27,13 +28,13 @@ import (
 // FakeThirdPartyResources implements ThirdPartyResourceInterface
 type FakeThirdPartyResources struct {
 	Fake *FakeExtensions
-	ns   string
 }
+
+var thirdpartyresourcesResource = unversioned.GroupVersionResource{Group: "extensions", Version: "", Resource: "thirdpartyresources"}
 
 func (c *FakeThirdPartyResources) Create(thirdPartyResource *extensions.ThirdPartyResource) (result *extensions.ThirdPartyResource, err error) {
 	obj, err := c.Fake.
-		Invokes(core.NewCreateAction("thirdpartyresources", c.ns, thirdPartyResource), &extensions.ThirdPartyResource{})
-
+		Invokes(core.NewRootCreateAction(thirdpartyresourcesResource, thirdPartyResource), &extensions.ThirdPartyResource{})
 	if obj == nil {
 		return nil, err
 	}
@@ -42,8 +43,7 @@ func (c *FakeThirdPartyResources) Create(thirdPartyResource *extensions.ThirdPar
 
 func (c *FakeThirdPartyResources) Update(thirdPartyResource *extensions.ThirdPartyResource) (result *extensions.ThirdPartyResource, err error) {
 	obj, err := c.Fake.
-		Invokes(core.NewUpdateAction("thirdpartyresources", c.ns, thirdPartyResource), &extensions.ThirdPartyResource{})
-
+		Invokes(core.NewRootUpdateAction(thirdpartyresourcesResource, thirdPartyResource), &extensions.ThirdPartyResource{})
 	if obj == nil {
 		return nil, err
 	}
@@ -52,13 +52,12 @@ func (c *FakeThirdPartyResources) Update(thirdPartyResource *extensions.ThirdPar
 
 func (c *FakeThirdPartyResources) Delete(name string, options *api.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(core.NewDeleteAction("thirdpartyresources", c.ns, name), &extensions.ThirdPartyResource{})
-
+		Invokes(core.NewRootDeleteAction(thirdpartyresourcesResource, name), &extensions.ThirdPartyResource{})
 	return err
 }
 
 func (c *FakeThirdPartyResources) DeleteCollection(options *api.DeleteOptions, listOptions api.ListOptions) error {
-	action := core.NewDeleteCollectionAction("thirdpartyresources", c.ns, listOptions)
+	action := core.NewRootDeleteCollectionAction(thirdpartyresourcesResource, listOptions)
 
 	_, err := c.Fake.Invokes(action, &extensions.ThirdPartyResourceList{})
 	return err
@@ -66,8 +65,7 @@ func (c *FakeThirdPartyResources) DeleteCollection(options *api.DeleteOptions, l
 
 func (c *FakeThirdPartyResources) Get(name string) (result *extensions.ThirdPartyResource, err error) {
 	obj, err := c.Fake.
-		Invokes(core.NewGetAction("thirdpartyresources", c.ns, name), &extensions.ThirdPartyResource{})
-
+		Invokes(core.NewRootGetAction(thirdpartyresourcesResource, name), &extensions.ThirdPartyResource{})
 	if obj == nil {
 		return nil, err
 	}
@@ -76,8 +74,7 @@ func (c *FakeThirdPartyResources) Get(name string) (result *extensions.ThirdPart
 
 func (c *FakeThirdPartyResources) List(opts api.ListOptions) (result *extensions.ThirdPartyResourceList, err error) {
 	obj, err := c.Fake.
-		Invokes(core.NewListAction("thirdpartyresources", c.ns, opts), &extensions.ThirdPartyResourceList{})
-
+		Invokes(core.NewRootListAction(thirdpartyresourcesResource, opts), &extensions.ThirdPartyResourceList{})
 	if obj == nil {
 		return nil, err
 	}
@@ -98,6 +95,15 @@ func (c *FakeThirdPartyResources) List(opts api.ListOptions) (result *extensions
 // Watch returns a watch.Interface that watches the requested thirdPartyResources.
 func (c *FakeThirdPartyResources) Watch(opts api.ListOptions) (watch.Interface, error) {
 	return c.Fake.
-		InvokesWatch(core.NewWatchAction("thirdpartyresources", c.ns, opts))
+		InvokesWatch(core.NewRootWatchAction(thirdpartyresourcesResource, opts))
+}
 
+// Patch applies the patch and returns the patched thirdPartyResource.
+func (c *FakeThirdPartyResources) Patch(name string, pt api.PatchType, data []byte, subresources ...string) (result *extensions.ThirdPartyResource, err error) {
+	obj, err := c.Fake.
+		Invokes(core.NewRootPatchSubresourceAction(thirdpartyresourcesResource, name, data, subresources...), &extensions.ThirdPartyResource{})
+	if obj == nil {
+		return nil, err
+	}
+	return obj.(*extensions.ThirdPartyResource), err
 }

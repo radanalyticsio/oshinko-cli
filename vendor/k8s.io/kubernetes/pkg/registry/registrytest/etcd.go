@@ -1,5 +1,5 @@
 /*
-Copyright 2015 The Kubernetes Authors All rights reserved.
+Copyright 2015 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,29 +27,34 @@ import (
 	"k8s.io/kubernetes/pkg/api/testapi"
 	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/labels"
-	etcdgeneric "k8s.io/kubernetes/pkg/registry/generic/etcd"
+	"k8s.io/kubernetes/pkg/registry/generic/registry"
 	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/storage"
 	etcdstorage "k8s.io/kubernetes/pkg/storage/etcd"
 	"k8s.io/kubernetes/pkg/storage/etcd/etcdtest"
 	etcdtesting "k8s.io/kubernetes/pkg/storage/etcd/testing"
+	"k8s.io/kubernetes/pkg/storage/storagebackend"
 	storagetesting "k8s.io/kubernetes/pkg/storage/testing"
 )
 
-func NewEtcdStorage(t *testing.T, group string) (storage.Interface, *etcdtesting.EtcdTestServer) {
-	// Use the unsecured etcd for these tests, since they spawn lots of connections and can hit the 1 minute unit test timeout
+func NewEtcdStorage(t *testing.T, group string) (*storagebackend.Config, *etcdtesting.EtcdTestServer) {
 	server := etcdtesting.NewUnsecuredEtcdTestClientServer(t)
-	storage := etcdstorage.NewEtcdStorage(server.Client, testapi.Groups[group].Codec(), etcdtest.PathPrefix(), false)
-	return storage, server
+	config := &storagebackend.Config{
+		Type:                     "etcd2",
+		Prefix:                   etcdtest.PathPrefix(),
+		ServerList:               server.Client.Endpoints(),
+		DeserializationCacheSize: etcdtest.DeserializationCacheSize,
+		Codec: testapi.Groups[group].StorageCodec(),
+	}
+	return config, server
 }
 
 type Tester struct {
 	tester  *resttest.Tester
-	storage *etcdgeneric.Etcd
+	storage *registry.Store
 }
 type UpdateFunc func(runtime.Object) runtime.Object
 
-func New(t *testing.T, storage *etcdgeneric.Etcd) *Tester {
+func New(t *testing.T, storage *registry.Store) *Tester {
 	return &Tester{
 		tester:  resttest.New(t, storage),
 		storage: storage,
@@ -62,6 +67,11 @@ func (t *Tester) TestNamespace() string {
 
 func (t *Tester) ClusterScope() *Tester {
 	t.tester = t.tester.ClusterScope()
+	return t
+}
+
+func (t *Tester) Namer(namer func(int) string) *Tester {
+	t.tester = t.tester.Namer(namer)
 	return t
 }
 
@@ -83,7 +93,7 @@ func (t *Tester) ReturnDeletedObject() *Tester {
 func (t *Tester) TestCreate(valid runtime.Object, invalid ...runtime.Object) {
 	t.tester.TestCreate(
 		valid,
-		t.setObject,
+		t.createObject,
 		t.getObject,
 		invalid...,
 	)
@@ -96,7 +106,7 @@ func (t *Tester) TestUpdate(valid runtime.Object, validUpdateFunc UpdateFunc, in
 	}
 	t.tester.TestUpdate(
 		valid,
-		t.setObject,
+		t.createObject,
 		t.getObject,
 		resttest.UpdateFunc(validUpdateFunc),
 		invalidFuncs...,
@@ -106,7 +116,7 @@ func (t *Tester) TestUpdate(valid runtime.Object, validUpdateFunc UpdateFunc, in
 func (t *Tester) TestDelete(valid runtime.Object) {
 	t.tester.TestDelete(
 		valid,
-		t.setObject,
+		t.createObject,
 		t.getObject,
 		errors.IsNotFound,
 	)
@@ -115,7 +125,7 @@ func (t *Tester) TestDelete(valid runtime.Object) {
 func (t *Tester) TestDeleteGraceful(valid runtime.Object, expectedGrace int64) {
 	t.tester.TestDeleteGraceful(
 		valid,
-		t.setObject,
+		t.createObject,
 		t.getObject,
 		expectedGrace,
 	)
@@ -148,10 +158,11 @@ func (t *Tester) TestWatch(valid runtime.Object, labelsPass, labelsFail []labels
 // =============================================================================
 // get codec based on runtime.Object
 func getCodec(obj runtime.Object) (runtime.Codec, error) {
-	fqKind, err := api.Scheme.ObjectKind(obj)
+	fqKinds, _, err := api.Scheme.ObjectKinds(obj)
 	if err != nil {
 		return nil, fmt.Errorf("unexpected encoding error: %v", err)
 	}
+	fqKind := fqKinds[0]
 	// TODO: caesarxuchao: we should detect which group an object belongs to
 	// by using the version returned by Schem.ObjectVersionAndKind() once we
 	// split the schemes for internal objects.
@@ -182,7 +193,7 @@ func (t *Tester) getObject(ctx api.Context, obj runtime.Object) (runtime.Object,
 	return result, nil
 }
 
-func (t *Tester) setObject(ctx api.Context, obj runtime.Object) error {
+func (t *Tester) createObject(ctx api.Context, obj runtime.Object) error {
 	accessor, err := meta.Accessor(obj)
 	if err != nil {
 		return err
@@ -191,7 +202,7 @@ func (t *Tester) setObject(ctx api.Context, obj runtime.Object) error {
 	if err != nil {
 		return err
 	}
-	return t.storage.Storage.Set(ctx, key, obj, nil, 0)
+	return t.storage.Storage.Create(ctx, key, obj, nil, 0)
 }
 
 func (t *Tester) setObjectsForList(objects []runtime.Object) []runtime.Object {
@@ -209,7 +220,7 @@ func (t *Tester) emitObject(obj runtime.Object, action string) error {
 
 	switch action {
 	case etcdstorage.EtcdCreate:
-		err = t.setObject(ctx, obj)
+		err = t.createObject(ctx, obj)
 	case etcdstorage.EtcdDelete:
 		accessor, err := meta.Accessor(obj)
 		if err != nil {

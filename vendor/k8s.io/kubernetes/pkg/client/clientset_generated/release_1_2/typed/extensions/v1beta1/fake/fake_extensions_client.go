@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors All rights reserved.
+Copyright 2016 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -53,6 +53,6 @@ func (c *FakeExtensions) Scales(namespace string) v1beta1.ScaleInterface {
 	return &FakeScales{c, namespace}
 }
 
-func (c *FakeExtensions) ThirdPartyResources(namespace string) v1beta1.ThirdPartyResourceInterface {
-	return &FakeThirdPartyResources{c, namespace}
+func (c *FakeExtensions) ThirdPartyResources() v1beta1.ThirdPartyResourceInterface {
+	return &FakeThirdPartyResources{c}
 }

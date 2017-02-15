@@ -36,7 +36,7 @@ var testBuildConfig = &api.BuildConfig{
 				},
 			},
 		},
-		BuildSpec: api.BuildSpec{
+		CommonSpec: api.CommonSpec{
 			Source: api.BuildSource{
 				Git: &api.GitBuildSource{
 					URI: "git://github.com/my/repo.git",
@@ -96,7 +96,7 @@ var buildConfig = &api.BuildConfig{
 				},
 			},
 		},
-		BuildSpec: api.BuildSpec{
+		CommonSpec: api.CommonSpec{
 			Source: api.BuildSource{
 				Git: &api.GitBuildSource{},
 			},
@@ -147,8 +147,8 @@ func TestMissingEvent(t *testing.T) {
 	plugin := New()
 	revision, _, proceed, err := plugin.Extract(buildConfig, "secret100", "", req)
 
-	if err == nil || !strings.Contains(err.Error(), "missing X-GitHub-Event or X-Gogs-Event") {
-		t.Errorf("Expected missing X-GitHub-Event or X-Gogs-Event, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "missing X-GitHub-Event, X-Gogs-Event or X-Gitlab-Event") {
+		t.Errorf("Expected missing X-GitHub-Event, X-Gogs-Event or X-Gitlab-Event, got %v", err)
 	}
 	if proceed {
 		t.Error("Expected 'proceed' return value to be 'false'")
@@ -165,8 +165,8 @@ func TestWrongGitHubEvent(t *testing.T) {
 	plugin := New()
 	revision, _, proceed, err := plugin.Extract(buildConfig, "secret100", "", req)
 
-	if err == nil || !strings.Contains(err.Error(), "Unknown X-GitHub-Event or X-Gogs-Event") {
-		t.Errorf("Expected missing Unknown X-GitHub-Event or X-Gogs-Event, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "Unknown X-GitHub-Event, X-Gogs-Event or X-Gitlab-Event") {
+		t.Errorf("Expected missing Unknown X-GitHub-Event, X-Gogs-Event or X-Gitlab-Event, got %v", err)
 	}
 	if proceed {
 		t.Error("Expected 'proceed' return value to be 'false'")
@@ -249,7 +249,7 @@ func postFile(eventHeader, eventName, filename, url string, expStatusCode int, t
 }
 
 func postFileWithCharset(eventHeader, eventName, filename, url, charset string, expStatusCode int, t *testing.T) *http.Request {
-	data, err := ioutil.ReadFile("fixtures/" + filename)
+	data, err := ioutil.ReadFile("testdata/" + filename)
 	if err != nil {
 		t.Errorf("Failed to open %s: %v", filename, err)
 	}
@@ -305,7 +305,7 @@ func setup(t *testing.T, filename, eventType, ref string) *testContext {
 						},
 					},
 				},
-				BuildSpec: api.BuildSpec{
+				CommonSpec: api.CommonSpec{
 					Source: api.BuildSource{
 						Git: &api.GitBuildSource{
 							URI: "git://github.com/my/repo.git",
@@ -318,7 +318,7 @@ func setup(t *testing.T, filename, eventType, ref string) *testContext {
 		},
 		path: "/foobar",
 	}
-	event, err := ioutil.ReadFile("fixtures/" + filename)
+	event, err := ioutil.ReadFile("testdata/" + filename)
 	if err != nil {
 		t.Errorf("Failed to open %s: %v", filename, err)
 	}

@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,138 +30,41 @@ import (
 	"strings"
 	"time"
 
+	systemd "github.com/coreos/go-systemd/daemon"
+	"github.com/emicklei/go-restful"
+	"github.com/emicklei/go-restful/swagger"
+	"github.com/golang/glog"
+	"gopkg.in/natefinch/lumberjack.v2"
+
+	"github.com/go-openapi/spec"
 	"k8s.io/kubernetes/pkg/admission"
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/rest"
 	"k8s.io/kubernetes/pkg/api/unversioned"
 	"k8s.io/kubernetes/pkg/apimachinery"
+	"k8s.io/kubernetes/pkg/apimachinery/registered"
 	"k8s.io/kubernetes/pkg/apiserver"
+	"k8s.io/kubernetes/pkg/apiserver/audit"
 	"k8s.io/kubernetes/pkg/auth/authenticator"
 	"k8s.io/kubernetes/pkg/auth/authorizer"
 	"k8s.io/kubernetes/pkg/auth/handlers"
+	"k8s.io/kubernetes/pkg/cloudprovider"
+	"k8s.io/kubernetes/pkg/genericapiserver/openapi"
+	"k8s.io/kubernetes/pkg/genericapiserver/options"
+	genericvalidation "k8s.io/kubernetes/pkg/genericapiserver/validation"
 	"k8s.io/kubernetes/pkg/registry/generic"
-	genericetcd "k8s.io/kubernetes/pkg/registry/generic/etcd"
+	"k8s.io/kubernetes/pkg/registry/generic/registry"
 	ipallocator "k8s.io/kubernetes/pkg/registry/service/ipallocator"
 	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/storage"
 	"k8s.io/kubernetes/pkg/util"
+	"k8s.io/kubernetes/pkg/util/async"
 	"k8s.io/kubernetes/pkg/util/crypto"
 	utilnet "k8s.io/kubernetes/pkg/util/net"
 	utilruntime "k8s.io/kubernetes/pkg/util/runtime"
 	"k8s.io/kubernetes/pkg/util/sets"
-
-	systemd "github.com/coreos/go-systemd/daemon"
-	"github.com/emicklei/go-restful"
-	"github.com/emicklei/go-restful/swagger"
-	"github.com/golang/glog"
-	"golang.org/x/net/context"
 )
 
-const (
-	DefaultEtcdPathPrefix = "/registry"
-	globalTimeout         = time.Minute
-)
-
-// StorageDestinations is a mapping from API group & resource to
-// the underlying storage interfaces.
-type StorageDestinations struct {
-	APIGroups map[string]*StorageDestinationsForAPIGroup
-}
-
-type StorageDestinationsForAPIGroup struct {
-	Default   storage.Interface
-	Overrides map[string]storage.Interface
-}
-
-func NewStorageDestinations() StorageDestinations {
-	return StorageDestinations{
-		APIGroups: map[string]*StorageDestinationsForAPIGroup{},
-	}
-}
-
-// AddAPIGroup replaces 'group' if it's already registered.
-func (s *StorageDestinations) AddAPIGroup(group string, defaultStorage storage.Interface) {
-	glog.Infof("Adding storage destination for group %v", group)
-	s.APIGroups[group] = &StorageDestinationsForAPIGroup{
-		Default:   defaultStorage,
-		Overrides: map[string]storage.Interface{},
-	}
-}
-
-func (s *StorageDestinations) AddStorageOverride(group, resource string, override storage.Interface) {
-	if _, ok := s.APIGroups[group]; !ok {
-		s.AddAPIGroup(group, nil)
-	}
-	if s.APIGroups[group].Overrides == nil {
-		s.APIGroups[group].Overrides = map[string]storage.Interface{}
-	}
-	s.APIGroups[group].Overrides[resource] = override
-}
-
-// Get finds the storage destination for the given group and resource. It will
-// Fatalf if the group has no storage destination configured.
-func (s *StorageDestinations) Get(group, resource string) storage.Interface {
-	apigroup, ok := s.APIGroups[group]
-	if !ok {
-		// TODO: return an error like a normal function. For now,
-		// Fatalf is better than just logging an error, because this
-		// condition guarantees future problems and this is a less
-		// mysterious failure point.
-		glog.Fatalf("No storage defined for API group: '%s'. Defined groups: %#v", group, s.APIGroups)
-		return nil
-	}
-	if apigroup.Overrides != nil {
-		if client, exists := apigroup.Overrides[resource]; exists {
-			return client
-		}
-	}
-	return apigroup.Default
-}
-
-// Search is like Get, but can be used to search a list of groups. It tries the
-// groups in order (and Fatalf's if none of them exist). The intention is for
-// this to be used for resources that move between groups.
-func (s *StorageDestinations) Search(groups []string, resource string) storage.Interface {
-	for _, group := range groups {
-		apigroup, ok := s.APIGroups[group]
-		if !ok {
-			continue
-		}
-		if apigroup.Overrides != nil {
-			if client, exists := apigroup.Overrides[resource]; exists {
-				return client
-			}
-		}
-		return apigroup.Default
-	}
-	// TODO: return an error like a normal function. For now,
-	// Fatalf is better than just logging an error, because this
-	// condition guarantees future problems and this is a less
-	// mysterious failure point.
-	glog.Fatalf("No storage defined for any of the groups: %v. Defined groups: %#v", groups, s.APIGroups)
-	return nil
-}
-
-// Get all backends for all registered storage destinations.
-// Used for getting all instances for health validations.
-func (s *StorageDestinations) Backends() []string {
-	backends := sets.String{}
-	for _, group := range s.APIGroups {
-		if group.Default != nil {
-			for _, backend := range group.Default.Backends(context.TODO()) {
-				backends.Insert(backend)
-			}
-		}
-		if group.Overrides != nil {
-			for _, storage := range group.Overrides {
-				for _, backend := range storage.Backends(context.TODO()) {
-					backends.Insert(backend)
-				}
-			}
-		}
-	}
-	return backends.List()
-}
+const globalTimeout = time.Minute
 
 // Info about an API group.
 type APIGroupInfo struct {
@@ -195,9 +98,12 @@ type APIGroupInfo struct {
 
 // Config is a structure used to configure a GenericAPIServer.
 type Config struct {
-	StorageDestinations StorageDestinations
-	// StorageVersions is a map between groups and their storage versions
-	StorageVersions map[string]string
+	// The storage factory for other objects
+	StorageFactory     StorageFactory
+	AuditLogPath       string
+	AuditLogMaxAge     int
+	AuditLogMaxBackups int
+	AuditLogMaxSize    int
 	// allow downstream consumers to disable the core controller loops
 	EnableLogsSupport bool
 	EnableUISupport   bool
@@ -222,6 +128,8 @@ type Config struct {
 	Authorizer             authorizer.Authorizer
 	AdmissionControl       admission.Interface
 	MasterServiceNamespace string
+	// TODO(ericchiang): Determine if policy escalation checks should be an admission controller.
+	AuthorizerRBACSuperUser string
 
 	// Map requests to contexts. Exported so downstream consumers can provider their own mappers
 	RequestContextMapper api.RequestContextMapper
@@ -285,6 +193,15 @@ type Config struct {
 	ExtraEndpointPorts []api.EndpointPort
 
 	KubernetesServiceNodePort int
+
+	// EnableOpenAPISupport enables OpenAPI support. Allow downstream customers to disable OpenAPI spec.
+	EnableOpenAPISupport bool
+
+	// OpenAPIInfo will be directly available as Info section of Open API spec.
+	OpenAPIInfo spec.Info
+
+	// OpenAPIDefaultResponse will be used if an web service operation does not have any responses listed.
+	OpenAPIDefaultResponse spec.Response
 }
 
 // GenericAPIServer contains state for a Kubernetes cluster api server.
@@ -322,7 +239,7 @@ type GenericAPIServer struct {
 	PublicReadWritePort  int
 	ServiceReadWriteIP   net.IP
 	ServiceReadWritePort int
-	masterServices       *util.Runner
+	masterServices       *async.Runner
 	ExtraServicePorts    []api.ServicePort
 	ExtraEndpointPorts   []api.EndpointPort
 
@@ -345,11 +262,17 @@ type GenericAPIServer struct {
 	// Map storing information about all groups to be exposed in discovery response.
 	// The map is from name to the group.
 	apiGroupsForDiscovery map[string]unversioned.APIGroup
+
+	// See Config.$name for documentation of these flags
+
+	enableOpenAPISupport   bool
+	openAPIInfo            spec.Info
+	openAPIDefaultResponse spec.Response
 }
 
 func (s *GenericAPIServer) StorageDecorator() generic.StorageDecorator {
 	if s.enableWatchCache {
-		return genericetcd.StorageWithCacher
+		return registry.StorageWithCacher
 	}
 	return generic.UndecoratedStorage
 }
@@ -385,8 +308,7 @@ func setDefaults(c *Config) {
 		// We should probably allow this for clouds that don't require NodePort to do load-balancing (GCE)
 		// but then that breaks the strict nestedness of ServiceType.
 		// Review post-v1
-		defaultServiceNodePortRange := utilnet.PortRange{Base: 30000, Size: 2768}
-		c.ServiceNodePortRange = defaultServiceNodePortRange
+		c.ServiceNodePortRange = options.DefaultServiceNodePortRange
 		glog.Infof("Node port range unspecified. Defaulting to %v.", c.ServiceNodePortRange)
 	}
 	if c.MasterCount == 0 {
@@ -405,7 +327,7 @@ func setDefaults(c *Config) {
 	if len(c.ExternalHost) == 0 && c.PublicAddress != nil {
 		hostAndPort := c.PublicAddress.String()
 		if c.ReadWritePort != 0 {
-			hostAndPort = net.JoinHostPort(hostAndPort, strconv.Itoa(c.ServiceReadWritePort))
+			hostAndPort = net.JoinHostPort(hostAndPort, strconv.Itoa(c.ReadWritePort))
 		}
 		c.ExternalHost = hostAndPort
 	}
@@ -472,18 +394,20 @@ func New(c *Config) (*GenericAPIServer, error) {
 
 		KubernetesServiceNodePort: c.KubernetesServiceNodePort,
 		apiGroupsForDiscovery:     map[string]unversioned.APIGroup{},
+
+		enableOpenAPISupport:   c.EnableOpenAPISupport,
+		openAPIInfo:            c.OpenAPIInfo,
+		openAPIDefaultResponse: c.OpenAPIDefaultResponse,
 	}
 
-	var handlerContainer *restful.Container
 	if c.RestfulContainer != nil {
 		s.mux = c.RestfulContainer.ServeMux
-		handlerContainer = c.RestfulContainer
+		s.HandlerContainer = c.RestfulContainer
 	} else {
 		mux := http.NewServeMux()
 		s.mux = mux
-		handlerContainer = NewHandlerContainer(mux, c.Serializer)
+		s.HandlerContainer = NewHandlerContainer(mux, c.Serializer)
 	}
-	s.HandlerContainer = handlerContainer
 	// Use CurlyRouter to be able to use regular expressions in paths. Regular expressions are required in paths for example for proxy (where the path is proxy/{kind}/{name}/{*})
 	s.HandlerContainer.Router(restful.CurlyRouter{})
 	s.MuxHelper = &apiserver.MuxHelper{Mux: s.mux, RegisteredPaths: []string{}}
@@ -545,7 +469,7 @@ func (s *GenericAPIServer) init(c *Config) {
 	}
 
 	if c.EnableLogsSupport {
-		apiserver.InstallLogsSupport(s.MuxHelper)
+		apiserver.InstallLogsSupport(s.MuxHelper, s.HandlerContainer)
 	}
 	// if c.EnableUISupport {
 	// 	ui.InstallSupport(s.MuxHelper, s.enableSwaggerSupport && s.enableSwaggerUI)
@@ -557,11 +481,13 @@ func (s *GenericAPIServer) init(c *Config) {
 		s.mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	}
 
+	apiserver.InstallVersionHandler(s.MuxHelper, s.HandlerContainer)
+
 	handler := http.Handler(s.mux.(*http.ServeMux))
 
 	// TODO: handle CORS and auth using go-restful
-	// See github.com/emicklei/go-restful/blob/GenericAPIServer/examples/restful-CORS-filter.go, and
-	// github.com/emicklei/go-restful/blob/GenericAPIServer/examples/restful-basic-authentication.go
+	// See github.com/emicklei/go-restful/blob/master/examples/restful-CORS-filter.go, and
+	// github.com/emicklei/go-restful/blob/master/examples/restful-basic-authentication.go
 
 	if len(c.CorsAllowedOriginList) > 0 {
 		allowedOriginRegexps, err := util.CompileRegexps(c.CorsAllowedOriginList)
@@ -575,7 +501,17 @@ func (s *GenericAPIServer) init(c *Config) {
 
 	attributeGetter := apiserver.NewRequestAttributeGetter(s.RequestContextMapper, s.NewRequestInfoResolver())
 	handler = apiserver.WithAuthorizationCheck(handler, attributeGetter, s.authorizer)
-	handler = apiserver.WithActingAs(handler, s.RequestContextMapper, s.authorizer)
+	handler = apiserver.WithImpersonation(handler, s.RequestContextMapper, s.authorizer)
+	if len(c.AuditLogPath) != 0 {
+		// audit handler must comes before the impersonationFilter to read the original user
+		writer := &lumberjack.Logger{
+			Filename:   c.AuditLogPath,
+			MaxAge:     c.AuditLogMaxAge,
+			MaxBackups: c.AuditLogMaxBackups,
+			MaxSize:    c.AuditLogMaxSize,
+		}
+		handler = audit.WithAudit(handler, attributeGetter, writer)
+	}
 
 	// Install Authenticator
 	if c.Authenticator != nil {
@@ -590,17 +526,18 @@ func (s *GenericAPIServer) init(c *Config) {
 	s.Handler = handler
 
 	// After all wrapping is done, put a context filter around both handlers
-	if handler, err := api.NewRequestContextFilter(s.RequestContextMapper, s.Handler); err != nil {
-		glog.Fatalf("Could not initialize request context filter: %v", err)
-	} else {
-		s.Handler = handler
+	var err error
+	handler, err = api.NewRequestContextFilter(s.RequestContextMapper, s.Handler)
+	if err != nil {
+		glog.Fatalf("Could not initialize request context filter for s.Handler: %v", err)
 	}
+	s.Handler = handler
 
-	if handler, err := api.NewRequestContextFilter(s.RequestContextMapper, s.InsecureHandler); err != nil {
-		glog.Fatalf("Could not initialize request context filter: %v", err)
-	} else {
-		s.InsecureHandler = handler
+	handler, err = api.NewRequestContextFilter(s.RequestContextMapper, s.InsecureHandler)
+	if err != nil {
+		glog.Fatalf("Could not initialize request context filter for s.InsecureHandler: %v", err)
 	}
+	s.InsecureHandler = handler
 
 	s.installGroupsDiscoveryHandler()
 }
@@ -637,11 +574,97 @@ func (s *GenericAPIServer) installGroupsDiscoveryHandler() {
 	})
 }
 
-func (s *GenericAPIServer) Run(options *ServerRunOptions) {
+func NewConfig(options *options.ServerRunOptions) *Config {
+	return &Config{
+		APIGroupPrefix:            options.APIGroupPrefix,
+		APIPrefix:                 options.APIPrefix,
+		CorsAllowedOriginList:     options.CorsAllowedOriginList,
+		AuditLogPath:              options.AuditLogPath,
+		AuditLogMaxAge:            options.AuditLogMaxAge,
+		AuditLogMaxBackups:        options.AuditLogMaxBackups,
+		AuditLogMaxSize:           options.AuditLogMaxSize,
+		EnableIndex:               true,
+		EnableLogsSupport:         options.EnableLogsSupport,
+		EnableProfiling:           options.EnableProfiling,
+		EnableSwaggerSupport:      true,
+		EnableSwaggerUI:           options.EnableSwaggerUI,
+		EnableUISupport:           true,
+		EnableWatchCache:          options.EnableWatchCache,
+		ExternalHost:              options.ExternalHost,
+		KubernetesServiceNodePort: options.KubernetesServiceNodePort,
+		MasterCount:               options.MasterCount,
+		MinRequestTimeout:         options.MinRequestTimeout,
+		PublicAddress:             options.AdvertiseAddress,
+		ReadWritePort:             options.SecurePort,
+		ServiceClusterIPRange:     &options.ServiceClusterIPRange,
+		ServiceNodePortRange:      options.ServiceNodePortRange,
+		EnableOpenAPISupport:      true,
+		OpenAPIDefaultResponse: spec.Response{
+			ResponseProps: spec.ResponseProps{
+				Description: "Default Response."}},
+		OpenAPIInfo: spec.Info{
+			InfoProps: spec.InfoProps{
+				Title:   "Generic API Server",
+				Version: "unversioned",
+			},
+		},
+	}
+}
+
+func DefaultAndValidateRunOptions(options *options.ServerRunOptions) {
+	genericvalidation.ValidateRunOptions(options)
+
+	// If advertise-address is not specified, use bind-address. If bind-address
+	// is not usable (unset, 0.0.0.0, or loopback), we will use the host's default
+	// interface as valid public addr for master (see: util/net#ValidPublicAddrForMaster)
+	if options.AdvertiseAddress == nil || options.AdvertiseAddress.IsUnspecified() {
+		hostIP, err := utilnet.ChooseBindAddress(options.BindAddress)
+		if err != nil {
+			glog.Fatalf("Unable to find suitable network address.error='%v' . "+
+				"Try to set the AdvertiseAddress directly or provide a valid BindAddress to fix this.", err)
+		}
+		options.AdvertiseAddress = hostIP
+	}
+	glog.Infof("Will report %v as public IP address.", options.AdvertiseAddress)
+
+	// Set default value for ExternalHost if not specified.
+	if len(options.ExternalHost) == 0 {
+		// TODO: extend for other providers
+		if options.CloudProvider == "gce" {
+			cloud, err := cloudprovider.InitCloudProvider(options.CloudProvider, options.CloudConfigFile)
+			if err != nil {
+				glog.Fatalf("Cloud provider could not be initialized: %v", err)
+			}
+			instances, supported := cloud.Instances()
+			if !supported {
+				glog.Fatalf("GCE cloud provider has no instances.  this shouldn't happen. exiting.")
+			}
+			name, err := os.Hostname()
+			if err != nil {
+				glog.Fatalf("Failed to get hostname: %v", err)
+			}
+			addrs, err := instances.NodeAddresses(name)
+			if err != nil {
+				glog.Warningf("Unable to obtain external host address from cloud provider: %v", err)
+			} else {
+				for _, addr := range addrs {
+					if addr.Type == api.NodeExternalIP {
+						options.ExternalHost = addr.Address
+					}
+				}
+			}
+		}
+	}
+}
+
+func (s *GenericAPIServer) Run(options *options.ServerRunOptions) {
 	if s.enableSwaggerSupport {
 		s.InstallSwaggerAPI()
 	}
-	// We serve on 2 ports. See docs/accessing_the_api.md
+	if s.enableOpenAPISupport {
+		s.InstallOpenAPI()
+	}
+	// We serve on 2 ports. See docs/admin/accessing-the-api.md
 	secureLocation := ""
 	if options.SecurePort != 0 {
 		secureLocation = net.JoinHostPort(options.BindAddress.String(), strconv.Itoa(options.SecurePort))
@@ -664,14 +687,16 @@ func (s *GenericAPIServer) Run(options *ServerRunOptions) {
 	}
 
 	if secureLocation != "" {
-		handler := apiserver.TimeoutHandler(s.Handler, longRunningTimeout)
+		handler := apiserver.TimeoutHandler(apiserver.RecoverPanics(s.Handler), longRunningTimeout)
 		secureServer := &http.Server{
 			Addr:           secureLocation,
-			Handler:        apiserver.MaxInFlightLimit(sem, longRunningRequestCheck, apiserver.RecoverPanics(handler)),
+			Handler:        apiserver.MaxInFlightLimit(sem, longRunningRequestCheck, handler),
 			MaxHeaderBytes: 1 << 20,
 			TLSConfig: &tls.Config{
-				// Change default from SSLv3 to TLSv1.0 (because of POODLE vulnerability)
-				MinVersion: tls.VersionTLS10,
+				// Can't use SSLv3 because of POODLE and BEAST
+				// Can't use TLSv1.0 because of POODLE and BEAST using CBC cipher
+				// Can't use TLSv1.1 because of RC4 cipher usage
+				MinVersion: tls.VersionTLS12,
 			},
 		}
 
@@ -696,11 +721,11 @@ func (s *GenericAPIServer) Run(options *ServerRunOptions) {
 			alternateDNS := []string{"kubernetes.default.svc", "kubernetes.default", "kubernetes"}
 			// It would be nice to set a fqdn subject alt name, but only the kubelets know, the apiserver is clueless
 			// alternateDNS = append(alternateDNS, "kubernetes.default.svc.CLUSTER.DNS.NAME")
-			if shouldGenSelfSignedCerts(options.TLSCertFile, options.TLSPrivateKeyFile) {
+			if !crypto.FoundCertOrKey(options.TLSCertFile, options.TLSPrivateKeyFile) {
 				if err := crypto.GenerateSelfSignedCert(s.ClusterIP.String(), options.TLSCertFile, options.TLSPrivateKeyFile, alternateIPs, alternateDNS); err != nil {
 					glog.Errorf("Unable to generate self signed cert: %v", err)
 				} else {
-					glog.Infof("Using self-signed cert (%options, %options)", options.TLSCertFile, options.TLSPrivateKeyFile)
+					glog.Infof("Using self-signed cert (%s, %s)", options.TLSCertFile, options.TLSPrivateKeyFile)
 				}
 			}
 		}
@@ -725,36 +750,24 @@ func (s *GenericAPIServer) Run(options *ServerRunOptions) {
 		}
 	}
 
-	handler := apiserver.TimeoutHandler(s.InsecureHandler, longRunningTimeout)
+	handler := apiserver.TimeoutHandler(apiserver.RecoverPanics(s.InsecureHandler), longRunningTimeout)
 	http := &http.Server{
 		Addr:           insecureLocation,
-		Handler:        apiserver.RecoverPanics(handler),
+		Handler:        handler,
 		MaxHeaderBytes: 1 << 20,
 	}
+
 	glog.Infof("Serving insecurely on %s", insecureLocation)
-	glog.Fatal(http.ListenAndServe())
-}
-
-// If the file represented by path exists and
-// readable, return true otherwise return false.
-func canReadFile(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-
-	defer f.Close()
-
-	return true
-}
-
-func shouldGenSelfSignedCerts(certPath, keyPath string) bool {
-	if canReadFile(certPath) || canReadFile(keyPath) {
-		glog.Infof("using existing apiserver.crt and apiserver.key files")
-		return false
-	}
-
-	return true
+	go func() {
+		defer utilruntime.HandleCrash()
+		for {
+			if err := http.ListenAndServe(); err != nil {
+				glog.Errorf("Unable to listen for insecure (%v); will try again.", err)
+			}
+			time.Sleep(15 * time.Second)
+		}
+	}()
+	select {}
 }
 
 // Exposes the given group version in API.
@@ -767,12 +780,6 @@ func (s *GenericAPIServer) InstallAPIGroup(apiGroupInfo *APIGroupInfo) error {
 	// Install REST handlers for all the versions in this group.
 	apiVersions := []string{}
 	for _, groupVersion := range apiGroupInfo.GroupMeta.GroupVersions {
-		// Don't serve any versions other than v1 from the legacy group
-		// TODO: plumb API-enabled versions here, so we can choose to enable/disable particular versions in an API group
-		if apiGroupInfo.IsLegacyGroup && groupVersion.Group == "" && groupVersion.Version != "v1" {
-			continue
-		}
-
 		apiVersions = append(apiVersions, groupVersion.Version)
 
 		apiGroupVersion, err := s.getAPIGroupVersion(apiGroupInfo, groupVersion, apiPrefix)
@@ -865,31 +872,53 @@ func (s *GenericAPIServer) getAPIGroupVersion(apiGroupInfo *APIGroupInfo, groupV
 	for k, v := range apiGroupInfo.VersionedResourcesStorageMap[groupVersion.Version] {
 		storage[strings.ToLower(k)] = v
 	}
-	version, err := s.newAPIGroupVersion(apiGroupInfo.GroupMeta, groupVersion)
+	version, err := s.newAPIGroupVersion(apiGroupInfo, groupVersion)
 	version.Root = apiPrefix
 	version.Storage = storage
-	version.ParameterCodec = apiGroupInfo.ParameterCodec
-	version.Serializer = apiGroupInfo.NegotiatedSerializer
-	version.Creater = apiGroupInfo.Scheme
-	version.Convertor = apiGroupInfo.Scheme
-	version.Typer = apiGroupInfo.Scheme
-	version.SubresourceGroupVersionKind = apiGroupInfo.SubresourceGroupVersionKind
 	return version, err
 }
 
-func (s *GenericAPIServer) newAPIGroupVersion(groupMeta apimachinery.GroupMeta, groupVersion unversioned.GroupVersion) (*apiserver.APIGroupVersion, error) {
+func (s *GenericAPIServer) newAPIGroupVersion(apiGroupInfo *APIGroupInfo, groupVersion unversioned.GroupVersion) (*apiserver.APIGroupVersion, error) {
 	return &apiserver.APIGroupVersion{
 		RequestInfoResolver: s.NewRequestInfoResolver(),
 
 		GroupVersion: groupVersion,
-		Linker:       groupMeta.SelfLinker,
-		Mapper:       groupMeta.RESTMapper,
 
-		Admit:   s.AdmissionControl,
-		Context: s.RequestContextMapper,
+		ParameterCodec: apiGroupInfo.ParameterCodec,
+		Serializer:     apiGroupInfo.NegotiatedSerializer,
+		Creater:        apiGroupInfo.Scheme,
+		Convertor:      apiGroupInfo.Scheme,
+		Copier:         apiGroupInfo.Scheme,
+		Typer:          apiGroupInfo.Scheme,
+		SubresourceGroupVersionKind: apiGroupInfo.SubresourceGroupVersionKind,
+		Linker: apiGroupInfo.GroupMeta.SelfLinker,
+		Mapper: apiGroupInfo.GroupMeta.RESTMapper,
 
+		Admit:             s.AdmissionControl,
+		Context:           s.RequestContextMapper,
 		MinRequestTimeout: s.MinRequestTimeout,
 	}, nil
+}
+
+// getSwaggerConfig returns swagger config shared between SwaggerAPI and OpenAPI spec generators
+func (s *GenericAPIServer) getSwaggerConfig() *swagger.Config {
+	hostAndPort := s.ExternalAddress
+	protocol := "https://"
+	webServicesUrl := protocol + hostAndPort
+	return &swagger.Config{
+		WebServicesUrl:  webServicesUrl,
+		WebServices:     s.HandlerContainer.RegisteredWebServices(),
+		ApiPath:         "/swaggerapi/",
+		SwaggerPath:     "/swaggerui/",
+		SwaggerFilePath: "/swagger-ui/",
+		SchemaFormatHandler: func(typeName string) string {
+			switch typeName {
+			case "unversioned.Time", "*unversioned.Time":
+				return "date-time"
+			}
+			return ""
+		},
+	}
 }
 
 // InstallSwaggerAPI installs the /swaggerapi/ endpoint to allow schema discovery
@@ -897,17 +926,36 @@ func (s *GenericAPIServer) newAPIGroupVersion(groupMeta apimachinery.GroupMeta, 
 // register their own web services into the Kubernetes mux prior to initialization
 // of swagger, so that other resource types show up in the documentation.
 func (s *GenericAPIServer) InstallSwaggerAPI() {
-	hostAndPort := s.ExternalAddress
-	protocol := "https://"
-	webServicesUrl := protocol + hostAndPort
 
 	// Enable swagger UI and discovery API
-	swaggerConfig := swagger.Config{
-		WebServicesUrl:  webServicesUrl,
-		WebServices:     s.HandlerContainer.RegisteredWebServices(),
-		ApiPath:         "/swaggerapi/",
-		SwaggerPath:     "/swaggerui/",
-		SwaggerFilePath: "/swagger-ui/",
+	swagger.RegisterSwaggerService(*s.getSwaggerConfig(), s.HandlerContainer)
+}
+
+// InstallOpenAPI installs the /swagger.json endpoint to allow new OpenAPI schema discovery.
+func (s *GenericAPIServer) InstallOpenAPI() {
+	openAPIConfig := openapi.Config{
+		SwaggerConfig:   s.getSwaggerConfig(),
+		IgnorePrefixes:  []string{"/swaggerapi"},
+		Info:            &s.openAPIInfo,
+		DefaultResponse: &s.openAPIDefaultResponse,
 	}
-	swagger.RegisterSwaggerService(swaggerConfig, s.HandlerContainer)
+	err := openapi.RegisterOpenAPIService(&openAPIConfig, s.HandlerContainer)
+	if err != nil {
+		glog.Fatalf("Failed to generate open api spec: %v", err)
+	}
+}
+
+// NewDefaultAPIGroupInfo returns an APIGroupInfo stubbed with "normal" values
+// exposed for easier composition from other packages
+func NewDefaultAPIGroupInfo(group string) APIGroupInfo {
+	groupMeta := registered.GroupOrDie(group)
+
+	return APIGroupInfo{
+		GroupMeta:                    *groupMeta,
+		VersionedResourcesStorageMap: map[string]map[string]rest.Storage{},
+		OptionsExternalVersion:       &registered.GroupOrDie(api.GroupName).GroupVersion,
+		Scheme:                       api.Scheme,
+		ParameterCodec:               api.ParameterCodec,
+		NegotiatedSerializer:         api.Codecs,
+	}
 }

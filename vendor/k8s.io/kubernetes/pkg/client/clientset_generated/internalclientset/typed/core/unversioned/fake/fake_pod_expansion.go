@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import (
 func (c *FakePods) Bind(binding *api.Binding) error {
 	action := core.CreateActionImpl{}
 	action.Verb = "create"
-	action.Resource = "pods"
+	action.Resource = podsResource
 	action.Subresource = "bindings"
 	action.Object = binding
 
@@ -37,7 +37,7 @@ func (c *FakePods) GetLogs(name string, opts *api.PodLogOptions) *restclient.Req
 	action := core.GenericActionImpl{}
 	action.Verb = "get"
 	action.Namespace = c.ns
-	action.Resource = "pod"
+	action.Resource = podsResource
 	action.Subresource = "logs"
 	action.Value = opts
 

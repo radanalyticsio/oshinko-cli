@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -20,19 +21,16 @@ import (
 // ErrExit is a marker interface for cli commands indicating that the response has been processed
 var ErrExit = fmt.Errorf("exit directly")
 
-// RequireNoArguments exits with a usage error if extra arguments are provided.
-func RequireNoArguments(c *cobra.Command, args []string) {
-	if len(args) > 0 {
-		kcmdutil.CheckErr(kcmdutil.UsageError(c, fmt.Sprintf(`unknown command "%s"`, strings.Join(args, " "))))
-	}
-}
+var commaSepVarsPattern = regexp.MustCompile(".*=.*,.*=.*")
 
-func DefaultSubCommandRun(out io.Writer) func(c *cobra.Command, args []string) {
-	return func(c *cobra.Command, args []string) {
-		c.SetOutput(out)
-		RequireNoArguments(c, args)
-		c.Help()
+// ReplaceCommandName recursively processes the examples in a given command to change a hardcoded
+// command name (like 'kubectl' to the appropriate target name). It returns c.
+func ReplaceCommandName(from, to string, c *cobra.Command) *cobra.Command {
+	c.Example = strings.Replace(c.Example, from, to, -1)
+	for _, sub := range c.Commands() {
+		ReplaceCommandName(from, to, sub)
 	}
+	return c
 }
 
 // GetDisplayFilename returns the absolute path of the filename as long as there was no error, otherwise it returns the filename as-is
@@ -82,7 +80,7 @@ func convertItemsForDisplay(objs []runtime.Object, preferredVersions ...unversio
 
 	for i := range objs {
 		obj := objs[i]
-		kind, err := kapi.Scheme.ObjectKind(obj)
+		kind, _, err := kapi.Scheme.ObjectKind(obj)
 		if err != nil {
 			return nil, err
 		}
@@ -105,12 +103,12 @@ func convertItemsForDisplay(objs []runtime.Object, preferredVersions ...unversio
 				actualOutputVersion = externalVersion
 				break
 			}
-			if actualOutputVersion.IsEmpty() {
+			if actualOutputVersion.Empty() {
 				actualOutputVersion = externalVersion
 			}
 		}
 
-		convertedObject, err := kapi.Scheme.ConvertToVersion(obj, actualOutputVersion.String())
+		convertedObject, err := kapi.Scheme.ConvertToVersion(obj, actualOutputVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -151,5 +149,13 @@ func VersionedPrintObject(fn func(*cobra.Command, meta.RESTMapper, runtime.Objec
 			obj = result[0]
 		}
 		return fn(c, mapper, obj, out)
+	}
+}
+
+func WarnAboutCommaSeparation(errout io.Writer, values []string, flag string) {
+	for _, value := range values {
+		if commaSepVarsPattern.MatchString(value) {
+			fmt.Fprintf(errout, "warning: %s no longer accepts comma-separated lists of values. %q will be treated as a single key-value pair.\n", flag, value)
+		}
 	}
 }

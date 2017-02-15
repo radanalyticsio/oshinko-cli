@@ -1,5 +1,3 @@
-// +build integration
-
 package integration
 
 import (
@@ -8,9 +6,11 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/docker/distribution/digest"
 	"github.com/docker/distribution/manifest"
@@ -21,16 +21,25 @@ import (
 	kapi "k8s.io/kubernetes/pkg/api"
 
 	"github.com/openshift/origin/pkg/cmd/dockerregistry"
+	cmdutil "github.com/openshift/origin/pkg/cmd/util"
 	"github.com/openshift/origin/pkg/cmd/util/tokencmd"
+	registryutil "github.com/openshift/origin/pkg/dockerregistry/testutil"
 	imageapi "github.com/openshift/origin/pkg/image/api"
 	testutil "github.com/openshift/origin/test/util"
 	testserver "github.com/openshift/origin/test/util/server"
 )
 
-func signedManifest(name string) ([]byte, digest.Digest, error) {
+func signedManifest(name string, blobs []digest.Digest) ([]byte, digest.Digest, error) {
 	key, err := libtrust.GenerateECP256PrivateKey()
 	if err != nil {
 		return []byte{}, "", fmt.Errorf("error generating EC key: %s", err)
+	}
+
+	history := make([]schema1.History, 0, len(blobs))
+	fsLayers := make([]schema1.FSLayer, 0, len(blobs))
+	for _, b := range blobs {
+		history = append(history, schema1.History{V1Compatibility: `{"id": "foo"}`})
+		fsLayers = append(fsLayers, schema1.FSLayer{BlobSum: b})
 	}
 
 	mappingManifest := schema1.Manifest{
@@ -40,21 +49,15 @@ func signedManifest(name string) ([]byte, digest.Digest, error) {
 		Name:         name,
 		Tag:          imageapi.DefaultImageTag,
 		Architecture: "amd64",
-		History: []schema1.History{
-			{
-				V1Compatibility: `{"id": "foo"}`,
-			},
-		},
+		History:      history,
+		FSLayers:     fsLayers,
 	}
 
 	manifestBytes, err := json.MarshalIndent(mappingManifest, "", "    ")
 	if err != nil {
 		return []byte{}, "", fmt.Errorf("error marshaling manifest: %s", err)
 	}
-	dgst, err := digest.FromBytes(manifestBytes)
-	if err != nil {
-		return []byte{}, "", fmt.Errorf("error calculating manifest digest: %s", err)
-	}
+	dgst := digest.FromBytes(manifestBytes)
 
 	jsonSignature, err := libtrust.NewJSONSignature(manifestBytes)
 	if err != nil {
@@ -75,6 +78,7 @@ func signedManifest(name string) ([]byte, digest.Digest, error) {
 
 func TestV2RegistryGetTags(t *testing.T) {
 	testutil.RequireEtcd(t)
+	defer testutil.DumpEtcdOnFailure(t)
 	_, clusterAdminKubeConfig, err := testserver.StartTestMasterAPI()
 	if err != nil {
 		t.Fatalf("error starting master: %v", err)
@@ -98,7 +102,8 @@ func TestV2RegistryGetTags(t *testing.T) {
 	}
 
 	config := `version: 0.1
-loglevel: debug
+log:
+  level: debug
 http:
   addr: 127.0.0.1:5000
 storage:
@@ -106,7 +111,11 @@ storage:
 auth:
   openshift:
 middleware:
+  registry:
+    - name: openshift
   repository:
+    - name: openshift
+  storage:
     - name: openshift
 `
 
@@ -117,6 +126,10 @@ middleware:
 	os.Setenv("DOCKER_REGISTRY_URL", "127.0.0.1:5000")
 
 	go dockerregistry.Execute(strings.NewReader(config))
+
+	if err := cmdutil.WaitForSuccessfulDial(false, "tcp", "127.0.0.1:5000", 100*time.Millisecond, 1*time.Second, 35); err != nil {
+		t.Fatal(err)
+	}
 
 	stream := imageapi.ImageStream{
 		ObjectMeta: kapi.ObjectMeta{
@@ -209,7 +222,7 @@ middleware:
 	if err != nil {
 		t.Fatalf("error getting imageStreamImage: %s", err)
 	}
-	if e, a := fmt.Sprintf("test@%s", dgst.Hex()[:7]), image.Name; e != a {
+	if e, a := fmt.Sprintf("test@%s", dgst.String()), image.Name; e != a {
 		t.Errorf("image name: expected %q, got %q", e, a)
 	}
 	if e, a := dgst.String(), image.Image.Name; e != a {
@@ -257,8 +270,14 @@ middleware:
 }
 
 func putManifest(name, user, token string) (digest.Digest, error) {
+	creds := registryutil.NewBasicCredentialStore(user, token)
+	desc, _, err := registryutil.UploadTestBlob(&url.URL{Host: "127.0.0.1:5000", Scheme: "http"}, creds, testutil.Namespace()+"/"+name)
+	if err != nil {
+		return "", err
+	}
+
 	putUrl := fmt.Sprintf("http://127.0.0.1:5000/v2/%s/%s/manifests/%s", testutil.Namespace(), name, imageapi.DefaultImageTag)
-	signedManifest, dgst, err := signedManifest(fmt.Sprintf("%s/%s", testutil.Namespace(), name))
+	signedManifest, dgst, err := signedManifest(fmt.Sprintf("%s/%s", testutil.Namespace(), name), []digest.Digest{desc.Digest})
 	if err != nil {
 		return "", err
 	}

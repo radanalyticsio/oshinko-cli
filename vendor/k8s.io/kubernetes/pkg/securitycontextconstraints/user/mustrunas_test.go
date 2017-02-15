@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,8 +17,9 @@ limitations under the License.
 package user
 
 import (
-	"k8s.io/kubernetes/pkg/api"
 	"testing"
+
+	"k8s.io/kubernetes/pkg/api"
 )
 
 func TestMustRunAsOptions(t *testing.T) {
@@ -52,11 +53,11 @@ func TestMustRunAsGenerate(t *testing.T) {
 	opts := &api.RunAsUserStrategyOptions{UID: &uid}
 	mustRunAs, err := NewMustRunAs(opts)
 	if err != nil {
-		t.Fatal("unexpected error initializing NewMustRunAs %v", err)
+		t.Fatalf("unexpected error initializing NewMustRunAs %v", err)
 	}
 	generated, err := mustRunAs.Generate(nil, nil)
 	if err != nil {
-		t.Fatal("unexpected error generating uid %v", err)
+		t.Fatalf("unexpected error generating uid %v", err)
 	}
 	if *generated != uid {
 		t.Errorf("generated uid does not equal configured uid")
@@ -69,7 +70,7 @@ func TestMustRunAsValidate(t *testing.T) {
 	opts := &api.RunAsUserStrategyOptions{UID: &uid}
 	mustRunAs, err := NewMustRunAs(opts)
 	if err != nil {
-		t.Fatal("unexpected error initializing NewMustRunAs %v", err)
+		t.Fatalf("unexpected error initializing NewMustRunAs %v", err)
 	}
 	container := &api.Container{
 		SecurityContext: &api.SecurityContext{

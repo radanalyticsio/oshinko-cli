@@ -5,10 +5,15 @@
     "name": "mongodb-ephemeral",
     "creationTimestamp": null,
     "annotations": {
-      "description": "MongoDB database service, without persistent storage. WARNING: Any data stored will be lost upon pod destruction. Only use this template for testing",
+      "openshift.io/display-name": "MongoDB (Ephemeral)",
+      "description": "MongoDB database service, without persistent storage. For more information about using this template, including OpenShift considerations, see https://github.com/sclorg/mongodb-container/blob/master/3.2/README.md.\n\nWARNING: Any data stored will be lost upon pod destruction. Only use this template for testing",
       "iconClass": "icon-mongodb",
       "tags": "database,mongodb"
     }
+  },
+  "message": "The following service(s) have been created in your project: ${DATABASE_SERVICE_NAME}.\n\n       Username: ${MONGODB_USER}\n       Password: ${MONGODB_PASSWORD}\n  Database Name: ${MONGODB_DATABASE}\n Connection URL: mongodb://${MONGODB_USER}:${MONGODB_PASSWORD}@${DATABASE_SERVICE_NAME}/${MONGODB_DATABASE}\n\nFor more information about using this template, including OpenShift considerations, see https://github.com/sclorg/mongodb-container/blob/master/3.2/README.md.",
+  "labels": {
+    "template": "mongodb-ephemeral-template"
   },
   "objects": [
     {
@@ -31,7 +36,6 @@
         "selector": {
           "name": "${DATABASE_SERVICE_NAME}"
         },
-        "portalIP": "",
         "type": "ClusterIP",
         "sessionAffinity": "None"
       },
@@ -54,13 +58,13 @@
           {
             "type": "ImageChange",
             "imageChangeParams": {
-              "automatic": false,
+              "automatic": true,
               "containerNames": [
                 "mongodb"
               ],
               "from": {
                 "kind": "ImageStreamTag",
-                "name": "mongodb:latest",
+                "name": "mongodb:${MONGODB_VERSION}",
                 "namespace": "${NAMESPACE}"
               },
               "lastTriggeredImage": ""
@@ -85,7 +89,7 @@
             "containers": [
               {
                 "name": "mongodb",
-                "image": "mongodb",
+                "image": " ",
                 "ports": [
                   {
                     "containerPort": 27017,
@@ -182,7 +186,7 @@
     },
     {
       "name": "MONGODB_USER",
-      "displayName": "MongoDB User",
+      "displayName": "MongoDB Connection Username",
       "description": "Username for MongoDB user that will be used for accessing the database.",
       "generate": "expression",
       "from": "user[A-Z0-9]{3}",
@@ -190,8 +194,8 @@
     },
     {
       "name": "MONGODB_PASSWORD",
-      "displayName": "MongoDB Password",
-      "description": "Password for the MongoDB user.",
+      "displayName": "MongoDB Connection Password",
+      "description": "Password for the MongoDB connection user.",
       "generate": "expression",
       "from": "[a-zA-Z0-9]{16}",
       "required": true
@@ -210,9 +214,13 @@
       "generate": "expression",
       "from": "[a-zA-Z0-9]{16}",
       "required": true
+    },
+    {
+      "name": "MONGODB_VERSION",
+      "displayName": "Version of MongoDB Image",
+      "description": "Version of MongoDB image to be used (2.4, 2.6, 3.2 or latest).",
+      "value": "3.2",
+      "required": true
     }
-  ],
-  "labels": {
-    "template": "mongodb-ephemeral-template"
-  }
+  ]
 }

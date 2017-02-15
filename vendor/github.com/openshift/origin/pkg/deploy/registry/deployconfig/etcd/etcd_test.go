@@ -3,7 +3,6 @@ package etcd
 import (
 	"testing"
 
-	"k8s.io/kubernetes/pkg/client/unversioned/testclient"
 	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/labels"
 	"k8s.io/kubernetes/pkg/registry/registrytest"
@@ -13,11 +12,15 @@ import (
 	_ "github.com/openshift/origin/pkg/deploy/api/install"
 	"github.com/openshift/origin/pkg/deploy/api/test"
 	"github.com/openshift/origin/pkg/deploy/registry/deployconfig"
+	"github.com/openshift/origin/pkg/util/restoptions"
 )
 
 func newStorage(t *testing.T) (*REST, *etcdtesting.EtcdTestServer) {
 	etcdStorage, server := registrytest.NewEtcdStorage(t, "")
-	storage, _, _ := NewREST(etcdStorage, testclient.NewSimpleFake())
+	storage, _, _, err := NewREST(restoptions.NewSimpleGetter(etcdStorage))
+	if err != nil {
+		t.Fatal(err)
+	}
 	return storage, server
 }
 
@@ -33,7 +36,7 @@ func validDeploymentConfig() *api.DeploymentConfig {
 func TestCreate(t *testing.T) {
 	storage, server := newStorage(t)
 	defer server.Terminate(t)
-	test := registrytest.New(t, storage.Etcd)
+	test := registrytest.New(t, storage.Store)
 	valid := validDeploymentConfig()
 	valid.Name = ""
 	valid.GenerateName = "test-"
@@ -47,7 +50,7 @@ func TestCreate(t *testing.T) {
 func TestList(t *testing.T) {
 	storage, server := newStorage(t)
 	defer server.Terminate(t)
-	test := registrytest.New(t, storage.Etcd)
+	test := registrytest.New(t, storage.Store)
 	test.TestList(
 		validDeploymentConfig(),
 	)
@@ -56,7 +59,7 @@ func TestList(t *testing.T) {
 func TestGet(t *testing.T) {
 	storage, server := newStorage(t)
 	defer server.Terminate(t)
-	test := registrytest.New(t, storage.Etcd)
+	test := registrytest.New(t, storage.Store)
 	test.TestGet(
 		validDeploymentConfig(),
 	)
@@ -65,7 +68,7 @@ func TestGet(t *testing.T) {
 func TestDelete(t *testing.T) {
 	storage, server := newStorage(t)
 	defer server.Terminate(t)
-	test := registrytest.New(t, storage.Etcd)
+	test := registrytest.New(t, storage.Store)
 	test.TestDelete(
 		validDeploymentConfig(),
 	)
@@ -74,7 +77,7 @@ func TestDelete(t *testing.T) {
 func TestWatch(t *testing.T) {
 	storage, server := newStorage(t)
 	defer server.Terminate(t)
-	test := registrytest.New(t, storage.Etcd)
+	test := registrytest.New(t, storage.Store)
 
 	valid := validDeploymentConfig()
 	valid.Name = "foo"

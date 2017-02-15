@@ -10,10 +10,11 @@ import (
 
 	"github.com/openshift/source-to-image/pkg/api"
 	"github.com/openshift/source-to-image/pkg/build"
+	"github.com/openshift/source-to-image/pkg/docker"
 )
 
 // Config returns the Config object in nice readable, tabbed format.
-func DescribeConfig(config *api.Config) string {
+func Config(config *api.Config) string {
 	out, err := tabbedString(func(out io.Writer) error {
 		if len(config.DisplayName) > 0 {
 			fmt.Fprintf(out, "Application Name:\t%s\n", config.DisplayName)
@@ -22,6 +23,7 @@ func DescribeConfig(config *api.Config) string {
 			fmt.Fprintf(out, "Description:\t%s\n", config.Description)
 		}
 		describeBuilderImage(config, config.BuilderImage, out)
+		describeRuntimeImage(config, out)
 		fmt.Fprintf(out, "Source:\t%s\n", config.Source)
 		if len(config.Ref) > 0 {
 			fmt.Fprintf(out, "Source Ref:\t%s\n", config.Ref)
@@ -34,6 +36,7 @@ func DescribeConfig(config *api.Config) string {
 		if len(config.EnvironmentFile) > 0 {
 			fmt.Fprintf(out, "Environment File:\t%s\n", config.EnvironmentFile)
 		}
+		printLabels(out, config.Labels)
 		fmt.Fprintf(out, "Incremental Build:\t%s\n", printBool(config.Incremental))
 		if config.Incremental {
 			fmt.Fprintf(out, "Incremental Image Pull User:\t%s\n", config.IncrementalAuthentication.Username)
@@ -82,7 +85,7 @@ func DescribeConfig(config *api.Config) string {
 		return nil
 	})
 	if err != nil {
-		fmt.Printf("ERROR: %v", err)
+		fmt.Printf("error: %v", err)
 	}
 	return out
 }
@@ -96,16 +99,38 @@ func describeBuilderImage(config *api.Config, image string, out io.Writer) {
 		Tag:                config.Tag,
 		IncrementalAuthentication: config.IncrementalAuthentication,
 	}
-	build.GenerateConfigFromLabels(c)
-	if len(c.DisplayName) > 0 {
-		fmt.Fprintf(out, "Builder Name:\t%s\n", c.DisplayName)
+	pr, err := docker.GetBuilderImage(c)
+	if err == nil {
+		build.GenerateConfigFromLabels(c, pr)
+		if len(c.DisplayName) > 0 {
+			fmt.Fprintf(out, "Builder Name:\t%s\n", c.DisplayName)
+		}
+		fmt.Fprintf(out, "Builder Image:\t%s\n", config.BuilderImage)
+		if len(c.BuilderImageVersion) > 0 {
+			fmt.Fprintf(out, "Builder Image Version:\t%s\n", c.BuilderImageVersion)
+		}
+		if len(c.BuilderBaseImageVersion) > 0 {
+			fmt.Fprintf(out, "Builder Base Version:\t%s\n", c.BuilderBaseImageVersion)
+		}
+	} else {
+		fmt.Fprintf(out, "Error describing image:\t%s\n", err.Error())
 	}
-	fmt.Fprintf(out, "Builder Image:\t%s\n", config.BuilderImage)
-	if len(c.BuilderImageVersion) > 0 {
-		fmt.Fprintf(out, "Builder Image Version:\t%s\n", c.BuilderImageVersion)
+}
+
+func describeRuntimeImage(config *api.Config, out io.Writer) {
+	if len(config.RuntimeImage) == 0 {
+		return
 	}
-	if len(c.BuilderBaseImageVersion) > 0 {
-		fmt.Fprintf(out, "Builder Base Version:\t%s\n", c.BuilderBaseImageVersion)
+
+	fmt.Fprintf(out, "Runtime Image:\t%s\n", config.RuntimeImage)
+
+	pullPolicy := config.RuntimeImagePullPolicy
+	if len(pullPolicy) == 0 {
+		pullPolicy = api.DefaultRuntimeImagePullPolicy
+	}
+	fmt.Fprintf(out, "Runtime Image Pull Policy:\t%s\n", pullPolicy)
+	if len(config.RuntimeAuthentication.Username) > 0 {
+		fmt.Fprintf(out, "Runtime Image Pull User:\t%s\n", config.RuntimeAuthentication.Username)
 	}
 }
 
@@ -115,6 +140,14 @@ func printEnv(out io.Writer, env api.EnvironmentList) {
 		result = append(result, strings.Join([]string{e.Name, e.Value}, "="))
 	}
 	fmt.Fprintf(out, "Environment:\t%s\n", strings.Join(result, ","))
+}
+
+func printLabels(out io.Writer, labels map[string]string) {
+	result := []string{}
+	for k, v := range labels {
+		result = append(result, fmt.Sprintf("%s=%q", k, v))
+	}
+	fmt.Fprintf(out, "Labels:\t%s\n", strings.Join(result, ","))
 }
 
 func printBool(b bool) string {

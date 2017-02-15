@@ -16,12 +16,6 @@ const (
 	// storage path root would configurable for all drivers through this
 	// package. In reality, we've found it simpler to do this on a per driver
 	// basis.
-
-	layersDirectory    = "_layers"
-	manifestsDirectory = "_manifests"
-	uploadsDirectory   = "_uploads"
-
-	multilevelHexPrefixLength = 2
 )
 
 // pathFor maps paths based on "object names" and their ids. The "object
@@ -36,8 +30,6 @@ const (
 // 						revisions
 //							-> <manifest digest path>
 //								-> link
-//								-> signatures
-// 									<algorithm>/<digest>/link
 // 						tags/<tag>
 //							-> current/link
 // 							-> index
@@ -48,13 +40,13 @@ const (
 // 						data
 // 						startedat
 // 						hashstates/<algorithm>/<offset>
-//			-> blobs/<algorithm>
+//			-> blob/<algorithm>
 //				<split directory content addressable storage>
 //
 // The storage backend layout is broken up into a content-addressable blob
 // store and repositories. The content-addressable blob store holds most data
 // throughout the backend, keyed by algorithm and digests of the underlying
-// content. Access to the blob store is controled through links from the
+// content. Access to the blob store is controlled through links from the
 // repository to blobstore.
 //
 // A repository is made up of layers, manifests and tags. The layers component
@@ -68,8 +60,7 @@ const (
 //
 // The third component of the repository directory is the manifests store,
 // which is made up of a revision store and tag store. Manifests are stored in
-// the blob store and linked into the revision store. Signatures are separated
-// from the manifest payload data and linked into the blob store, as well.
+// the blob store and linked into the revision store.
 // While the registry can save all revisions of a manifest, no relationship is
 // implied as to the ordering of changes to a manifest. The tag store provides
 // support for name, tag lookups of manifests, using "current/link" under a
@@ -80,11 +71,9 @@ const (
 //
 //	Manifests:
 //
-// 	manifestRevisionsPathSpec:     <root>/v2/repositories/<name>/_manifests/revisions/
+// 	manifestRevisionsPathSpec:      <root>/v2/repositories/<name>/_manifests/revisions/
 // 	manifestRevisionPathSpec:      <root>/v2/repositories/<name>/_manifests/revisions/<algorithm>/<hex digest>/
 // 	manifestRevisionLinkPathSpec:  <root>/v2/repositories/<name>/_manifests/revisions/<algorithm>/<hex digest>/link
-// 	manifestSignaturesPathSpec:    <root>/v2/repositories/<name>/_manifests/revisions/<algorithm>/<hex digest>/signatures/
-// 	manifestSignatureLinkPathSpec: <root>/v2/repositories/<name>/_manifests/revisions/<algorithm>/<hex digest>/signatures/<algorithm>/<hex digest>/link
 //
 //	Tags:
 //
@@ -97,7 +86,6 @@ const (
 //
 // 	Blobs:
 //
-// 	layersPathSpec:               <root>/v2/repositories/<name>/_layers/
 // 	layerLinkPathSpec:            <root>/v2/repositories/<name>/_layers/<algorithm>/<hex digest>/link
 //
 //	Uploads:
@@ -108,6 +96,7 @@ const (
 //
 //	Blob Store:
 //
+//	blobsPathSpec:                  <root>/v2/blobs/
 // 	blobPathSpec:                   <root>/v2/blobs/<algorithm>/<first two hex bytes of digest>/<hex digest>
 // 	blobDataPathSpec:               <root>/v2/blobs/<algorithm>/<first two hex bytes of digest>/<hex digest>/data
 // 	blobMediaTypePathSpec:               <root>/v2/blobs/<algorithm>/<first two hex bytes of digest>/<hex digest>/data
@@ -134,19 +123,15 @@ func pathFor(spec pathSpec) (string, error) {
 	switch v := spec.(type) {
 
 	case manifestRevisionsPathSpec:
+		return path.Join(append(repoPrefix, v.name, "_manifests", "revisions")...), nil
 
-		return path.Join(append(repoPrefix, v.name, manifestsDirectory, "revisions")...), nil
 	case manifestRevisionPathSpec:
-		revisionsPrefix, err := pathFor(manifestRevisionsPathSpec{name: v.name})
-		if err != nil {
-			return "", err
-		}
 		components, err := digestPathComponents(v.revision, false)
 		if err != nil {
 			return "", err
 		}
 
-		return path.Join(append([]string{revisionsPrefix}, components...)...), nil
+		return path.Join(append(append(repoPrefix, v.name, "_manifests", "revisions"), components...)...), nil
 	case manifestRevisionLinkPathSpec:
 		root, err := pathFor(manifestRevisionPathSpec{
 			name:     v.name,
@@ -158,35 +143,8 @@ func pathFor(spec pathSpec) (string, error) {
 		}
 
 		return path.Join(root, "link"), nil
-	case manifestSignaturesPathSpec:
-		root, err := pathFor(manifestRevisionPathSpec{
-			name:     v.name,
-			revision: v.revision,
-		})
-
-		if err != nil {
-			return "", err
-		}
-
-		return path.Join(root, "signatures"), nil
-	case manifestSignatureLinkPathSpec:
-		root, err := pathFor(manifestSignaturesPathSpec{
-			name:     v.name,
-			revision: v.revision,
-		})
-
-		if err != nil {
-			return "", err
-		}
-
-		signatureComponents, err := digestPathComponents(v.signature, false)
-		if err != nil {
-			return "", err
-		}
-
-		return path.Join(root, path.Join(append(signatureComponents, "link")...)), nil
 	case manifestTagsPathSpec:
-		return path.Join(append(repoPrefix, v.name, manifestsDirectory, "tags")...), nil
+		return path.Join(append(repoPrefix, v.name, "_manifests", "tags")...), nil
 	case manifestTagPathSpec:
 		root, err := pathFor(manifestTagsPathSpec{
 			name: v.name,
@@ -247,26 +205,23 @@ func pathFor(spec pathSpec) (string, error) {
 		}
 
 		return path.Join(root, path.Join(components...)), nil
-	case layersPathSpec:
-
-		return path.Join(append(repoPrefix, v.name, layersDirectory)...), nil
 	case layerLinkPathSpec:
-		layersPrefix, err := pathFor(layersPathSpec{name: v.name})
-		if err != nil {
-			return "", err
-		}
 		components, err := digestPathComponents(v.digest, false)
 		if err != nil {
 			return "", err
 		}
-		components = append(components, "link")
 
 		// TODO(stevvooe): Right now, all blobs are linked under "_layers". If
 		// we have future migrations, we may want to rename this to "_blobs".
 		// A migration strategy would simply leave existing items in place and
 		// write the new paths, commit a file then delete the old files.
 
-		return path.Join(append([]string{layersPrefix}, components...)...), nil
+		blobLinkPathComponents := append(repoPrefix, v.name, "_layers")
+
+		return path.Join(path.Join(append(blobLinkPathComponents, components...)...), "link"), nil
+	case blobsPathSpec:
+		blobsPathPrefix := append(rootPrefix, "blobs")
+		return path.Join(blobsPathPrefix...), nil
 	case blobPathSpec:
 		components, err := digestPathComponents(v.digest, true)
 		if err != nil {
@@ -274,27 +229,27 @@ func pathFor(spec pathSpec) (string, error) {
 		}
 
 		blobPathPrefix := append(rootPrefix, "blobs")
-
 		return path.Join(append(blobPathPrefix, components...)...), nil
 	case blobDataPathSpec:
-		blobPathPrefix, err := pathFor(blobPathSpec{
-			digest: v.digest,
-		})
+		components, err := digestPathComponents(v.digest, true)
 		if err != nil {
 			return "", err
 		}
 
-		return path.Join(blobPathPrefix, "data"), nil
+		components = append(components, "data")
+		blobPathPrefix := append(rootPrefix, "blobs")
+		return path.Join(append(blobPathPrefix, components...)...), nil
+
 	case uploadDataPathSpec:
-		return path.Join(append(repoPrefix, v.name, uploadsDirectory, v.id, "data")...), nil
+		return path.Join(append(repoPrefix, v.name, "_uploads", v.id, "data")...), nil
 	case uploadStartedAtPathSpec:
-		return path.Join(append(repoPrefix, v.name, uploadsDirectory, v.id, "startedat")...), nil
+		return path.Join(append(repoPrefix, v.name, "_uploads", v.id, "startedat")...), nil
 	case uploadHashStatePathSpec:
 		offset := fmt.Sprintf("%d", v.offset)
 		if v.list {
 			offset = "" // Limit to the prefix for listing offsets.
 		}
-		return path.Join(append(repoPrefix, v.name, uploadsDirectory, v.id, "hashstates", string(v.alg), offset)...), nil
+		return path.Join(append(repoPrefix, v.name, "_uploads", v.id, "hashstates", string(v.alg), offset)...), nil
 	case repositoriesRootPathSpec:
 		return path.Join(repoPrefix...), nil
 	default:
@@ -310,8 +265,8 @@ type pathSpec interface {
 	pathSpec()
 }
 
-// manifestRevisionsPathSpec describes the components of the directory path for
-// a root of repository revisions.
+// manifestRevisionsPathSpec describes the directory path for
+// a manifest revision.
 type manifestRevisionsPathSpec struct {
 	name string
 }
@@ -337,26 +292,6 @@ type manifestRevisionLinkPathSpec struct {
 }
 
 func (manifestRevisionLinkPathSpec) pathSpec() {}
-
-// manifestSignaturesPathSpec decribes the path components for the directory
-// containing all the signatures for the target blob. Entries are named with
-// the underlying key id.
-type manifestSignaturesPathSpec struct {
-	name     string
-	revision digest.Digest
-}
-
-func (manifestSignaturesPathSpec) pathSpec() {}
-
-// manifestSignatureLinkPathSpec decribes the path components used to look up
-// a signature file by the hash of its blob.
-type manifestSignatureLinkPathSpec struct {
-	name      string
-	revision  digest.Digest
-	signature digest.Digest
-}
-
-func (manifestSignatureLinkPathSpec) pathSpec() {}
 
 // manifestTagsPathSpec describes the path elements required to point to the
 // manifest tags directory.
@@ -413,13 +348,6 @@ type manifestTagIndexEntryLinkPathSpec struct {
 
 func (manifestTagIndexEntryLinkPathSpec) pathSpec() {}
 
-// layersPathSpec describes the root directory of repository layer links.
-type layersPathSpec struct {
-	name string
-}
-
-func (layersPathSpec) pathSpec() {}
-
 // blobLinkPathSpec specifies a path for a blob link, which is a file with a
 // blob id. The blob link will contain a content addressable blob id reference
 // into the blob store. The format of the contents is as follows:
@@ -440,14 +368,18 @@ type layerLinkPathSpec struct {
 func (layerLinkPathSpec) pathSpec() {}
 
 // blobAlgorithmReplacer does some very simple path sanitization for user
-// input. Mostly, this is to provide some hierarchy for tarsum digests. Paths
-// should be "safe" before getting this far due to strict digest requirements
-// but we can add further path conversion here, if needed.
+// input. Paths should be "safe" before getting this far due to strict digest
+// requirements but we can add further path conversion here, if needed.
 var blobAlgorithmReplacer = strings.NewReplacer(
 	"+", "/",
 	".", "/",
 	";", "/",
 )
+
+// blobsPathSpec contains the path for the blobs directory
+type blobsPathSpec struct{}
+
+func (blobsPathSpec) pathSpec() {}
 
 // blobPathSpec contains the path for the registry global blob store.
 type blobPathSpec struct {
@@ -512,10 +444,6 @@ func (repositoriesRootPathSpec) pathSpec() {}
 //
 // 	<algorithm>/<hex digest>
 //
-// Most importantly, for tarsum, the layout looks like this:
-//
-// 	tarsum/<version>/<digest algorithm>/<full digest>
-//
 // If multilevel is true, the first two bytes of the digest will separate
 // groups of digest folder. It will be as follows:
 //
@@ -533,24 +461,30 @@ func digestPathComponents(dgst digest.Digest, multilevel bool) ([]string, error)
 	var suffix []string
 
 	if multilevel {
-		suffix = append(suffix, hex[:multilevelHexPrefixLength])
+		suffix = append(suffix, hex[:2])
 	}
 
 	suffix = append(suffix, hex)
 
-	if tsi, err := digest.ParseTarSum(dgst.String()); err == nil {
-		// We have a tarsum!
-		version := tsi.Version
-		if version == "" {
-			version = "v0"
-		}
+	return append(prefix, suffix...), nil
+}
 
-		prefix = []string{
-			"tarsum",
-			version,
-			tsi.Algorithm,
-		}
+// Reconstructs a digest from a path
+func digestFromPath(digestPath string) (digest.Digest, error) {
+
+	digestPath = strings.TrimSuffix(digestPath, "/data")
+	dir, hex := path.Split(digestPath)
+	dir = path.Dir(dir)
+	dir, next := path.Split(dir)
+
+	// next is either the algorithm OR the first two characters in the hex string
+	var algo string
+	if next == hex[:2] {
+		algo = path.Base(dir)
+	} else {
+		algo = next
 	}
 
-	return append(prefix, suffix...), nil
+	dgst := digest.NewDigestFromHex(algo, hex)
+	return dgst, dgst.Validate()
 }

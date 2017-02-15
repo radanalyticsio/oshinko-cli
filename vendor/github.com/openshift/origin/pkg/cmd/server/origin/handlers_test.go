@@ -15,6 +15,7 @@ import (
 	"k8s.io/kubernetes/pkg/util/sets"
 	"k8s.io/kubernetes/pkg/watch"
 
+	authenticationapi "github.com/openshift/origin/pkg/auth/api"
 	"github.com/openshift/origin/pkg/authorization/authorizer"
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
 	userapi "github.com/openshift/origin/pkg/user/api"
@@ -23,7 +24,7 @@ import (
 
 type impersonateAuthorizer struct{}
 
-func (impersonateAuthorizer) Authorize(ctx kapi.Context, a authorizer.AuthorizationAttributes) (allowed bool, reason string, err error) {
+func (impersonateAuthorizer) Authorize(ctx kapi.Context, a authorizer.Action) (allowed bool, reason string, err error) {
 	user, exists := kapi.UserFrom(ctx)
 	if !exists {
 		return false, "missing user", nil
@@ -40,22 +41,29 @@ func (impersonateAuthorizer) Authorize(ctx kapi.Context, a authorizer.Authorizat
 		return false, "denied", nil
 	}
 
-	if len(user.GetGroups()) == 1 && user.GetGroups()[0] == "wheel" && a.GetVerb() == "impersonate" && a.GetResource() == "systemusers" {
+	if len(user.GetGroups()) > 0 && user.GetGroups()[0] == "wheel" && a.GetVerb() == "impersonate" && a.GetResource() == "systemusers" {
 		return true, "", nil
 	}
 
-	if len(user.GetGroups()) == 1 && user.GetGroups()[0] == "sa-impersonater" && a.GetVerb() == "impersonate" && a.GetResource() == "serviceaccounts" {
+	if len(user.GetGroups()) > 0 && user.GetGroups()[0] == "sa-impersonater" && a.GetVerb() == "impersonate" && a.GetResource() == "serviceaccounts" {
 		return true, "", nil
 	}
 
-	if len(user.GetGroups()) == 1 && user.GetGroups()[0] == "regular-impersonater" && a.GetVerb() == "impersonate" && a.GetResource() == "users" {
+	if len(user.GetGroups()) > 0 && user.GetGroups()[0] == "regular-impersonater" && a.GetVerb() == "impersonate" && a.GetResource() == "users" {
+		return true, "", nil
+	}
+
+	if len(user.GetGroups()) > 1 && user.GetGroups()[1] == "group-impersonater" && a.GetVerb() == "impersonate" && a.GetResource() == "groups" {
+		return true, "", nil
+	}
+	if len(user.GetGroups()) > 1 && user.GetGroups()[1] == "system-group-impersonater" && a.GetVerb() == "impersonate" && a.GetResource() == "systemgroups" {
 		return true, "", nil
 	}
 
 	return false, "deny by default", nil
 }
 
-func (impersonateAuthorizer) GetAllowedSubjects(ctx kapi.Context, attributes authorizer.AuthorizationAttributes) (sets.String, sets.String, error) {
+func (impersonateAuthorizer) GetAllowedSubjects(ctx kapi.Context, attributes authorizer.Action) (sets.String, sets.String, error) {
 	return nil, nil, nil
 }
 
@@ -86,6 +94,7 @@ func TestImpersonationFilter(t *testing.T) {
 		name                string
 		user                user.Info
 		impersonationString string
+		impersonationGroups []string
 		expectedUser        user.Info
 		expectedCode        int
 	}{
@@ -109,6 +118,76 @@ func TestImpersonationFilter(t *testing.T) {
 				Name: "tester",
 			},
 			expectedCode: http.StatusForbidden,
+		},
+		{
+			name: "disallowed-group",
+			user: &user.DefaultInfo{
+				Name:   "dev",
+				Groups: []string{"wheel"},
+			},
+			impersonationString: "system:admin",
+			impersonationGroups: []string{"some-group"},
+			expectedUser: &user.DefaultInfo{
+				Name:   "dev",
+				Groups: []string{"wheel"},
+			},
+			expectedCode: http.StatusForbidden,
+		},
+		{
+			name: "disallowed-system-group",
+			user: &user.DefaultInfo{
+				Name:   "dev",
+				Groups: []string{"wheel", "group-impersonater"},
+			},
+			impersonationString: "system:admin",
+			impersonationGroups: []string{"some-group", "system:group"},
+			expectedUser: &user.DefaultInfo{
+				Name:   "dev",
+				Groups: []string{"wheel", "group-impersonater"},
+			},
+			expectedCode: http.StatusForbidden,
+		},
+		{
+			name: "disallowed-group-2",
+			user: &user.DefaultInfo{
+				Name:   "dev",
+				Groups: []string{"wheel", "system-group-impersonater"},
+			},
+			impersonationString: "system:admin",
+			impersonationGroups: []string{"some-group", "system:group"},
+			expectedUser: &user.DefaultInfo{
+				Name:   "dev",
+				Groups: []string{"wheel", "system-group-impersonater"},
+			},
+			expectedCode: http.StatusForbidden,
+		},
+		{
+			name: "allowed-group",
+			user: &user.DefaultInfo{
+				Name:   "dev",
+				Groups: []string{"wheel", "group-impersonater"},
+			},
+			impersonationString: "system:admin",
+			impersonationGroups: []string{"some-group"},
+			expectedUser: &user.DefaultInfo{
+				Name:   "system:admin",
+				Groups: []string{"some-group"},
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name: "allowed-system-group",
+			user: &user.DefaultInfo{
+				Name:   "dev",
+				Groups: []string{"wheel", "system-group-impersonater"},
+			},
+			impersonationString: "system:admin",
+			impersonationGroups: []string{"some-system:group"},
+			expectedUser: &user.DefaultInfo{
+				Name:   "system:admin",
+				Groups: []string{"some-system:group"},
+			},
+			expectedCode: http.StatusOK,
 		},
 		{
 			name: "allowed-systemusers-impersonation",
@@ -222,7 +301,10 @@ func TestImpersonationFilter(t *testing.T) {
 			t.Errorf("%s: unexpected error: %v", tc.name, err)
 			continue
 		}
-		req.Header.Add("Impersonate-User", tc.impersonationString)
+		req.Header.Add(authenticationapi.ImpersonateUserHeader, tc.impersonationString)
+		for _, group := range tc.impersonationGroups {
+			req.Header.Add(authenticationapi.ImpersonateGroupHeader, group)
+		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Errorf("%s: unexpected error: %v", tc.name, err)

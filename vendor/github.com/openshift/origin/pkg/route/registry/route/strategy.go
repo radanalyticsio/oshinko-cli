@@ -40,19 +40,42 @@ func (routeStrategy) NamespaceScoped() bool {
 	return true
 }
 
-func (s routeStrategy) PrepareForCreate(obj runtime.Object) {
+func (s routeStrategy) PrepareForCreate(ctx kapi.Context, obj runtime.Object) {
 	route := obj.(*api.Route)
 	route.Status = api.RouteStatus{}
-	// Limit to kind/name
-	// TODO: convert to LocalObjectReference
-	route.Spec.To = kapi.ObjectReference{Kind: route.Spec.To.Kind, Name: route.Spec.To.Name}
+	err := s.allocateHost(route)
+	if err != nil {
+		// TODO: this will be changed when moved to a controller
+		utilruntime.HandleError(errors.NewInternalError(fmt.Errorf("allocation error: %v for route: %#v", err, obj)))
+	}
+}
+
+func (s routeStrategy) PrepareForUpdate(ctx kapi.Context, obj, old runtime.Object) {
+	route := obj.(*api.Route)
+	oldRoute := old.(*api.Route)
+	route.Status = oldRoute.Status
+
+	// Ignore attempts to clear the spec Host
+	// Prevents "immutable field" errors when applying the same route definition used to create
+	if len(route.Spec.Host) == 0 {
+		route.Spec.Host = oldRoute.Spec.Host
+	}
+}
+
+// allocateHost allocates a host name ONLY if the route doesn't specify a subdomain wildcard policy and
+// the host name on the route is empty and an allocator is configured.
+// It must first allocate the shard and may return an error if shard allocation fails.
+func (s routeStrategy) allocateHost(route *api.Route) error {
+	if route.Spec.WildcardPolicy == api.WildcardPolicySubdomain {
+		// Don't allocate a host if subdomain wildcard policy.
+		return nil
+	}
+
 	if len(route.Spec.Host) == 0 && s.RouteAllocator != nil {
 		// TODO: this does not belong here, and should be removed
 		shard, err := s.RouteAllocator.AllocateRouterShard(route)
 		if err != nil {
-			// TODO: this will be changed when moved to a controller
-			utilruntime.HandleError(errors.NewInternalError(fmt.Errorf("allocation error: %v for route: %#v", err, obj)))
-			return
+			return errors.NewInternalError(fmt.Errorf("allocation error: %v for route: %#v", err, route))
 		}
 		route.Spec.Host = s.RouteAllocator.GenerateHostname(route, shard)
 		if route.Annotations == nil {
@@ -60,15 +83,7 @@ func (s routeStrategy) PrepareForCreate(obj runtime.Object) {
 		}
 		route.Annotations[HostGeneratedAnnotationKey] = "true"
 	}
-}
-
-func (routeStrategy) PrepareForUpdate(obj, old runtime.Object) {
-	route := obj.(*api.Route)
-	oldRoute := old.(*api.Route)
-	route.Status = oldRoute.Status
-	// Limit to kind/name
-	// TODO: convert to LocalObjectReference
-	route.Spec.To = kapi.ObjectReference{Kind: route.Spec.To.Kind, Name: route.Spec.To.Name}
+	return nil
 }
 
 func (routeStrategy) Validate(ctx kapi.Context, obj runtime.Object) field.ErrorList {
@@ -100,7 +115,7 @@ type routeStatusStrategy struct {
 
 var StatusStrategy = routeStatusStrategy{NewStrategy(nil)}
 
-func (routeStatusStrategy) PrepareForUpdate(obj, old runtime.Object) {
+func (routeStatusStrategy) PrepareForUpdate(ctx kapi.Context, obj, old runtime.Object) {
 	newRoute := obj.(*api.Route)
 	oldRoute := old.(*api.Route)
 	newRoute.Spec = oldRoute.Spec
@@ -111,7 +126,7 @@ func (routeStatusStrategy) ValidateUpdate(ctx kapi.Context, obj, old runtime.Obj
 }
 
 // Matcher returns a matcher for a route
-func Matcher(label labels.Selector, field fields.Selector) generic.Matcher {
+func Matcher(label labels.Selector, field fields.Selector) *generic.SelectionPredicate {
 	return &generic.SelectionPredicate{Label: label, Field: field, GetAttrs: getAttrs}
 }
 

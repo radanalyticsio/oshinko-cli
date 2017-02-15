@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -35,18 +36,19 @@ type plugin struct {
 	Secret, Path string
 	Err          error
 	Env          []kapi.EnvVar
+	Proceed      bool
 }
 
 func (p *plugin) Extract(buildCfg *api.BuildConfig, secret, path string, req *http.Request) (*api.SourceRevision, []kapi.EnvVar, bool, error) {
 	p.Secret, p.Path = secret, path
-	return nil, p.Env, true, p.Err
+	return nil, p.Env, p.Proceed, p.Err
 }
 
 func newStorage() (*rest.WebHook, *buildConfigInstantiator, *test.BuildConfigRegistry) {
 	mockRegistry := &test.BuildConfigRegistry{}
 	bci := &buildConfigInstantiator{}
 	hook := NewWebHookREST(mockRegistry, bci, map[string]webhook.Plugin{
-		"ok": &plugin{},
+		"ok": &plugin{Proceed: true},
 		"okenv": &plugin{
 			Env: []kapi.EnvVar{
 				{
@@ -54,6 +56,7 @@ func newStorage() (*rest.WebHook, *buildConfigInstantiator, *test.BuildConfigReg
 					Value: "bar",
 				},
 			},
+			Proceed: true,
 		},
 		"errsecret": &plugin{Err: webhook.ErrSecretMismatch},
 		"errhook":   &plugin{Err: webhook.ErrHookNotEnabled},
@@ -238,7 +241,7 @@ func (p *pathPlugin) Extract(buildCfg *api.BuildConfig, secret, path string, req
 type errPlugin struct{}
 
 func (*errPlugin) Extract(buildCfg *api.BuildConfig, secret, path string, req *http.Request) (*api.SourceRevision, []kapi.EnvVar, bool, error) {
-	return nil, []kapi.EnvVar{}, true, errors.New("Plugin error!")
+	return nil, []kapi.EnvVar{}, false, errors.New("Plugin error!")
 }
 
 var testBuildConfig = &api.BuildConfig{
@@ -252,7 +255,7 @@ var testBuildConfig = &api.BuildConfig{
 				},
 			},
 		},
-		BuildSpec: api.BuildSpec{
+		CommonSpec: api.CommonSpec{
 			Source: api.BuildSource{
 				Git: &api.GitBuildSource{
 					URI: "git://github.com/my/repo.git",
@@ -396,5 +399,65 @@ func TestInvokeWebhookErrorCreateBuild(t *testing.T) {
 	if !responder.called ||
 		!strings.Contains(responder.err.Error(), "Internal error occurred: hook failed: Plugin error!") {
 		t.Errorf("Expected BadRequest, got %s, expected error %s!", responder.err.Error(), "Internal error occurred: hook failed: Plugin error!")
+	}
+}
+
+func TestGeneratedBuildTriggerInfoGenericWebHook(t *testing.T) {
+	revision := &api.SourceRevision{
+		Git: &api.GitSourceRevision{
+			Author: api.SourceControlUser{
+				Name:  "John Doe",
+				Email: "john.doe@test.com",
+			},
+			Committer: api.SourceControlUser{
+				Name:  "John Doe",
+				Email: "john.doe@test.com",
+			},
+			Message: "A random act of kindness",
+		},
+	}
+
+	buildtriggerCause := generateBuildTriggerInfo(revision, "generic", "mysecret")
+	hiddenSecret := fmt.Sprintf("%s***", "mysecret"[:(len("mysecret")/2)])
+	for _, cause := range buildtriggerCause {
+		if !reflect.DeepEqual(revision, cause.GenericWebHook.Revision) {
+			t.Errorf("Expected returned revision to equal: %v", revision)
+		}
+		if cause.GenericWebHook.Secret != hiddenSecret {
+			t.Errorf("Expected obfuscated secret to be: %s", hiddenSecret)
+		}
+		if cause.Message != api.BuildTriggerCauseGenericMsg {
+			t.Errorf("Expected build reason to be 'Generic WebHook, go %s'", cause.Message)
+		}
+	}
+}
+
+func TestGeneratedBuildTriggerInfoGitHubWebHook(t *testing.T) {
+	revision := &api.SourceRevision{
+		Git: &api.GitSourceRevision{
+			Author: api.SourceControlUser{
+				Name:  "John Doe",
+				Email: "john.doe@test.com",
+			},
+			Committer: api.SourceControlUser{
+				Name:  "John Doe",
+				Email: "john.doe@test.com",
+			},
+			Message: "A random act of kindness",
+		},
+	}
+
+	buildtriggerCause := generateBuildTriggerInfo(revision, "github", "mysecret")
+	hiddenSecret := fmt.Sprintf("%s***", "mysecret"[:(len("mysecret")/2)])
+	for _, cause := range buildtriggerCause {
+		if !reflect.DeepEqual(revision, cause.GitHubWebHook.Revision) {
+			t.Errorf("Expected returned revision to equal: %v", revision)
+		}
+		if cause.GitHubWebHook.Secret != hiddenSecret {
+			t.Errorf("Expected obfuscated secret to be: %s", hiddenSecret)
+		}
+		if cause.Message != api.BuildTriggerCauseGithubMsg {
+			t.Errorf("Expected build reason to be 'GitHub WebHook, go %s'", cause.Message)
+		}
 	}
 }

@@ -1,5 +1,3 @@
-// +build integration
-
 package integration
 
 import (
@@ -10,14 +8,14 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"regexp"
+	"strings"
 	"testing"
 
 	"k8s.io/kubernetes/pkg/client/restclient"
 	clientcmdapi "k8s.io/kubernetes/pkg/client/unversioned/clientcmd/api"
 
 	"github.com/openshift/origin/pkg/client"
-	"github.com/openshift/origin/pkg/cmd/cli/cmd"
+	"github.com/openshift/origin/pkg/cmd/cli/cmd/login"
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
 	testutil "github.com/openshift/origin/test/util"
 	testserver "github.com/openshift/origin/test/util/server"
@@ -46,6 +44,7 @@ func TestOAuthRequestHeader(t *testing.T) {
 
 	// Get master config
 	testutil.RequireEtcd(t)
+	defer testutil.DumpEtcdOnFailure(t)
 	masterOptions, err := testserver.DefaultMasterOptions()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -154,8 +153,11 @@ func TestOAuthRequestHeader(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	authorizeURL := clientConfig.Host + "/oauth/authorize?client_id=openshift-challenging-client&response_type=token"
-	proxyURL := proxyServer.URL + "/oauth/authorize?client_id=openshift-challenging-client&response_type=token"
+	state := `{"then": "/index.html?a=1&b=2&c=%2F"}`
+	encodedState := (url.Values{"state": []string{state}}).Encode()
+
+	authorizeURL := clientConfig.Host + "/oauth/authorize?client_id=openshift-challenging-client&response_type=token&" + encodedState
+	proxyURL := proxyServer.URL + "/oauth/authorize?client_id=openshift-challenging-client&response_type=token&" + encodedState
 
 	testcases := map[string]struct {
 		transport                http.RoundTripper
@@ -246,14 +248,25 @@ func TestOAuthRequestHeader(t *testing.T) {
 			continue
 		}
 
-		// Extract the access_token
-
-		// group #0 is everything.                      #1                #2     #3
-		accessTokenRedirectRegex := regexp.MustCompile(`(^|&)access_token=([^&]+)($|&)`)
-		accessToken := ""
-		if matches := accessTokenRedirectRegex.FindStringSubmatch(tokenRedirect.Fragment); matches != nil {
-			accessToken = matches[2]
+		// Grab the raw fragment ourselves, since the stdlib URL parsing decodes parts of it
+		fragment := ""
+		if parts := strings.SplitN(authenticatedProxyResponse.Header.Get("Location"), "#", 2); len(parts) == 2 {
+			fragment = parts[1]
 		}
+		// Extract query-encoded values from the fragment
+		fragmentValues, err := url.ParseQuery(fragment)
+		if err != nil {
+			t.Errorf("%s: %v", k, err)
+			continue
+		}
+		// Ensure the state was retrieved correctly
+		returnedState := fragmentValues.Get("state")
+		if returnedState != state {
+			t.Errorf("%s: Expected state\n\t%v\ngot\n\t%v", k, state, returnedState)
+			continue
+		}
+		// Ensure the access_token was retrieved correctly
+		accessToken := fragmentValues.Get("access_token")
 		if accessToken == "" {
 			t.Errorf("%s: Expected access token, got %s", k, tokenRedirect.String())
 			continue
@@ -295,7 +308,7 @@ func TestOAuthRequestHeader(t *testing.T) {
 
 	// Attempt a login using a redirecting auth proxy
 	loginOutput := &bytes.Buffer{}
-	loginOptions := &cmd.LoginOptions{
+	loginOptions := &login.LoginOptions{
 		Server:             anonConfig.Host,
 		CAFile:             masterCAFile,
 		StartingKubeConfig: &clientcmdapi.Config{},
@@ -427,7 +440,7 @@ Certificate:
         X509v3 extensions:
             X509v3 Key Usage: critical
                 Digital Signature, Key Encipherment
-            X509v3 Extended Key Usage: 
+            X509v3 Extended Key Usage:
                 TLS Web Client Authentication
             X509v3 Basic Constraints: critical
                 CA:FALSE
@@ -534,7 +547,7 @@ Certificate:
         X509v3 extensions:
             X509v3 Key Usage: critical
                 Digital Signature, Key Encipherment
-            X509v3 Extended Key Usage: 
+            X509v3 Extended Key Usage:
                 TLS Web Client Authentication
             X509v3 Basic Constraints: critical
                 CA:FALSE
@@ -643,7 +656,7 @@ Certificate:
         X509v3 extensions:
             X509v3 Key Usage: critical
                 Digital Signature, Key Encipherment
-            X509v3 Extended Key Usage: 
+            X509v3 Extended Key Usage:
                 TLS Web Client Authentication
             X509v3 Basic Constraints: critical
                 CA:FALSE

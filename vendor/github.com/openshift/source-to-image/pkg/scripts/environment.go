@@ -8,19 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/golang/glog"
 	"github.com/openshift/source-to-image/pkg/api"
 )
 
-// Environment represents a single environment variable definition
-type Environment struct {
-	Name  string
-	Value string
-}
-
 // GetEnvironment gets the .s2i/environment file located in the sources and
-// parse it into []environment
-func GetEnvironment(config *api.Config) ([]Environment, error) {
+// parse it into EnvironmentList.
+func GetEnvironment(config *api.Config) (api.EnvironmentList, error) {
 	envPath := filepath.Join(config.WorkingDir, api.Source, ".s2i", api.Environment)
 	if _, err := os.Stat(envPath); os.IsNotExist(err) {
 		// TODO: Remove this when the '.sti/environment' is deprecated.
@@ -28,7 +21,7 @@ func GetEnvironment(config *api.Config) ([]Environment, error) {
 		if _, err := os.Stat(envPath); os.IsNotExist(err) {
 			return nil, errors.New("no environment file found in application sources")
 		}
-		glog.Infof("DEPRECATED: Use .s2i/environment instead of .sti/environment")
+		glog.Info("DEPRECATED: Use .s2i/environment instead of .sti/environment")
 	}
 
 	f, err := os.Open(envPath)
@@ -37,7 +30,7 @@ func GetEnvironment(config *api.Config) ([]Environment, error) {
 	}
 	defer f.Close()
 
-	result := []Environment{}
+	result := api.EnvironmentList{}
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -46,31 +39,23 @@ func GetEnvironment(config *api.Config) ([]Environment, error) {
 		if strings.HasPrefix(s, "#") {
 			continue
 		}
-		parts := strings.SplitN(s, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		e := Environment{
-			Name:  strings.TrimSpace(parts[0]),
-			Value: strings.TrimSpace(parts[1]),
-		}
-		result = append(result, e)
+		result.Set(s)
 	}
 
-	glog.Infof("Setting %d environment variables provided by environment file in sources", len(result))
+	glog.V(1).Infof("Setting %d environment variables provided by environment file in sources", len(result))
 	return result, scanner.Err()
 }
 
-// ConvertEnvironment converts the []Environment to "key=val" strings
-func ConvertEnvironment(env []Environment) (result []string) {
+// ConvertEnvironmentList converts the EnvironmentList to "key=val" strings.
+func ConvertEnvironmentList(env api.EnvironmentList) (result []string) {
 	for _, e := range env {
 		result = append(result, fmt.Sprintf("%s=%s", e.Name, e.Value))
 	}
 	return
 }
 
-// ConvertEnvironmentToDocker converts the []Environment into Dockerfile format
-func ConvertEnvironmentToDocker(env []Environment) (result string) {
+// ConvertEnvironmentToDocker converts the EnvironmentList into Dockerfile format.
+func ConvertEnvironmentToDocker(env api.EnvironmentList) (result string) {
 	for i, e := range env {
 		if i == 0 {
 			result += fmt.Sprintf("ENV %s=\"%s\"", e.Name, e.Value)

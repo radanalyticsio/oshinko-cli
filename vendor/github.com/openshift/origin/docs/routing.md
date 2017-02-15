@@ -133,7 +133,7 @@ pod.json
 
     {
       "kind": "Pod",
-      "apiVersion": "v1beta3",
+      "apiVersion": "v1",
       "metadata": {
         "name": "hello-pod",
         "labels": {
@@ -170,7 +170,7 @@ service.json
 
     {
       "kind": "Service",
-      "apiVersion": "v1beta3",
+      "apiVersion": "v1",
       "metadata": {
         "name": "hello-openshift"
       },
@@ -186,7 +186,6 @@ service.json
         "selector": {
           "name": "hello-openshift"
         },
-        "portalIP": "",
         "type": "ClusterIP",
         "sessionAffinity": "None"
       }
@@ -196,7 +195,7 @@ route.json
 
     {
       "kind": "Route",
-      "apiVersion": "v1beta3",
+      "apiVersion": "v1",
       "metadata": {
         "name": "hello-route"
       },
@@ -341,9 +340,15 @@ The router is an [HAProxy](http://www.haproxy.org/) container that is run via a 
 provides a watch on `routes` and `endpoints`.  The watch funnels down to the configuration files for the [HAProxy](http://www.haproxy.org/)
 plugin which can be found in `plugins/router/haproxy/haproxy.go`.  The router is then issued a reload command.
 
-When debugging the router it is sometimes useful to inspect these files.  To do this you must enter the namespace of the
-running container by getting the pid and using nsenter
-`nsenter -m -u -n -i -p -t $(docker inspect --format "{{.State.Pid }}" <container-id>)`
+When debugging the router it is sometimes useful to inspect these files.  For example:
+
+```
+$ oc get pods -n default
+NAME                      READY     STATUS    RESTARTS   AGE
+router-1-2sqao            1/1       Running   0          1m
+$ oc rsh -n default router-1-2sqao 
+```
+
 Listed below are the files used for configuration.
 
     ConfigTemplate         = "/var/lib/haproxy/conf/haproxy_template.conf"

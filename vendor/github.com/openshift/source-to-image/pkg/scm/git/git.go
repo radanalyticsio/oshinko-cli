@@ -2,7 +2,6 @@ package git
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -13,14 +12,17 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/golang/glog"
 	"github.com/openshift/source-to-image/pkg/api"
+	"github.com/openshift/source-to-image/pkg/errors"
 	"github.com/openshift/source-to-image/pkg/util"
+	utilglog "github.com/openshift/source-to-image/pkg/util/glog"
 )
+
+var glog = utilglog.StderrLog
 
 // Git is an interface used by main STI code to extract/checkout git repositories
 type Git interface {
-	ValidCloneSpec(source string) bool
+	ValidCloneSpec(source string) (bool, error)
 	ValidCloneSpecRemoteOnly(source string) bool
 	MungeNoProtocolURL(source string, url *url.URL) error
 	Clone(source, target string, opts api.CloneConfig) error
@@ -64,10 +66,10 @@ type FileProtoDetails struct {
 	BadRef bool
 }
 
-var gitSshURLUser = regexp.MustCompile(`^([\w\-_\.]+)$`)
-var gitSshURLIPv4 = regexp.MustCompile(`^([\w\.\-_]+)$`)         // should cover textual hostnames and x.x.x.x
-var gitSshURLIPv6 = regexp.MustCompile(`^(\[[a-fA-F0-9\:]+\])$`) // should cover [hex:hex ... :hex]
-var gitSshURLPathRef = regexp.MustCompile(`^([\w\.\-_+\/\\]+)$`)
+var gitSSHURLUser = regexp.MustCompile(`^([\w\-_\.]+)$`)
+var gitSSHURLIPv4 = regexp.MustCompile(`^([\w\.\-_]+)$`)         // should cover textual hostnames and x.x.x.x
+var gitSSHURLIPv6 = regexp.MustCompile(`^(\[[a-fA-F0-9\:]+\])$`) // should cover [hex:hex ... :hex]
+var gitSSHURLPathRef = regexp.MustCompile(`^([\w\.\-_+\/\\]+)$`)
 
 var allowedSchemes = []string{"git", "http", "https", "file", "ssh"}
 
@@ -94,13 +96,17 @@ func stringInSlice(s string, slice []string) bool {
 
 // ValidCloneSpec determines if the given string reference points to a valid git
 // repository
-func (h *stiGit) ValidCloneSpec(source string) bool {
-	details, _ := ParseFile(source)
-	if details.FileExists && !details.BadRef {
-		return true
+func (h *stiGit) ValidCloneSpec(source string) (bool, error) {
+	details, _, err := ParseFile(source)
+	if err != nil {
+		return false, err
 	}
 
-	return h.ValidCloneSpecRemoteOnly(source)
+	if details.FileExists && !details.BadRef {
+		return true, nil
+	}
+
+	return h.ValidCloneSpecRemoteOnly(source), nil
 }
 
 // ValidCloneSpecRemoteOnly determines if the given string reference points to a valid remote git
@@ -135,10 +141,13 @@ func (h *stiGit) MungeNoProtocolURL(source string, uri *url.URL) error {
 		return nil
 	}
 
-	details, mods := ParseFile(source)
+	details, mods, err := ParseFile(source)
+	if err != nil {
+		return err
+	}
 
 	if details.BadRef {
-		return errors.New(fmt.Sprintf("bad reference following # in %s", source))
+		return fmt.Errorf("bad reference following # in %s", source)
 	}
 	if !details.FileExists {
 		mods2, err := ParseSSH(source)
@@ -182,21 +191,16 @@ func ParseURL(source string) (*url.URL, error) {
 	// to work around the url.Parse bug, deal with the fact it seemed to split on just :
 	if strings.Index(source, "://") == -1 && uri.Scheme != "" {
 		uri.Scheme = ""
-		return nil, errors.New(fmt.Sprintf("url source %s mistakingly interpreted as protocol %s by golang", source, uri.Scheme))
+		return nil, fmt.Errorf("url source %s mistakingly interpreted as protocol %s by golang", source, uri.Scheme)
 	}
 
 	// now see if an invalid protocol is specified
 	if !stringInSlice(uri.Scheme, allowedSchemes) {
-		return nil, errors.New(fmt.Sprintf("unsupported protocol specfied:  %s", uri.Scheme))
+		return nil, fmt.Errorf("unsupported protocol specfied:  %s", uri.Scheme)
 	}
 
-	// have a valid protocol, return sucess
+	// have a valid protocol, return success
 	return uri, nil
-}
-
-func useCopy(protoSpecified bool, source string) bool {
-	glog.V(4).Infof("useCopy proto spec %v local git repo %v has git bin %v", protoSpecified, isLocalGitRepository(source), hasGitBinary())
-	return !isLocalGitRepository(source) || !hasGitBinary()
 }
 
 // mimic the path munging (make paths absolute to fix file:// with non-absolute paths) done when scm.go:DownloderForSource valided git file urls
@@ -216,84 +220,80 @@ func makePathAbsolute(source string) string {
 // expect git clone spec syntax; it also provides details if the file://
 // proto was explicitly specified, if we should use OS copy vs. the git
 // binary, and if a frag/ref has a bad format
-func ParseFile(source string) (details *FileProtoDetails, mods *URLMods) {
+func ParseFile(source string) (*FileProtoDetails, *URLMods, error) {
+	// Checking to see if the user included a "file://" in the call
 	protoSpecified := false
 	if strings.HasPrefix(source, "file://") && len(source) > 7 {
 		protoSpecified = true
 	}
 
+	refSpecified := false
+	path, ref := "", ""
+	if strings.LastIndex(source, "#") != -1 {
+		refSpecified = true
+
+		segments := strings.SplitN(source, "#", 2)
+		path = segments[0]
+		ref = segments[1]
+	} else {
+		path = source
+	}
+
 	// in each valid case, like the prior logic in scm.go did, we'll make the
 	// paths absolute and prepend file:// to the path which callers should
 	// switch to
+	if doesExist(path) {
 
-	// if source, minus potential file:// prefix, exists as is, denote
-	// and return
-	if doesExist(source) {
-		details = &FileProtoDetails{
-			FileExists:     true,
-			UseCopy:        useCopy(protoSpecified, source),
-			ProtoSpecified: protoSpecified,
-			BadRef:         false,
+		// Is there even a valid .git repository?
+		isValidGit, err := isValidGitRepository(path)
+		hasGit := false
+		if isValidGit {
+			hasGit = hasGitBinary()
 		}
-		mods = &URLMods{
-			Scheme: "file",
-			Path:   makePathAbsolute(strings.TrimPrefix(source, "file://")),
-		}
-		return
-	}
 
-	// need to see if this was a file://<valid file>#ref
-	if protoSpecified && strings.LastIndex(source, "#") != -1 {
-		segments := strings.SplitN(source, "#", 2)
-		// given last index check above, segement should
-		// be of len 2
-		path, ref := segments[0], segments[1]
-		// file does not exist, return bad
-		if !doesExist(path) {
-			details = &FileProtoDetails{
-				UseCopy:        false,
-				FileExists:     false,
-				ProtoSpecified: protoSpecified,
-				BadRef:         false,
-			}
-			mods = nil
-			return
-		}
-		// if ref/frag bad, return bad
-		if !gitSshURLPathRef.MatchString(ref) {
-			details = &FileProtoDetails{
-				UseCopy:        false,
+		if err != nil || !isValidGit || !hasGit {
+			details := &FileProtoDetails{
+				UseCopy:        true,
 				FileExists:     true,
+				BadRef:         false,
 				ProtoSpecified: protoSpecified,
-				BadRef:         true,
 			}
-			mods = nil
-			return
+			mods := &URLMods{
+				Scheme: "file",
+				Path:   makePathAbsolute(strings.TrimPrefix(path, "file://")),
+				Ref:    ref,
+			}
+			return details, mods, err
 		}
 
-		// return good
-		details = &FileProtoDetails{
-			UseCopy:        useCopy(protoSpecified, source),
+		// Check is the #ref is valid
+		badRef := refSpecified && !gitSSHURLPathRef.MatchString(ref)
+
+		details := &FileProtoDetails{
+			BadRef:         badRef,
 			FileExists:     true,
 			ProtoSpecified: protoSpecified,
-			BadRef:         false,
+			// this value doesn't really matter, we should not proceed if the git ref is bad
+			// but let's fallback to "copy" mode if the ref is invalid.
+			UseCopy: badRef,
 		}
-		mods = &URLMods{
+
+		mods := &URLMods{
 			Scheme: "file",
-			Path:   makePathAbsolute(strings.TrimPrefix(source, "file://")),
+			Path:   makePathAbsolute(strings.TrimPrefix(path, "file://")),
 			Ref:    ref,
 		}
-		return
+		return details, mods, nil
 	}
 
-	// general return bad
-	details = &FileProtoDetails{
+	// File does not exist, return bad
+	details := &FileProtoDetails{
 		UseCopy:        false,
 		FileExists:     false,
 		BadRef:         false,
 		ProtoSpecified: protoSpecified,
 	}
-	return
+	return details, nil, nil
 }
 
 // ParseSSH will see if the input string is a valid git clone spec
@@ -302,7 +302,7 @@ func ParseFile(source string) (details *FileProtoDetails, mods *URLMods) {
 func ParseSSH(source string) (*URLMods, error) {
 	// if not ssh protcol, return bad
 	if strings.Index(source, "://") != -1 && !strings.HasPrefix(source, "ssh") {
-		return nil, errors.New(fmt.Sprintf("not ssh protocol: %s", source))
+		return nil, fmt.Errorf("not ssh protocol: %s", source)
 	}
 
 	lastColonIdx := strings.LastIndex(source, ":")
@@ -316,8 +316,8 @@ func ParseSSH(source string) (*URLMods, error) {
 			user, host = segments[0], segments[1]
 
 			// bad user, return
-			if !gitSshURLUser.MatchString(user) {
-				return nil, errors.New(fmt.Sprintf("invalid user name provided: %s from %s", user, source))
+			if !gitSSHURLUser.MatchString(user) {
+				return nil, fmt.Errorf("invalid user name provided: %s from %s", user, source)
 			}
 
 			// because of ipv6, need to redo last index of :
@@ -326,7 +326,7 @@ func ParseSSH(source string) (*URLMods, error) {
 				path = host[lastColonIdx+1:]
 				host = host[0:lastColonIdx]
 			} else {
-				return nil, errors.New(fmt.Sprintf("invalid git ssh clone spec, the @ precedes the last: %s", source))
+				return nil, fmt.Errorf("invalid git ssh clone spec, the @ precedes the last: %s", source)
 			}
 		} else {
 			host = source[0:lastColonIdx]
@@ -334,8 +334,8 @@ func ParseSSH(source string) (*URLMods, error) {
 		}
 
 		// bad host, either ipv6 or ipv4
-		if !gitSshURLIPv6.MatchString(host) && !gitSshURLIPv4.MatchString(host) {
-			return nil, errors.New(fmt.Sprintf("invalid host provided: %s from %s", host, source))
+		if !gitSSHURLIPv6.MatchString(host) && !gitSSHURLIPv4.MatchString(host) {
+			return nil, fmt.Errorf("invalid host provided: %s from %s", host, source)
 		}
 
 		segments := strings.SplitN(path, "#", 2)
@@ -343,14 +343,14 @@ func ParseSSH(source string) (*URLMods, error) {
 			path, ref = segments[0], segments[1]
 
 			// bad ref/frag
-			if !gitSshURLPathRef.MatchString(ref) {
-				return nil, errors.New(fmt.Sprintf("invalid reference provided: %s from %s", ref, source))
+			if !gitSSHURLPathRef.MatchString(ref) {
+				return nil, fmt.Errorf("invalid reference provided: %s from %s", ref, source)
 			}
 		}
 
 		// bad path
-		if !gitSshURLPathRef.MatchString(path) {
-			return nil, errors.New(fmt.Sprintf("invalid path provided: %s from ", path, source))
+		if !gitSSHURLPathRef.MatchString(path) {
+			return nil, fmt.Errorf("invalid path provided: %s from %s", path, source)
 		}
 
 		// return good
@@ -362,20 +362,107 @@ func ParseSSH(source string) (*URLMods, error) {
 			Ref:    ref,
 		}, nil
 	}
-	return nil, errors.New(fmt.Sprintf("unable to parse ssh git clone specification:  %s", source))
+	return nil, fmt.Errorf("unable to parse ssh git clone specification:  %s", source)
 }
 
-// isLocalGitRepository checks if the specified directory has .git subdirectory (it
-// is a Git repository)
-func isLocalGitRepository(dir string) bool {
-	_, err := os.Stat(fmt.Sprintf("%s/.git", strings.TrimPrefix(dir, "file://")))
-	return !(err != nil && os.IsNotExist(err))
+// followGitSubmodule looks at a .git /file/ and tries to retrieve from inside
+// it the gitdir value, which is supposed to indicate the location of the
+// corresponding .git /directory/.  Note: the gitdir value should point directly
+// to the corresponding .git directory even in the case of nested submodules.
+func followGitSubmodule(gitPath string) (string, error) {
+	f, err := os.Open(gitPath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	if sc.Scan() {
+		s := sc.Text()
+
+		if strings.HasPrefix(s, "gitdir: ") {
+			newGitPath := s[8:]
+
+			if !filepath.IsAbs(newGitPath) {
+				newGitPath = filepath.Join(filepath.Dir(gitPath), newGitPath)
+			}
+
+			fi, err := os.Stat(newGitPath)
+			if err != nil && !os.IsNotExist(err) {
+				return "", err
+			}
+			if os.IsNotExist(err) || !fi.IsDir() {
+				return "", fmt.Errorf("gitdir link in .git file %q is invalid", gitPath)
+			}
+			return newGitPath, nil
+		}
+	}
+
+	return "", fmt.Errorf("unable to parse .git file %q", gitPath)
+}
+
+// isValidGitRepository checks to see if there is a git repository in the
+// directory and if the repository is valid -- i.e. it has remotes or commits
+func isValidGitRepository(dir string) (bool, error) {
+	gitPath := filepath.Join(strings.TrimPrefix(dir, "file://"), ".git")
+
+	fi, err := os.Stat(gitPath)
+	if os.IsNotExist(err) {
+		// The directory is not a git repo, no error
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	if !fi.IsDir() {
+		gitPath, err = followGitSubmodule(gitPath)
+		if err != nil {
+			return false, err
+		}
+	}
+
+	// Search the content of the .git directory for content
+	directories := [2]string{
+		filepath.Join(gitPath, "objects"),
+		filepath.Join(gitPath, "refs"),
+	}
+
+	// For the directories we search, if the git repo has been used, there will
+	// be some file.  We don't just search the base git repository because of the
+	// hook samples that are normally generated with `git init`
+	isEmpty := true
+	for _, dir := range directories {
+		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			// If we find a file, the git directory is "not empty"
+			// We're looking for object blobs, and ref files
+			if info != nil && !info.IsDir() {
+				isEmpty = false
+				return filepath.SkipDir
+			}
+
+			return err
+		})
+
+		if err != nil && err != filepath.SkipDir {
+			// There is a .git, but we've encountered an error
+			return true, err
+		}
+
+		if !isEmpty {
+			return true, nil
+		}
+	}
+
+	// Since we know there's a .git directory, but there is nothing in it, we
+	// throw an error
+	return true, errors.NewEmptyGitRepositoryError(dir)
 }
 
 // doesExist checks if the path exists, removing file:// if needed for OS FS check
 func doesExist(dir string) bool {
 	_, err := os.Stat(strings.TrimPrefix(dir, "file://"))
-	return !(err != nil && os.IsNotExist(err))
+	return err == nil
 }
 
 // hasGitBinary checks if the 'git' binary is available on the system
@@ -393,7 +480,7 @@ func (h *stiGit) Clone(source, target string, c api.CloneConfig) error {
 	// git, sending of stdout/stderr to the Pipes created here, and the glog routines sent to pipeToLog
 	//
 	// It was agreed that we wanted to keep --quiet and no stdout output ....leaving stderr only since
-	// --quiet does not surpress that anyway reduced the frequency of the hang, but it still occurred.
+	// --quiet does not suppress that anyway reduced the frequency of the hang, but it still occurred.
 	// the pipeToLog method has been left for now for historical purposes, but if this implemenetation
 	// of git clone holds, we'll want to delete that at some point.
 
@@ -453,7 +540,7 @@ func (h *stiGit) SubmoduleUpdate(repo string, init, recursive bool) error {
 	return h.runner.RunWithOptions(opts, "git", updateArgs...)
 }
 
-// GetInfo retrieves the informations about the source code and commit
+// GetInfo retrieves the information about the source code and commit
 func (h *stiGit) GetInfo(repo string) *api.SourceInfo {
 	git := func(arg ...string) string {
 		command := exec.Command("git", arg...)

@@ -120,6 +120,9 @@ func mockBuild(phase buildapi.BuildPhase, output buildapi.BuildOutput) *buildapi
 		ObjectMeta: kapi.ObjectMeta{
 			Name:      "data-build",
 			Namespace: "namespace",
+			Annotations: map[string]string{
+				buildapi.BuildConfigAnnotation: "test-bc",
+			},
 			Labels: map[string]string{
 				"name": "dataBuild",
 				// TODO: Switch this test to use Serial policy
@@ -128,16 +131,18 @@ func mockBuild(phase buildapi.BuildPhase, output buildapi.BuildOutput) *buildapi
 			},
 		},
 		Spec: buildapi.BuildSpec{
-			Source: buildapi.BuildSource{
-				Git: &buildapi.GitBuildSource{
-					URI: "http://my.build.com/the/build/Dockerfile",
+			CommonSpec: buildapi.CommonSpec{
+				Source: buildapi.BuildSource{
+					Git: &buildapi.GitBuildSource{
+						URI: "http://my.build.com/the/build/Dockerfile",
+					},
+					ContextDir: "contextimage",
 				},
-				ContextDir: "contextimage",
+				Strategy: buildapi.BuildStrategy{
+					DockerStrategy: &buildapi.DockerBuildStrategy{},
+				},
+				Output: output,
 			},
-			Strategy: buildapi.BuildStrategy{
-				DockerStrategy: &buildapi.DockerBuildStrategy{},
-			},
-			Output: output,
 		},
 		Status: buildapi.BuildStatus{
 			Phase: phase,
@@ -178,7 +183,7 @@ func mockPod(status kapi.PodPhase, exitCode int) *kapi.Pod {
 			ContainerStatuses: []kapi.ContainerStatus{
 				{
 					State: kapi.ContainerState{
-						Terminated: &kapi.ContainerStateTerminated{ExitCode: exitCode},
+						Terminated: &kapi.ContainerStateTerminated{ExitCode: int32(exitCode)},
 					},
 				},
 			},
@@ -537,7 +542,9 @@ func TestHandlePod(t *testing.T) {
 		if build.Status.Phase != tc.outStatus {
 			t.Errorf("(%d) Expected %s, got %s!", i, tc.outStatus, build.Status.Phase)
 		}
-
+		if tc.inStatus != buildapi.BuildPhaseCancelled && tc.inStatus != buildapi.BuildPhaseComplete && !hasBuildPodNameAnnotation(build) {
+			t.Errorf("(%d) Build does not have pod name annotation.", i)
+		}
 		if tc.startTimestamp == nil && build.Status.StartTimestamp != nil {
 			t.Errorf("(%d) Expected nil start timestamp, got %v!", i, build.Status.StartTimestamp)
 		}
@@ -716,7 +723,10 @@ func TestHandleHandleBuildDeletionOK(t *testing.T) {
 	build := mockBuild(buildapi.BuildPhaseComplete, buildapi.BuildOutput{})
 	ctrl := BuildDeleteController{&customPodManager{
 		GetPodFunc: func(namespace, names string) (*kapi.Pod, error) {
-			return &kapi.Pod{ObjectMeta: kapi.ObjectMeta{Labels: map[string]string{buildapi.BuildLabel: build.Name}}}, nil
+			return &kapi.Pod{ObjectMeta: kapi.ObjectMeta{
+				Labels:      map[string]string{buildapi.BuildLabel: buildapi.LabelValue(build.Name)},
+				Annotations: map[string]string{buildapi.BuildAnnotation: build.Name},
+			}}, nil
 		},
 		DeletePodFunc: func(namespace string, pod *kapi.Pod) error {
 			deleteWasCalled = true
@@ -729,7 +739,33 @@ func TestHandleHandleBuildDeletionOK(t *testing.T) {
 		t.Errorf("Unexpected error %v", err)
 	}
 	if !deleteWasCalled {
-		t.Error("DeletePod was not called when it should!")
+		t.Error("DeletePod was not called when it should have been!")
+	}
+}
+
+func TestHandleHandlePipelineBuildDeletionOK(t *testing.T) {
+	deleteWasCalled := false
+	build := mockBuild(buildapi.BuildPhaseComplete, buildapi.BuildOutput{})
+	build.Spec.Strategy.JenkinsPipelineStrategy = &buildapi.JenkinsPipelineBuildStrategy{}
+	ctrl := BuildDeleteController{&customPodManager{
+		GetPodFunc: func(namespace, names string) (*kapi.Pod, error) {
+			return &kapi.Pod{ObjectMeta: kapi.ObjectMeta{
+				Labels:      map[string]string{buildapi.BuildLabel: buildapi.LabelValue(build.Name)},
+				Annotations: map[string]string{buildapi.BuildAnnotation: build.Name},
+			}}, nil
+		},
+		DeletePodFunc: func(namespace string, pod *kapi.Pod) error {
+			deleteWasCalled = true
+			return nil
+		},
+	}}
+
+	err := ctrl.HandleBuildDeletion(build)
+	if err != nil {
+		t.Errorf("Unexpected error %v", err)
+	}
+	if deleteWasCalled {
+		t.Error("DeletePod was called when it should not have been!")
 	}
 }
 
@@ -738,7 +774,10 @@ func TestHandleHandleBuildDeletionOKDeprecatedLabel(t *testing.T) {
 	build := mockBuild(buildapi.BuildPhaseComplete, buildapi.BuildOutput{})
 	ctrl := BuildDeleteController{&customPodManager{
 		GetPodFunc: func(namespace, names string) (*kapi.Pod, error) {
-			return &kapi.Pod{ObjectMeta: kapi.ObjectMeta{Labels: map[string]string{buildapi.BuildLabel: build.Name}}}, nil
+			return &kapi.Pod{ObjectMeta: kapi.ObjectMeta{
+				Labels:      map[string]string{buildapi.BuildLabel: buildapi.LabelValue(build.Name)},
+				Annotations: map[string]string{buildapi.BuildAnnotation: build.Name},
+			}}, nil
 		},
 		DeletePodFunc: func(namespace string, pod *kapi.Pod) error {
 			deleteWasCalled = true
@@ -751,7 +790,7 @@ func TestHandleHandleBuildDeletionOKDeprecatedLabel(t *testing.T) {
 		t.Errorf("Unexpected error %v", err)
 	}
 	if !deleteWasCalled {
-		t.Error("DeletePod was not called when it should!")
+		t.Error("DeletePod was not called when it should have been!")
 	}
 }
 
@@ -787,7 +826,7 @@ func TestHandleHandleBuildDeletionGetPodNotFound(t *testing.T) {
 		t.Errorf("Unexpected error, %v", err)
 	}
 	if deleteWasCalled {
-		t.Error("DeletePod was called when it should not!")
+		t.Error("DeletePod was called when it should not have been!")
 	}
 }
 
@@ -809,7 +848,7 @@ func TestHandleHandleBuildDeletionMismatchedLabels(t *testing.T) {
 		t.Errorf("Unexpected error %v", err)
 	}
 	if deleteWasCalled {
-		t.Error("DeletePod was called when it should not!")
+		t.Error("DeletePod was called when it should not have been!")
 	}
 }
 
@@ -817,7 +856,10 @@ func TestHandleHandleBuildDeletionDeletePodError(t *testing.T) {
 	build := mockBuild(buildapi.BuildPhaseComplete, buildapi.BuildOutput{})
 	ctrl := BuildDeleteController{&customPodManager{
 		GetPodFunc: func(namespace, names string) (*kapi.Pod, error) {
-			return &kapi.Pod{ObjectMeta: kapi.ObjectMeta{Labels: map[string]string{buildapi.BuildLabel: build.Name}}}, nil
+			return &kapi.Pod{ObjectMeta: kapi.ObjectMeta{
+				Labels:      map[string]string{buildapi.BuildLabel: buildapi.LabelValue(build.Name)},
+				Annotations: map[string]string{buildapi.BuildAnnotation: build.Name},
+			}}, nil
 		},
 		DeletePodFunc: func(namespace string, pod *kapi.Pod) error {
 			return errors.New("random")
@@ -862,7 +904,29 @@ func TestHandleBuildPodDeletionOK(t *testing.T) {
 		t.Errorf("Unexpected error %v", err)
 	}
 	if !updateWasCalled {
-		t.Error("UpdateBuild was not called when it should!")
+		t.Error("UpdateBuild was not called when it should have been!")
+	}
+}
+
+func TestHandlePipelineBuildPodDeletionOK(t *testing.T) {
+	updateWasCalled := false
+	// only not finished build (buildutil.IsBuildComplete) should be handled
+	build := mockBuild(buildapi.BuildPhaseRunning, buildapi.BuildOutput{})
+	build.Spec.Strategy.JenkinsPipelineStrategy = &buildapi.JenkinsPipelineBuildStrategy{}
+	ctrl := mockBuildPodDeleteController(build, &customBuildUpdater{
+		UpdateFunc: func(namespace string, build *buildapi.Build) error {
+			updateWasCalled = true
+			return nil
+		},
+	}, nil)
+	pod := mockPod(kapi.PodSucceeded, 0)
+
+	err := ctrl.HandleBuildPodDeletion(pod)
+	if err != nil {
+		t.Errorf("Unexpected error %v", err)
+	}
+	if updateWasCalled {
+		t.Error("UpdateBuild called when it should not have been!")
 	}
 }
 

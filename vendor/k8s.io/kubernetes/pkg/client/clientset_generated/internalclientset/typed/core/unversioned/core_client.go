@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors All rights reserved.
+Copyright 2016 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import (
 )
 
 type CoreInterface interface {
+	GetRESTClient() *restclient.RESTClient
 	ComponentStatusesGetter
 	ConfigMapsGetter
 	EndpointsGetter
@@ -159,7 +160,8 @@ func setConfigDefaults(config *restclient.Config) error {
 	config.GroupVersion = &copyGroupVersion
 	//}
 
-	config.Codec = api.Codecs.LegacyCodec(*config.GroupVersion)
+	config.NegotiatedSerializer = api.Codecs
+
 	if config.QPS == 0 {
 		config.QPS = 5
 	}
@@ -167,4 +169,13 @@ func setConfigDefaults(config *restclient.Config) error {
 		config.Burst = 10
 	}
 	return nil
+}
+
+// GetRESTClient returns a RESTClient that is used to communicate
+// with API server by this client implementation.
+func (c *CoreClient) GetRESTClient() *restclient.RESTClient {
+	if c == nil {
+		return nil
+	}
+	return c.RESTClient
 }

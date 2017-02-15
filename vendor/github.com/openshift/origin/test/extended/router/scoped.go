@@ -9,7 +9,7 @@ import (
 	o "github.com/onsi/gomega"
 
 	"k8s.io/kubernetes/pkg/util/wait"
-	"k8s.io/kubernetes/test/e2e"
+	e2e "k8s.io/kubernetes/test/e2e/framework"
 
 	exutil "github.com/openshift/origin/test/extended/util"
 )
@@ -17,13 +17,15 @@ import (
 var _ = g.Describe("[networking][router] openshift routers", func() {
 	defer g.GinkgoRecover()
 	var (
-		configPath = exutil.FixturePath("fixtures", "scoped-router.yaml")
+		configPath = exutil.FixturePath("testdata", "scoped-router.yaml")
 		oc         = exutil.NewCLI("scoped-router", exutil.KubeConfigPath())
 	)
 
 	g.BeforeEach(func() {
 		// defer oc.Run("delete").Args("-f", configPath).Execute()
-		err := oc.Run("create").Args("-f", configPath).Execute()
+		err := oc.AsAdmin().Run("adm").Args("policy", "add-cluster-role-to-user", "system:router", oc.Username()).Execute()
+		o.Expect(err).NotTo(o.HaveOccurred())
+		err = oc.Run("create").Args("-f", configPath).Execute()
 		o.Expect(err).NotTo(o.HaveOccurred())
 	})
 

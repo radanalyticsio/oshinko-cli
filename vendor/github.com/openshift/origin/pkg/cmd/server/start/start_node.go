@@ -19,9 +19,11 @@ import (
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
 	configapilatest "github.com/openshift/origin/pkg/cmd/server/api/latest"
 	"github.com/openshift/origin/pkg/cmd/server/api/validation"
+	"github.com/openshift/origin/pkg/cmd/templates"
 	cmdutil "github.com/openshift/origin/pkg/cmd/util"
 	"github.com/openshift/origin/pkg/cmd/util/docker"
 	utilflags "github.com/openshift/origin/pkg/cmd/util/flags"
+	sdnapi "github.com/openshift/origin/pkg/sdn/api"
 	"github.com/openshift/origin/pkg/version"
 )
 
@@ -32,25 +34,27 @@ type NodeOptions struct {
 	Output     io.Writer
 }
 
-const nodeLong = `
-Start a node
+var nodeLong = templates.LongDesc(`
+	Start a node
 
-This command helps you launch a node.  Running
+	This command helps you launch a node.  Running
 
-  $ %[1]s start node --config=<node-config>
+	    %[1]s start node --config=<node-config>
 
-will start a node with given configuration file. The node will run in the
-foreground until you terminate the process.`
+	will start a node with given configuration file. The node will run in the
+	foreground until you terminate the process.`)
 
 // NewCommandStartNode provides a CLI handler for 'start node' command
-func NewCommandStartNode(basename string, out io.Writer) (*cobra.Command, *NodeOptions) {
+func NewCommandStartNode(basename string, out, errout io.Writer) (*cobra.Command, *NodeOptions) {
 	options := &NodeOptions{Output: out}
 
 	cmd := &cobra.Command{
 		Use:   "node",
 		Short: "Launch a node",
 		Long:  fmt.Sprintf(nodeLong, basename),
-		Run:   options.Run,
+		Run: func(c *cobra.Command, args []string) {
+			options.Run(c, errout, args)
+		},
 	}
 
 	flags := cmd.Flags()
@@ -70,25 +74,27 @@ func NewCommandStartNode(basename string, out io.Writer) (*cobra.Command, *NodeO
 	return cmd, options
 }
 
-const networkLong = `
-Start node network components
+var networkLong = templates.LongDesc(`
+	Start node network components
 
-This command helps you launch node networking.  Running
+	This command helps you launch node networking.  Running
 
-  $ %[1]s start network --config=<node-config>
+	    %[1]s start network --config=<node-config>
 
-will start the network proxy and SDN plugins with given configuration file. The proxy will
-run in the foreground until you terminate the process.`
+	will start the network proxy and SDN plugins with given configuration file. The proxy will
+	run in the foreground until you terminate the process.`)
 
 // NewCommandStartNetwork provides a CLI handler for 'start network' command
-func NewCommandStartNetwork(basename string, out io.Writer) (*cobra.Command, *NodeOptions) {
+func NewCommandStartNetwork(basename string, out, errout io.Writer) (*cobra.Command, *NodeOptions) {
 	options := &NodeOptions{Output: out}
 
 	cmd := &cobra.Command{
 		Use:   "network",
 		Short: "Launch node network",
 		Long:  fmt.Sprintf(networkLong, basename),
-		Run:   options.Run,
+		Run: func(c *cobra.Command, args []string) {
+			options.Run(c, errout, args)
+		},
 	}
 
 	flags := cmd.Flags()
@@ -106,7 +112,7 @@ func NewCommandStartNetwork(basename string, out io.Writer) (*cobra.Command, *No
 	return cmd, options
 }
 
-func (options *NodeOptions) Run(c *cobra.Command, args []string) {
+func (options *NodeOptions) Run(c *cobra.Command, errout io.Writer, args []string) {
 	kcmdutil.CheckErr(options.Complete())
 	kcmdutil.CheckErr(options.Validate(args))
 
@@ -115,9 +121,9 @@ func (options *NodeOptions) Run(c *cobra.Command, args []string) {
 	if err := options.StartNode(); err != nil {
 		if kerrors.IsInvalid(err) {
 			if details := err.(*kerrors.StatusError).ErrStatus.Details; details != nil {
-				fmt.Fprintf(c.Out(), "Invalid %s %s\n", details.Kind, details.Name)
+				fmt.Fprintf(errout, "Invalid %s %s\n", details.Kind, details.Name)
 				for _, cause := range details.Causes {
-					fmt.Fprintf(c.Out(), "  %s: %s\n", cause.Field, cause.Message)
+					fmt.Fprintf(errout, "  %s: %s\n", cause.Field, cause.Message)
 				}
 				os.Exit(255)
 			}
@@ -198,7 +204,7 @@ func (o NodeOptions) RunNode() error {
 	validationResults := validation.ValidateNodeConfig(nodeConfig, nil)
 	if len(validationResults.Warnings) != 0 {
 		for _, warning := range validationResults.Warnings {
-			glog.Warningf("%v", warning)
+			glog.Warningf("Warning: %v, node start will continue.", warning)
 		}
 	}
 	if len(validationResults.Errors) != 0 {
@@ -280,9 +286,17 @@ func (o NodeOptions) IsRunFromConfig() bool {
 }
 
 func StartNode(nodeConfig configapi.NodeConfig, components *utilflags.ComponentFlag) error {
-	config, err := kubernetes.BuildKubernetesNodeConfig(nodeConfig)
+	config, err := kubernetes.BuildKubernetesNodeConfig(nodeConfig, components.Enabled(ComponentProxy), components.Enabled(ComponentDNS))
 	if err != nil {
 		return err
+	}
+
+	if sdnapi.IsOpenShiftNetworkPlugin(config.KubeletServer.NetworkPluginName) {
+		// TODO: SDN plugin depends on the Kubelet registering as a Node and doesn't retry cleanly,
+		// and Kubelet also can't start the PodSync loop until the SDN plugin has loaded.
+		if components.Enabled(ComponentKubelet) != components.Enabled(ComponentPlugins) {
+			return fmt.Errorf("the SDN plugin must be run in the same process as the kubelet")
+		}
 	}
 
 	if components.Enabled(ComponentKubelet) {
@@ -291,7 +305,7 @@ func StartNode(nodeConfig configapi.NodeConfig, components *utilflags.ComponentF
 		glog.Infof("Starting node networking %s (%s)", config.KubeletServer.HostnameOverride, version.Get().String())
 	}
 
-	_, kubeClientConfig, err := configapi.GetKubeClient(nodeConfig.MasterKubeConfig)
+	_, kubeClientConfig, err := configapi.GetKubeClient(nodeConfig.MasterKubeConfig, nodeConfig.MasterClientConnectionOverrides)
 	if err != nil {
 		return err
 	}
@@ -305,8 +319,6 @@ func StartNode(nodeConfig configapi.NodeConfig, components *utilflags.ComponentF
 		config.EnsureLocalQuota(nodeConfig) // must be performed after EnsureVolumeDir
 	}
 
-	// TODO: SDN plugin depends on the Kubelet registering as a Node and doesn't retry cleanly,
-	// and Kubelet also can't start the PodSync loop until the SDN plugin has loaded.
 	if components.Enabled(ComponentKubelet) {
 		config.RunKubelet()
 	}
@@ -316,6 +328,11 @@ func StartNode(nodeConfig configapi.NodeConfig, components *utilflags.ComponentF
 	if components.Enabled(ComponentProxy) {
 		config.RunProxy()
 	}
+	if components.Enabled(ComponentDNS) {
+		config.RunDNS()
+	}
+
+	config.RunServiceStores(components.Enabled(ComponentProxy), components.Enabled(ComponentDNS))
 
 	return nil
 }

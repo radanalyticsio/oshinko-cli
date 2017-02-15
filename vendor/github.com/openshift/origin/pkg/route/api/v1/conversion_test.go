@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	kapi "k8s.io/kubernetes/pkg/api"
-	kapiv1 "k8s.io/kubernetes/pkg/api/v1"
 
 	"github.com/openshift/origin/pkg/route/api"
 	"github.com/openshift/origin/pkg/route/api/v1"
@@ -31,7 +30,7 @@ func TestSupportingCamelConstants(t *testing.T) {
 	} {
 		obj := &v1.TLSConfig{Termination: k}
 		out := &api.TLSConfig{}
-		if err := kapi.Scheme.Convert(obj, out); err != nil {
+		if err := kapi.Scheme.Convert(obj, out, nil); err != nil {
 			t.Errorf("%s: did not convert: %v", k, err)
 			continue
 		}
@@ -44,18 +43,27 @@ func TestSupportingCamelConstants(t *testing.T) {
 func TestDefaults(t *testing.T) {
 	obj := &v1.Route{
 		Spec: v1.RouteSpec{
-			To:  kapiv1.ObjectReference{Name: "other"},
+			To:  v1.RouteTargetReference{Name: "other"},
 			TLS: &v1.TLSConfig{},
+		},
+		Status: v1.RouteStatus{
+			Ingress: []v1.RouteIngress{{}},
 		},
 	}
 	out := &api.Route{}
-	if err := kapi.Scheme.Convert(obj, out); err != nil {
+	if err := kapi.Scheme.Convert(obj, out, nil); err != nil {
 		t.Fatal(err)
 	}
 	if out.Spec.TLS.Termination != api.TLSTerminationEdge {
 		t.Errorf("did not default termination: %#v", out)
 	}
+	if out.Spec.WildcardPolicy != api.WildcardPolicyNone {
+		t.Errorf("did not default wildcard policy: %#v", out)
+	}
 	if out.Spec.To.Kind != "Service" {
 		t.Errorf("did not default object reference kind: %#v", out)
+	}
+	if out.Status.Ingress[0].WildcardPolicy != api.WildcardPolicyNone {
+		t.Errorf("did not default status ingress wildcard policy: %#v", out)
 	}
 }

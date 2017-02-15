@@ -19,7 +19,7 @@ import (
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	clientcmd "k8s.io/kubernetes/pkg/client/unversioned/clientcmd"
 	"k8s.io/kubernetes/pkg/util/wait"
-	"k8s.io/kubernetes/test/e2e"
+	e2e "k8s.io/kubernetes/test/e2e/framework"
 
 	_ "github.com/openshift/origin/pkg/api/install"
 	"github.com/openshift/origin/pkg/client"
@@ -32,21 +32,22 @@ import (
 // CLI provides function to call the OpenShift CLI and Kubernetes and OpenShift
 // REST clients.
 type CLI struct {
-	execPath        string
-	verb            string
-	configPath      string
-	adminConfigPath string
-	username        string
-	outputDir       string
-	globalArgs      []string
-	commandArgs     []string
-	finalArgs       []string
-	stdin           *bytes.Buffer
-	stdout          io.Writer
-	stderr          io.Writer
-	verbose         bool
-	cmd             *cobra.Command
-	kubeFramework   *e2e.Framework
+	execPath         string
+	verb             string
+	configPath       string
+	adminConfigPath  string
+	username         string
+	outputDir        string
+	globalArgs       []string
+	commandArgs      []string
+	finalArgs        []string
+	stdin            *bytes.Buffer
+	stdout           io.Writer
+	stderr           io.Writer
+	verbose          bool
+	withoutNamespace bool
+	cmd              *cobra.Command
+	kubeFramework    *e2e.Framework
 }
 
 // NewCLI initialize the upstream E2E framework and set the namespace to match
@@ -129,6 +130,12 @@ func (c *CLI) SetNamespace(ns string) *CLI {
 	return c
 }
 
+// WithoutNamespace instructs the command should be invoked without adding --namespace parameter
+func (c *CLI) WithoutNamespace() *CLI {
+	c.withoutNamespace = true
+	return c
+}
+
 // SetOutputDir change the default output directory for temporary files
 func (c *CLI) SetOutputDir(dir string) *CLI {
 	c.outputDir = dir
@@ -174,7 +181,7 @@ func (c *CLI) Verbose() *CLI {
 // REST provides an OpenShift REST client for the current user. If the user is not
 // set, then it provides REST client for the cluster admin user
 func (c *CLI) REST() *client.Client {
-	_, clientConfig, err := configapi.GetKubeClient(c.configPath)
+	_, clientConfig, err := configapi.GetKubeClient(c.configPath, nil)
 	osClient, err := client.New(clientConfig)
 	if err != nil {
 		FatalErr(err)
@@ -184,7 +191,7 @@ func (c *CLI) REST() *client.Client {
 
 // AdminREST provides an OpenShift REST client for the cluster admin user.
 func (c *CLI) AdminREST() *client.Client {
-	_, clientConfig, err := configapi.GetKubeClient(c.adminConfigPath)
+	_, clientConfig, err := configapi.GetKubeClient(c.adminConfigPath, nil)
 	osClient, err := client.New(clientConfig)
 	if err != nil {
 		FatalErr(err)
@@ -194,7 +201,7 @@ func (c *CLI) AdminREST() *client.Client {
 
 // KubeREST provides a Kubernetes REST client for the current namespace
 func (c *CLI) KubeREST() *kclient.Client {
-	kubeClient, _, err := configapi.GetKubeClient(c.configPath)
+	kubeClient, _, err := configapi.GetKubeClient(c.configPath, nil)
 	if err != nil {
 		FatalErr(err)
 	}
@@ -203,7 +210,7 @@ func (c *CLI) KubeREST() *kclient.Client {
 
 // AdminKubeREST provides a Kubernetes REST client for the cluster admin user.
 func (c *CLI) AdminKubeREST() *kclient.Client {
-	kubeClient, _, err := configapi.GetKubeClient(c.adminConfigPath)
+	kubeClient, _, err := configapi.GetKubeClient(c.adminConfigPath, nil)
 	if err != nil {
 		FatalErr(err)
 	}
@@ -239,9 +246,11 @@ func (c *CLI) Run(commands ...string) *CLI {
 		username:        c.username,
 		outputDir:       c.outputDir,
 		globalArgs: append(commands, []string{
-			fmt.Sprintf("--namespace=%s", c.Namespace()),
 			fmt.Sprintf("--config=%s", c.configPath),
 		}...),
+	}
+	if !c.withoutNamespace {
+		nc.globalArgs = append(nc.globalArgs, fmt.Sprintf("--namespace=%s", c.Namespace()))
 	}
 	nc.stdin, nc.stdout, nc.stderr = in, out, errout
 	return nc.setOutput(c.stdout)
@@ -276,7 +285,13 @@ func (c *CLI) printCmd() string {
 	return strings.Join(c.finalArgs, " ")
 }
 
-// Output executes the command and return the output as string
+type ExitError struct {
+	Cmd    string
+	StdErr string
+	*exec.ExitError
+}
+
+// Output executes the command and returns stdout/stderr combined into one string
 func (c *CLI) Output() (string, error) {
 	if c.verbose {
 		fmt.Printf("DEBUG: oc %s\n", c.printCmd())
@@ -292,11 +307,44 @@ func (c *CLI) Output() (string, error) {
 		return trimmed, nil
 	case *exec.ExitError:
 		e2e.Logf("Error running %v:\n%s", cmd, trimmed)
-		return trimmed, err
+		return trimmed, &ExitError{ExitError: err.(*exec.ExitError), Cmd: c.execPath + " " + strings.Join(c.finalArgs, " "), StdErr: trimmed}
 	default:
 		FatalErr(fmt.Errorf("unable to execute %q: %v", c.execPath, err))
 		// unreachable code
 		return "", nil
+	}
+}
+
+// Outputs executes the command and returns the stdout/stderr output as separate strings
+func (c *CLI) Outputs() (string, string, error) {
+	if c.verbose {
+		fmt.Printf("DEBUG: oc %s\n", c.printCmd())
+	}
+	cmd := exec.Command(c.execPath, c.finalArgs...)
+	cmd.Stdin = c.stdin
+	e2e.Logf("Running '%s %s'", c.execPath, strings.Join(c.finalArgs, " "))
+	//out, err := cmd.CombinedOutput()
+	var stdErrBuff, stdOutBuff bytes.Buffer
+	cmd.Stdout = &stdOutBuff
+	cmd.Stderr = &stdErrBuff
+	err := cmd.Run()
+
+	stdOutBytes := stdOutBuff.Bytes()
+	stdErrBytes := stdErrBuff.Bytes()
+	stdOut := strings.TrimSpace(string(stdOutBytes))
+	stdErr := strings.TrimSpace(string(stdErrBytes))
+	switch err.(type) {
+	case nil:
+		c.stdout = bytes.NewBuffer(stdOutBytes)
+		c.stderr = bytes.NewBuffer(stdErrBytes)
+		return stdOut, stdErr, nil
+	case *exec.ExitError:
+		e2e.Logf("Error running %v:\nStdOut>\n%s\nStdErr>\n%s\n", cmd, stdOut, stdErr)
+		return stdOut, stdErr, err
+	default:
+		FatalErr(fmt.Errorf("unable to execute %q: %v", c.execPath, err))
+		// unreachable code
+		return "", "", nil
 	}
 }
 
@@ -340,7 +388,7 @@ func (c *CLI) OutputToFile(filename string) (string, error) {
 func (c *CLI) Execute() error {
 	out, err := c.Output()
 	if _, err := io.Copy(g.GinkgoWriter, strings.NewReader(out+"\n")); err != nil {
-		fmt.Printf("ERROR: Unable to copy the output to ginkgo writer")
+		fmt.Fprintln(os.Stderr, "ERROR: Unable to copy the output to ginkgo writer")
 	}
 	os.Stdout.Sync()
 	return err

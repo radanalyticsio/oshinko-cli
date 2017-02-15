@@ -45,11 +45,15 @@ func (r DockerClientSearcher) Search(precise bool, terms ...string) (ComponentMa
 	componentMatches := ComponentMatches{}
 	errs := []error{}
 	for _, term := range terms {
-		if term == "__dockerimage_fail" {
+		var (
+			ref imageapi.DockerImageReference
+			err error
+		)
+		switch term {
+		case "__dockerimage_fail":
 			errs = append(errs, fmt.Errorf("unable to find the specified docker image: %s", term))
 			continue
-		}
-		if term == "scratch" {
+		case "scratch":
 			componentMatches = append(componentMatches, &ComponentMatch{
 				Value: term,
 				Score: 0.0,
@@ -59,11 +63,13 @@ func (r DockerClientSearcher) Search(precise bool, terms ...string) (ComponentMa
 				Virtual:   true,
 			})
 			return componentMatches, errs
-		}
-
-		ref, err := imageapi.ParseDockerImageReference(term)
-		if err != nil {
-			continue
+		case "*":
+			ref = imageapi.DockerImageReference{Name: term}
+		default:
+			ref, err = imageapi.ParseDockerImageReference(term)
+			if err != nil {
+				continue
+			}
 		}
 
 		termMatches := ScoredComponentMatches{}
@@ -125,7 +131,7 @@ func (r DockerClientSearcher) Search(precise bool, terms ...string) (ComponentMa
 				continue
 			}
 			dockerImage := &imageapi.DockerImage{}
-			if err := kapi.Scheme.Convert(image, dockerImage); err != nil {
+			if err := kapi.Scheme.Convert(image, dockerImage, nil); err != nil {
 				errs = append(errs, err)
 				continue
 			}
@@ -207,6 +213,8 @@ func (s ImageImportSearcher) Search(precise bool, terms ...string) (ComponentMat
 		if image.Status.Status != unversioned.StatusSuccess {
 			glog.V(4).Infof("image import failed: %#v", image)
 			switch image.Status.Reason {
+			case unversioned.StatusReasonInternalError:
+				glog.Warningf("Docker registry lookup failed: %s", image.Status.Message)
 			case unversioned.StatusReasonInvalid, unversioned.StatusReasonUnauthorized, unversioned.StatusReasonNotFound:
 			default:
 				errs = append(errs, fmt.Errorf("can't look up Docker image %q: %s", term, image.Status.Message))
@@ -256,9 +264,17 @@ func (r DockerRegistrySearcher) Search(precise bool, terms ...string) (Component
 	componentMatches := ComponentMatches{}
 	var errs []error
 	for _, term := range terms {
-		ref, err := imageapi.ParseDockerImageReference(term)
-		if err != nil {
-			continue
+		var (
+			ref imageapi.DockerImageReference
+			err error
+		)
+		if term != "*" {
+			ref, err = imageapi.ParseDockerImageReference(term)
+			if err != nil {
+				continue
+			}
+		} else {
+			ref = imageapi.DockerImageReference{Name: term}
 		}
 
 		glog.V(4).Infof("checking Docker registry for %q, allow-insecure=%v", ref.String(), r.AllowInsecure)
@@ -293,7 +309,7 @@ func (r DockerRegistrySearcher) Search(precise bool, terms ...string) (Component
 		glog.V(4).Infof("found image: %#v", image)
 
 		dockerImage := &imageapi.DockerImage{}
-		if err = kapi.Scheme.Convert(&image.Image, dockerImage); err != nil {
+		if err = kapi.Scheme.Convert(&image.Image, dockerImage, nil); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -359,15 +375,18 @@ func matchTag(image docker.APIImages, value, registry, namespace, name, tag stri
 		}
 		match := &ComponentMatch{}
 		ok, score := partialScorer(name, iRef.Name, true, 0.5, 1.0)
+		// If the name doesn't match, don't consider this image as a match
 		if !ok {
 			continue
 		}
+
+		// Add up the score, then get the average
 		match.Score += score
 		_, score = partialScorer(namespace, iRef.Namespace, false, 0.5, 1.0)
 		match.Score += score
 		_, score = partialScorer(registry, iRef.Registry, false, 0.5, 1.0)
 		match.Score += score
-		_, score = partialScorer(tag, iRef.Tag, false, 0.5, 1.0)
+		_, score = partialScorer(tag, iRef.Tag, true, 0.5, 1.0)
 		match.Score += score
 
 		if match.Score >= 4.0 {
