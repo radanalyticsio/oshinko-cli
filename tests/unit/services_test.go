@@ -59,7 +59,7 @@ func (s *OshinkoUnitTestSuite) TestServicePorts(c *check.C) {
 func (s *OshinkoUnitTestSuite) TestServicePort(c *check.C) {
 	expectedPort := 12345
 	newServicePort := services.ServicePort(expectedPort)
-	c.Assert(newServicePort.ServicePort.Port, check.Equals, expectedPort)
+	c.Assert(newServicePort.ServicePort.Port, check.Equals, int32(expectedPort))
 }
 
 func (s *OshinkoUnitTestSuite) TestServicePortName(c *check.C) {

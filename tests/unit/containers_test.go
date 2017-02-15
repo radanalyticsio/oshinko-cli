@@ -73,7 +73,7 @@ func (s *OshinkoUnitTestSuite) TestContainerPort(c *check.C) {
 	expectedName, expectedPort := "testname", 1234
 	newContainerPort := containers.ContainerPort(expectedName, expectedPort)
 	c.Assert(newContainerPort.ContainerPort.Name, check.Equals, expectedName)
-	c.Assert(newContainerPort.ContainerPort.ContainerPort, check.Equals, expectedPort)
+	c.Assert(newContainerPort.ContainerPort.ContainerPort, check.Equals, int32(expectedPort))
 }
 
 func (s *OshinkoUnitTestSuite) TestProtocol(c *check.C) {
@@ -94,7 +94,7 @@ func (s *OshinkoUnitTestSuite) TestHostPort(c *check.C) {
 	newContainerPort := containers.ContainerPort("name", 1)
 	expectedHostPort := 12345
 	newContainerPort.HostPort(expectedHostPort)
-	c.Assert(newContainerPort.ContainerPort.HostPort, check.Equals, expectedHostPort)
+	c.Assert(newContainerPort.ContainerPort.HostPort, check.Equals, int32(expectedHostPort))
 }
 
 func (s *OshinkoUnitTestSuite) TestHostIP(c *check.C) {

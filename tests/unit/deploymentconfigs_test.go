@@ -20,7 +20,7 @@ func (s *OshinkoUnitTestSuite) TestReplicas(c *check.C) {
 	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
 	expectedReplicas := 12345
 	newDeploymentConfig.Replicas(expectedReplicas)
-	c.Assert(newDeploymentConfig.Spec.Replicas, check.Equals, expectedReplicas)
+	c.Assert(newDeploymentConfig.Spec.Replicas, check.Equals, int32(expectedReplicas))
 }
 
 func (s *OshinkoUnitTestSuite) TestLabel(c *check.C) {
