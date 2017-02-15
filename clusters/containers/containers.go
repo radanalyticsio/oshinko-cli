@@ -84,7 +84,7 @@ type OContainerPort struct {
 func ContainerPort(name string, port int) *OContainerPort {
 	cp := OContainerPort{}
 	cp.Name = name
-	cp.ContainerPort.ContainerPort = port
+	cp.ContainerPort.ContainerPort = int32(port)
 	cp.ContainerPort.Protocol = kapi.ProtocolTCP
 	return &cp
 }
@@ -100,7 +100,7 @@ func (cp *OContainerPort) SetName(name string) *OContainerPort {
 }
 
 func (cp *OContainerPort) HostPort(port int) *OContainerPort {
-	cp.ContainerPort.HostPort = port
+	cp.ContainerPort.HostPort = int32(port)
 	return cp
 }
 

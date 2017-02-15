@@ -8,6 +8,7 @@ import (
 	"time"
 
 	oclient "github.com/openshift/origin/pkg/client"
+	deployapi "github.com/openshift/origin/pkg/deploy/api"
 	ocon "github.com/radanalyticsio/oshinko-core/clusters/containers"
 	odc "github.com/radanalyticsio/oshinko-core/clusters/deploymentconfigs"
 	opt "github.com/radanalyticsio/oshinko-core/clusters/podtemplates"
@@ -16,6 +17,7 @@ import (
 	kapi "k8s.io/kubernetes/pkg/api"
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/labels"
+	"k8s.io/kubernetes/pkg/selection"
 	"k8s.io/kubernetes/pkg/util/sets"
 )
 
@@ -50,23 +52,23 @@ const sparkconfdir = "/etc/oshinko-spark-configs"
 const webServiceSuffix = "-ui"
 
 type SparkPod struct {
-	IP string
+	IP     string
 	Status string
-	Type string
+	Type   string
 }
 
 type SparkCluster struct {
-	Namespace       string `json:"namespace,omitempty"`
-	Name            string `json:"name,omitempty"`
-	Href            string `json:"href"`
-	Image           string `json:"image"`
-	MasterURL       string `json:"masterUrl"`
-	MasterWebURL    string `json:"masterWebUrl"`
-	Status          string `json:"status"`
-	WorkerCount     int    `json:"workerCount"`
-	MasterCount     int    `json:"masterCount,omitempty"`
-	Config          ClusterConfig
-	Pods		[]SparkPod
+	Namespace    string `json:"namespace,omitempty"`
+	Name         string `json:"name,omitempty"`
+	Href         string `json:"href"`
+	Image        string `json:"image"`
+	MasterURL    string `json:"masterUrl"`
+	MasterWebURL string `json:"masterWebUrl"`
+	Status       string `json:"status"`
+	WorkerCount  int    `json:"workerCount"`
+	MasterCount  int    `json:"masterCount,omitempty"`
+	Config       ClusterConfig
+	Pods         []SparkPod
 }
 
 func generalErr(err error, msg string, code int) ClusterError {
@@ -84,11 +86,11 @@ func makeSelector(otype string, clustername string) kapi.ListOptions {
 	// Build a selector list based on type and/or cluster name
 	ls := labels.NewSelector()
 	if otype != "" {
-		ot, _ := labels.NewRequirement(typeLabel, labels.EqualsOperator, sets.NewString(otype))
+		ot, _ := labels.NewRequirement(typeLabel, selection.Equals, sets.NewString(otype))
 		ls = ls.Add(*ot)
 	}
 	if clustername != "" {
-		cname, _ := labels.NewRequirement(clusterLabel, labels.EqualsOperator, sets.NewString(clustername))
+		cname, _ := labels.NewRequirement(clusterLabel, selection.Equals, sets.NewString(clustername))
 		ls = ls.Add(*cname)
 	}
 	return kapi.ListOptions{LabelSelector: ls}
@@ -103,7 +105,7 @@ func retrieveServiceURL(client kclient.ServiceInterface, stype, clustername stri
 		if stype == masterType {
 			scheme = "spark://"
 		}
-		return scheme + srv.Name + ":" + strconv.Itoa(srv.Spec.Ports[0].Port)
+		return scheme + srv.Name + ":" + strconv.Itoa(int(srv.Spec.Ports[0].Port))
 	}
 	return ""
 }
@@ -393,7 +395,7 @@ func waitForCount(client kclient.ReplicationControllerInterface, name string, co
 
 	for i := 0; i < 5; i++ {
 		r, _ := client.Get(name)
-		if r.Status.Replicas == count {
+		if int(r.Status.Replicas) == count {
 			return
 		}
 		time.Sleep(1 * time.Second)
@@ -401,7 +403,7 @@ func waitForCount(client kclient.ReplicationControllerInterface, name string, co
 }
 
 func DeleteCluster(clustername, namespace string, osclient *oclient.Client, client *kclient.Client) (string, error) {
-        var foundSomething bool = false
+	var foundSomething bool = false
 	info := []string{}
 	scalerepls := []string{}
 
@@ -452,7 +454,7 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 	// Delete each replication controller
 	for i := range repls.Items {
 		name := repls.Items[i].Name
-		err = rcc.Delete(name)
+		err = rcc.Delete(name, nil)
 		if err != nil {
 			info = append(info, "unable to delete replication controller "+name+" ("+err.Error()+")")
 		}
@@ -483,15 +485,14 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 	return strings.Join(info, ", "), nil
 }
 
-
 // FindSingleClusterResponse find a cluster and return its representation
 func FindSingleCluster(name, namespace string, osclient *oclient.Client, client *kclient.Client) (SparkCluster, error) {
 
 	addpod := func(p kapi.Pod) SparkPod {
 		return SparkPod{
-			IP: p.Status.PodIP,
+			IP:     p.Status.PodIP,
 			Status: string(p.Status.Phase),
-			Type: p.Labels[typeLabel],
+			Type:   p.Labels[typeLabel],
 		}
 	}
 
@@ -535,8 +536,8 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 	result.Href = "/clusters/" + clustername
 	result.WorkerCount, _, _ = countWorkers(pc, clustername)
 	result.MasterCount = 1
-	result.Config.WorkerCount = wrepl.Spec.Replicas
-	result.Config.MasterCount = mrepl.Spec.Replicas
+	result.Config.WorkerCount = int(wrepl.Spec.Replicas)
+	result.Config.MasterCount = int(mrepl.Spec.Replicas)
 	result.MasterURL = retrieveServiceURL(sc, masterType, clustername)
 	result.MasterWebURL = retrieveServiceURL(sc, webuiType, clustername)
 	if result.MasterURL == "" {
@@ -569,7 +570,6 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 
 // FindClusters find a cluster and return its representation
 func FindClusters(namespace string, client *kclient.Client) ([]SparkCluster, error) {
-
 
 	var result []SparkCluster = []SparkCluster{}
 
@@ -621,7 +621,6 @@ func FindClusters(namespace string, client *kclient.Client) ([]SparkCluster, err
 	return result, nil
 }
 
-
 func getReplController(client kclient.ReplicationControllerInterface, clustername, otype string) (*kapi.ReplicationController, error) {
 
 	selectorlist := makeSelector(otype, clustername)
@@ -638,6 +637,23 @@ func getReplController(client kclient.ReplicationControllerInterface, clusternam
 		}
 	}
 	return &newestRepl, nil
+}
+
+func getDepConfig(client oclient.DeploymentConfigInterface, clustername, otype string) (*deployapi.DeploymentConfig, error) {
+	selectorlist := makeSelector(otype, clustername)
+	deps, err := client.List(selectorlist)
+	if err != nil || len(deps.Items) == 0 {
+		return nil, err
+	}
+	// Use the latest replication controller.  There could be more than one
+	// if the user did something like oc env to set a new env var on a deployment
+	newestDep := deps.Items[0]
+	for i := 0; i < len(deps.Items); i++ {
+		if deps.Items[i].CreationTimestamp.Unix() > newestDep.CreationTimestamp.Unix() {
+			newestDep = deps.Items[i]
+		}
+	}
+	return &newestDep, nil
 }
 
 // UpdateSingleClusterResponse update a cluster and return the new representation
@@ -670,18 +686,18 @@ func UpdateCluster(name, namespace string, config *ClusterConfig, osclient *ocli
 	// that should be an error at this point (unless we spin all the pods down and
 	// redeploy)
 
-	rcc := client.ReplicationControllers(namespace)
-	repl, err := getReplController(rcc, clustername, workerType)
+	dcc := osclient.DeploymentConfigs(namespace)
+	dep, err := getDepConfig(dcc, clustername, workerType)
 	if err != nil {
 		return result, generalErr(err, replMsgWorker, ClientOperationCode)
-	} else if repl == nil {
+	} else if dep == nil {
 		return result, generalErr(err, replMsgWorker, ClusterIncompleteCode)
 	}
 
 	// If the current replica count does not match the request, update the replication controller
-	if repl.Spec.Replicas != workercount {
-		repl.Spec.Replicas = workercount
-		_, err = rcc.Update(repl)
+	if int(dep.Spec.Replicas) != workercount {
+		dep.Spec.Replicas = int32(workercount)
+		_, err = dcc.Update(dep)
 		if err != nil {
 			return result, generalErr(err, updateReplMsg, ClientOperationCode)
 		}

@@ -2,29 +2,27 @@ package clusters
 
 import (
 	"fmt"
+	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"strconv"
 	"strings"
-	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 )
 
 type ClusterConfig struct {
-
-	MasterCount int
-	WorkerCount int
-	Name string
+	MasterCount       int
+	WorkerCount       int
+	Name              string
 	SparkMasterConfig string
 	SparkWorkerConfig string
-	SparkImage string
+	SparkImage        string
 }
 
-
 var defaultConfig ClusterConfig = ClusterConfig{
-								MasterCount: 1,
-	                                                        WorkerCount: 1,
-								Name: "default",
-								SparkMasterConfig: "",
-								SparkWorkerConfig: "",
-								SparkImage: ""}
+	MasterCount:       1,
+	WorkerCount:       1,
+	Name:              "default",
+	SparkMasterConfig: "",
+	SparkWorkerConfig: "",
+	SparkImage:        ""}
 
 const Defaultname = "default"
 const failOnMissing = true
@@ -35,16 +33,15 @@ const WorkerCountMustBeAtLeastOne = "cluster configuration may not have a worker
 const ErrorWhileProcessing = "'%s', %s"
 const NamedConfigDoesNotExist = "named config '%s' does not exist"
 
-
 // This function is meant to support testability
 func GetDefaultConfig() ClusterConfig {
 	return defaultConfig
 }
 
 func assignConfig(res *ClusterConfig, src ClusterConfig) {
-        if src.Name != "" {
+	if src.Name != "" {
 		res.Name = src.Name
-        }
+	}
 	if src.MasterCount != 0 {
 		res.MasterCount = src.MasterCount
 	}
@@ -73,7 +70,6 @@ func checkConfiguration(config ClusterConfig) error {
 	return err
 }
 
-
 func getInt(value, configmapname string) (int, error) {
 	i, err := strconv.Atoi(strings.Trim(value, "\n"))
 	if err != nil {
@@ -91,13 +87,13 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 	// the first element in the name
 	switch name {
 	case "mastercount":
-		config.MasterCount, err = getInt(value, configmapname + ".mastercount")
+		config.MasterCount, err = getInt(value, configmapname+".mastercount")
 	case "workercount":
-		config.WorkerCount, err = getInt(value, configmapname + ".workercount")
+		config.WorkerCount, err = getInt(value, configmapname+".workercount")
 	case "sparkmasterconfig":
-                config.SparkMasterConfig = strings.Trim(value, "\n")
+		config.SparkMasterConfig = strings.Trim(value, "\n")
 	case "sparkworkerconfig":
-                config.SparkWorkerConfig = strings.Trim(value, "\n")
+		config.SparkWorkerConfig = strings.Trim(value, "\n")
 	case "sparkimage":
 		config.SparkImage = strings.Trim(value, "\n")
 	}
@@ -119,7 +115,7 @@ func readConfig(name string, res *ClusterConfig, failOnMissing bool, cm kclient.
 		}
 	}
 	if err == nil && cmap != nil {
-		for n, v := range (cmap.Data) {
+		for n, v := range cmap.Data {
 			err = process(res, n, v, name)
 			if err != nil {
 				break
@@ -140,9 +136,9 @@ func loadConfig(name string, cm kclient.ConfigMapsInterface) (res ClusterConfig,
 }
 
 func GetClusterConfig(config *ClusterConfig, cm kclient.ConfigMapsInterface) (res ClusterConfig, err error) {
-        var name string = ""
+	var name string = ""
 	if config != nil {
-	   name = config.Name
+		name = config.Name
 	}
 	res, err = loadConfig(name, cm)
 	if err == nil && config != nil {
