@@ -5,14 +5,14 @@ go get github.com/renstrom/dedent
 go get github.com/docker/go-connections/nat
 go get github.com/ghodss/yaml
 
-PROJECT='github.com/redhatanalytics/oshinko-cli'
+PROJECT='github.com/radanalyticsio/oshinko-cli'
 TAG=`git describe --tags --abbrev=0 2> /dev/null | head -n1`
 if [ -z $TAG ]; then
     TAG='0.0.0'
 fi
 
 GIT_COMMIT=`git log -n1 --pretty=format:%h`
-TAG="${GIT_TAG}-${GIT_COMMIT}"
+TAG="${TAG}-${GIT_COMMIT}"
 
 APP=oshinko-cli
 
@@ -46,7 +46,7 @@ export GO15VENDOREXPERIMENT=1
 
 if [ $CMD = build ]; then
     go $CMD $GO_OPTIONS $TAGS -ldflags \
-    "-X $PROJECT/version.tag=$TAG -X $PROJECT/version.appName=$APP" \
+    "-X $PROJECT/version.gitTag=$TAG -X $PROJECT/version.appName=$APP" \
     $OUTPUT_FLAG $TARGET
 fi
 
