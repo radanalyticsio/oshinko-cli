@@ -5,6 +5,7 @@ import (
 	"github.com/openshift/origin/pkg/cmd/flagtypes"
 	"github.com/openshift/origin/pkg/cmd/templates"
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/cmd"
 	"github.com/spf13/cobra"
 	"io"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
@@ -53,6 +54,7 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 		ExposeFlags(firstcmd, "server", "client-certificate",
 			"client-key", "certificate-authority", "insecure-skip-tls-verify", "token")
 
+	cmds.AddCommand(cmd.NewCmdVersion(fullName, f, in, out))
 	cmds.AddCommand(NewCmdOptions(out))
 	return cmds
 }
