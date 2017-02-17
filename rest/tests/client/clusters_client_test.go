@@ -99,6 +99,66 @@ func (s *OshinkoRestTestSuite) TestCreateAndDeleteCluster(c *check.C) {
 	c.Assert(obsmcount, check.Equals, mcount)
 	c.Assert(obswcount, check.Equals, wcount)
 
+	// scale the cluster
+	// this will attempt to scale up the number of workers by 1. as with
+	// the creation test, this test will loop for a number of retries to
+	// give time for the new worker to be created.
+	uwcount := int64(wcount + 1)
+	ucconfig := models.NewClusterConfig{MasterCount: mcount, WorkerCount: uwcount}
+	ucdetails := models.NewCluster{Name: &cname, Config: &ucconfig}
+	uclparams := clusters.NewUpdateSingleClusterParams().WithCluster(&ucdetails).WithName(cname)
+
+	// update the cluster
+	_, err = s.cli.Clusters.UpdateSingleCluster(uclparams)
+	if err != nil {
+		msg := err.(*clusters.UpdateSingleClusterDefault).Error() + "\n"
+		for _, e := range err.(*clusters.UpdateSingleClusterDefault).Payload.Errors {
+			msg += errors.SingleErrorToString(e)
+		}
+		c.Fatal(msg)
+	}
+
+	// check for update completion
+	obsmcount, obswcount = int64(0), int64(0)
+	for tries = 0; tries < retries; tries++ {
+		cldresult, err := s.cli.Clusters.FindSingleCluster(cldparams)
+		if err != nil {
+			msg := fmt.Sprintf("%s \n %+v",
+				err.(*clusters.FindSingleClusterDefault).Error(),
+				err.(*clusters.FindSingleClusterDefault).Payload.Errors)
+			c.Fatal(msg)
+		}
+
+		// if enough pods are available, we loop through them and exit
+		// the retry loop, otherwise sleep for 1 second.
+		if len(cldresult.Payload.Cluster.Pods) >= int(mcount+uwcount) {
+			// loop through the pods to count workers and masters
+			obsmcount = 0
+			obswcount = 0
+			for _, pod := range cldresult.Payload.Cluster.Pods {
+				switch *pod.Type {
+				case "master":
+					if *pod.Status == "Running" {
+						obsmcount += 1
+					}
+				case "worker":
+					if *pod.Status == "Running" {
+						obswcount += 1
+					}
+				}
+			}
+			if obsmcount+obswcount >= mcount+uwcount {
+				break
+			}
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+
+	c.Assert(tries, LessThan, retries)
+	c.Assert(obsmcount, check.Equals, mcount)
+	c.Assert(obswcount, check.Equals, uwcount)
+
 	// delete the cluster
 	delparams := clusters.NewDeleteSingleClusterParams().WithName(cname)
 	_, err = s.cli.Clusters.DeleteSingleCluster(delparams)
