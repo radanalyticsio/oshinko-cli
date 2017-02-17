@@ -63,7 +63,7 @@ func checkClusterHelper(s *OshinkoRestTestSuite, c *check.C, params *clusters.Fi
 					}
 				}
 			}
-			if int(obsmcount+obswcount) >= count {
+			if int(obsmcount+obswcount) == count {
 				break
 			}
 		}
@@ -104,7 +104,7 @@ func (s *OshinkoRestTestSuite) TestCreateAndDeleteCluster(c *check.C) {
 	c.Assert(obsmcount, check.Equals, mcount)
 	c.Assert(obswcount, check.Equals, wcount)
 
-	// scale the cluster
+	// scale up the cluster
 	// this will attempt to scale up the number of workers by 1. as with
 	// the creation test, this test will loop for a number of retries to
 	// give time for the new worker to be created.
@@ -112,6 +112,28 @@ func (s *OshinkoRestTestSuite) TestCreateAndDeleteCluster(c *check.C) {
 	ucconfig := models.NewClusterConfig{MasterCount: mcount, WorkerCount: uwcount}
 	ucdetails := models.NewCluster{Name: &cname, Config: &ucconfig}
 	uclparams := clusters.NewUpdateSingleClusterParams().WithCluster(&ucdetails).WithName(cname)
+
+	// update the cluster
+	_, err = s.cli.Clusters.UpdateSingleCluster(uclparams)
+	if err != nil {
+		msg := err.(*clusters.UpdateSingleClusterDefault).Error() + "\n"
+		for _, e := range err.(*clusters.UpdateSingleClusterDefault).Payload.Errors {
+			msg += errors.SingleErrorToString(e)
+		}
+		c.Fatal(msg)
+	}
+
+	// check for update completion
+	obsmcount, obswcount = checkClusterHelper(s, c, cldparams, int(mcount+uwcount))
+
+	c.Assert(obsmcount, check.Equals, mcount)
+	c.Assert(obswcount, check.Equals, uwcount)
+
+	// scale down the cluster
+	uwcount = int64(wcount - 1)
+	ucconfig = models.NewClusterConfig{MasterCount: mcount, WorkerCount: uwcount}
+	ucdetails = models.NewCluster{Name: &cname, Config: &ucconfig}
+	uclparams = clusters.NewUpdateSingleClusterParams().WithCluster(&ucdetails).WithName(cname)
 
 	// update the cluster
 	_, err = s.cli.Clusters.UpdateSingleCluster(uclparams)
