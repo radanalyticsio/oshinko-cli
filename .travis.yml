@@ -1,5 +1,10 @@
 language: go
 
+
+env:
+  - TEST_DIR=.
+  - TEST_DIR=./rest
+
 install: make build
 
 script: make test
