@@ -2,12 +2,12 @@ package handlers
 
 import (
 	"github.com/go-openapi/runtime/middleware"
-	coreclusters "github.com/radanalyticsio/oshinko-core/clusters"
-	osa "github.com/radanalyticsio/oshinko-rest/helpers/authentication"
-	oe "github.com/radanalyticsio/oshinko-rest/helpers/errors"
-	"github.com/radanalyticsio/oshinko-rest/helpers/info"
-	"github.com/radanalyticsio/oshinko-rest/models"
-	apiclusters "github.com/radanalyticsio/oshinko-rest/restapi/operations/clusters"
+	coreclusters "github.com/radanalyticsio/oshinko-cli/core/clusters"
+	osa "github.com/radanalyticsio/oshinko-cli/rest/helpers/authentication"
+	oe "github.com/radanalyticsio/oshinko-cli/rest/helpers/errors"
+	"github.com/radanalyticsio/oshinko-cli/rest/helpers/info"
+	"github.com/radanalyticsio/oshinko-cli/rest/models"
+	apiclusters "github.com/radanalyticsio/oshinko-cli/rest/restapi/operations/clusters"
 )
 
 const nameSpaceMsg = "cannot determine target openshift namespace"

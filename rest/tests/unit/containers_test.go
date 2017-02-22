@@ -5,8 +5,8 @@ import (
 	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/resource"
 
-	"github.com/radanalyticsio/oshinko-core/clusters/containers"
-	"github.com/radanalyticsio/oshinko-core/clusters/probes"
+	"github.com/radanalyticsio/oshinko-cli/core/clusters/containers"
+	"github.com/radanalyticsio/oshinko-cli/core/clusters/probes"
 )
 
 func (s *OshinkoUnitTestSuite) TestContainer(c *check.C) {
