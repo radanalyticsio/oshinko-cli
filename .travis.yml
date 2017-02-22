@@ -2,8 +2,8 @@ language: go
 
 
 env:
-  - TEST_DIR=.
-  - TEST_DIR=./rest
+  - TEST_DIR=$TRAVIS_BUILD_DIR
+  - TEST_DIR=$TRAVIS_BUILD_DIR/rest
 
 install: make build
 
