@@ -1,5 +1,11 @@
 language: go
 
-install: make build
+env:
+  - TEST_DIR=.
+  - TEST_DIR=rest
 
-script: make test
+install: cd ${TRAVIS_BUILD_DIR}/${TEST_DIR} && make build
+
+before_script: go get gopkg.in/check.v1
+
+script: cd ${TRAVIS_BUILD_DIR}/${TEST_DIR} && make test
