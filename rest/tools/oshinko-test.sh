@@ -38,7 +38,7 @@ usage() {
     echo
     echo "client test arguments:"
     echo "  -p PROJECT    a project to run the tests in, created if it doesn't exist (default: current project)"
-    echo "  -r REPO       the Git source repo to build the test from (default: https://github.com/radanalyticsio/oshinko-cli/rest)"
+    echo "  -r REPO       the Git source repo to build the test from (default: https://github.com/radanalyticsio/oshinko-cli)"
     echo "  -b REF        a Git branch, tag, or commit to build the test from (default: master)"
     echo "  -n NAME       the Pod name for the client test (default: oshinko-tests)"
     echo "  -i URI        the URI for the internal registry which will store the built image, if not supplied the script will attempt to ascertain"
