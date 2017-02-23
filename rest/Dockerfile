@@ -2,7 +2,7 @@
 # by default this image will run the server listening on port 8080
 FROM golang
 
-ADD . /go/src/github.com/radanalyticsio/oshinko-cli/rest
+ADD . /go/src/github.com/radanalyticsio/oshinko-cli
 
 WORKDIR /go/src/github.com/radanalyticsio/oshinko-cli/rest
 RUN make install
