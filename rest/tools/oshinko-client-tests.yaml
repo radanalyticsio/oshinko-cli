@@ -25,8 +25,8 @@ objects:
         ref: ${SOURCE_REF}
       dockerfile: |-
         FROM golang
-        ADD . /go/src/github.com/radanalyticsio/oshinko-rest/
-        WORKDIR /go/src/github.com/radanalyticsio/oshinko-rest
+        ADD . /go/src/github.com/radanalyticsio/oshinko-cli/rest/
+        WORKDIR /go/src/github.com/radanalyticsio/oshinko-cli/rest
         RUN chmod a+rwX -R .
         RUN go get gopkg.in/check.v1
         ENTRYPOINT tools/oshinko-test.sh -t client-deployed
@@ -83,7 +83,7 @@ parameters:
 - name: SOURCE_REPO
   description: |-
     Source URI to use for building the oshinko-rest client tests.
-  value: https://github.com/radanalyticsio/oshinko-rest
+  value: https://github.com/radanalyticsio/oshinko-cli/rest
 - name: SOURCE_REF
   description: |-
     Branch or commit of the source repository to use for building the

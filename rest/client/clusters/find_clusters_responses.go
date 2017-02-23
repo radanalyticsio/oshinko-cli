@@ -14,7 +14,7 @@ import (
 
 	strfmt "github.com/go-openapi/strfmt"
 
-	"github.com/radanalyticsio/oshinko-rest/models"
+	"github.com/radanalyticsio/oshinko-cli/rest/models"
 )
 
 // FindClustersReader is a Reader for the FindClusters structure.

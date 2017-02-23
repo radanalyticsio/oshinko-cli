@@ -14,7 +14,7 @@ import (
 	flags "github.com/jessevdk/go-flags"
 	graceful "github.com/tylerb/graceful"
 
-	"github.com/radanalyticsio/oshinko-rest/restapi/operations"
+	"github.com/radanalyticsio/oshinko-cli/rest/restapi/operations"
 )
 
 const (

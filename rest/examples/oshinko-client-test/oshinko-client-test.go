@@ -6,7 +6,7 @@ import (
 	httptransport "github.com/go-openapi/runtime/client"
 	strfmt "github.com/go-openapi/strfmt"
 
-	"github.com/radanalyticsio/oshinko-rest/client"
+	"github.com/radanalyticsio/oshinko-cli/rest/client"
 )
 
 // A simple application to demonstrate the API client for oshinko-rest-server

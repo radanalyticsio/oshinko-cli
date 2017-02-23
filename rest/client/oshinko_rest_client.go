@@ -9,8 +9,8 @@ import (
 
 	strfmt "github.com/go-openapi/strfmt"
 
-	"github.com/radanalyticsio/oshinko-rest/client/clusters"
-	"github.com/radanalyticsio/oshinko-rest/client/server"
+	"github.com/radanalyticsio/oshinko-cli/rest/client/clusters"
+	"github.com/radanalyticsio/oshinko-cli/rest/client/server"
 )
 
 // Default oshinko rest HTTP client.

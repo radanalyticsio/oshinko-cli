@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/radanalyticsio/oshinko-rest/models"
+	"github.com/radanalyticsio/oshinko-cli/rest/models"
 )
 
 // errorResponseWriter is a wrapper struct to help with inspecting the

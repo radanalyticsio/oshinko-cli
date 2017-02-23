@@ -12,4 +12,4 @@ fi
 
 APP=oshinko-rest-server
 
-TAG_APPNAME_FLAGS="-X github.com/radanalyticsio/oshinko-rest/version.gitTag=$TAG -X github.com/radanalyticsio/oshinko-rest/version.appName=$APP"
+TAG_APPNAME_FLAGS="-X github.com/radanalyticsio/oshinko-cli/rest/version.gitTag=$TAG -X github.com/radanalyticsio/oshinko-cli/rest/version.appName=$APP"

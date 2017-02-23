@@ -1,33 +1,23 @@
-LOCAL_IMAGE=project/oshinko-cli
-
-.PHONY: all build test clean
+.PHONY : build clean install test validate-api image generate
 
 build:
-	scripts/build.sh build
-
-extended:
-	scripts/build.sh extended
-
-image:
-	sudo docker build -t $(LOCAL_IMAGE) .
+	tools/build.sh build
 
 clean:
 	rm -rf _output
-	sudo docker rmi $(LOCAL_IMAGE)
 
 install:
-	scripts/build.sh install
+	tools/build.sh install
 
 test:
-	scripts/build.sh test
+	tools/oshinko-test.sh -t unit
 
-debug:
-	scripts/build.sh debug
+validate-api:
+	swagger validate api/swagger.yaml
 
-# Run command tests. Uses whatever binaries are currently built.
-#
-# Example:
-#   make test-cmd
-test-cmd: build
-	hack/test-cmd.sh
-.PHONY: test-cmd
+image:
+	docker build -t oshinko-rest .
+
+generate:
+	swagger generate server -f api/swagger.yaml -A oshinko-rest
+	swagger generate client -f api/swagger.yaml -A oshinko-rest

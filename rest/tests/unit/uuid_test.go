@@ -5,7 +5,7 @@ import (
 
 	"gopkg.in/check.v1"
 
-	"github.com/radanalyticsio/oshinko-rest/helpers/uuid"
+	"github.com/radanalyticsio/oshinko-cli/rest/helpers/uuid"
 )
 
 func (s *OshinkoUnitTestSuite) TestUuid(c *check.C) {

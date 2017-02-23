@@ -6,7 +6,7 @@ import (
 
 	"gopkg.in/check.v1"
 
-	"github.com/radanalyticsio/oshinko-rest/helpers/errors"
+	"github.com/radanalyticsio/oshinko-cli/rest/helpers/errors"
 )
 
 func (s *OshinkoUnitTestSuite) TestNewSingleErrorReponse(c *check.C) {

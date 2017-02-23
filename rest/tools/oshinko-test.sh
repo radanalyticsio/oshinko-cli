@@ -38,7 +38,7 @@ usage() {
     echo
     echo "client test arguments:"
     echo "  -p PROJECT    a project to run the tests in, created if it doesn't exist (default: current project)"
-    echo "  -r REPO       the Git source repo to build the test from (default: https://github.com/radanalyticsio/oshinko-rest)"
+    echo "  -r REPO       the Git source repo to build the test from (default: https://github.com/radanalyticsio/oshinko-cli/rest)"
     echo "  -b REF        a Git branch, tag, or commit to build the test from (default: master)"
     echo "  -n NAME       the Pod name for the client test (default: oshinko-tests)"
     echo "  -i URI        the URI for the internal registry which will store the built image, if not supplied the script will attempt to ascertain"
@@ -81,8 +81,9 @@ case "$REQUESTED_TEST" in
         . tools/common.sh
         # this export is needed for the vendor experiment for as long as go
         # version 1.5 is still in use.
+        go get gopkg.in/check.v1
         export GO15VENDOREXPERIMENT=1
-        go test -v -ldflags "$TAG_APPNAME_FLAGS" "github.com/radanalyticsio/oshinko-rest/tests/unit"
+        go test -v -ldflags "$TAG_APPNAME_FLAGS" "github.com/radanalyticsio/oshinko-cli/rest/tests/unit"
         ;;
 
     client-deployed)
@@ -91,7 +92,7 @@ case "$REQUESTED_TEST" in
         # this export is needed for the vendor experiment for as long as go
         # version 1.5 is still in use.
         export GO15VENDOREXPERIMENT=1
-        go test -v -ldflags "$TAG_APPNAME_FLAGS" "github.com/radanalyticsio/oshinko-rest/tests/client"
+        go test -v -ldflags "$TAG_APPNAME_FLAGS" "github.com/radanalyticsio/oshinko-cli/rest/tests/client"
         ;;
 
     client)
@@ -115,7 +116,7 @@ case "$REQUESTED_TEST" in
 
         if [ -z "$SOURCE_REPO" ]
         then
-            SOURCE_REPO=https://github.com/radanalyticsio/oshinko-rest
+            SOURCE_REPO=https://github.com/radanalyticsio/oshinko-cli/rest
         fi
 
         if [ -z "$SOURCE_REF" ]

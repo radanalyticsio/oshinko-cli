@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-openapi/runtime"
 
-	"github.com/radanalyticsio/oshinko-rest/models"
+	"github.com/radanalyticsio/oshinko-cli/rest/models"
 )
 
 /*CreateClusterCreated Cluster create response

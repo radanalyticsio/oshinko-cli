@@ -5,7 +5,7 @@ import (
 
 	"gopkg.in/check.v1"
 
-	"github.com/radanalyticsio/oshinko-rest/helpers/info"
+	"github.com/radanalyticsio/oshinko-cli/rest/helpers/info"
 )
 
 func (s *OshinkoUnitTestSuite) TestInAPod(c *check.C) {

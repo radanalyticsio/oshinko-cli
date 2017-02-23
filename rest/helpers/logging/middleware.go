@@ -5,8 +5,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/radanalyticsio/oshinko-rest/helpers/flags"
-	"github.com/radanalyticsio/oshinko-rest/helpers/uuid"
+	"github.com/radanalyticsio/oshinko-cli/rest/helpers/flags"
+	"github.com/radanalyticsio/oshinko-cli/rest/helpers/uuid"
 )
 
 // LogResponseWriter is a wrapper struct which allows us to retain the

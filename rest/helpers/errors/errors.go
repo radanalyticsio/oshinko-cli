@@ -4,7 +4,7 @@ package errors
 import (
     "fmt"
 
-	"github.com/radanalyticsio/oshinko-rest/models"
+	"github.com/radanalyticsio/oshinko-cli/rest/models"
 )
 
 // NewSingleErrorResponse creates a new error reponse object for use as a return

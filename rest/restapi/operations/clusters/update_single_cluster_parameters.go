@@ -13,7 +13,7 @@ import (
 
 	strfmt "github.com/go-openapi/strfmt"
 
-	"github.com/radanalyticsio/oshinko-rest/models"
+	"github.com/radanalyticsio/oshinko-cli/rest/models"
 )
 
 // NewUpdateSingleClusterParams creates a new UpdateSingleClusterParams object

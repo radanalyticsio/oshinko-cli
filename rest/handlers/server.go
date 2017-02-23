@@ -3,10 +3,10 @@ package handlers
 import (
 	middleware "github.com/go-openapi/runtime/middleware"
 
-	osa "github.com/radanalyticsio/oshinko-rest/helpers/authentication"
-	"github.com/radanalyticsio/oshinko-rest/helpers/info"
-	"github.com/radanalyticsio/oshinko-rest/restapi/operations/server"
-	"github.com/radanalyticsio/oshinko-rest/version"
+	osa "github.com/radanalyticsio/oshinko-cli/rest/helpers/authentication"
+	"github.com/radanalyticsio/oshinko-cli/rest/helpers/info"
+	"github.com/radanalyticsio/oshinko-cli/rest/restapi/operations/server"
+	"github.com/radanalyticsio/oshinko-cli/rest/version"
 )
 
 // ServerResponse respond to the server info request

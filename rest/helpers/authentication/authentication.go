@@ -11,7 +11,7 @@ import (
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/util/crypto"
 
-	"github.com/radanalyticsio/oshinko-rest/helpers/info"
+	"github.com/radanalyticsio/oshinko-cli/rest/helpers/info"
 )
 
 func SAConfig() (*restclient.Config, error) {
@@ -57,7 +57,7 @@ func GetKubeClient() (*kclient.Client, error) {
 		}
 		return client, err
 	} else {
-		client, _, err := serverapi.GetKubeClient(info.GetKubeConfigPath())
+		client, _, err := serverapi.GetKubeClient(info.GetKubeConfigPath(), nil)
 		return client, err
 	}
 }
@@ -75,7 +75,7 @@ func GetOpenShiftClient() (*client.Client, error) {
 		}
 		return client, err
 	} else {
-		client, _, err := serverapi.GetOpenShiftClient(info.GetKubeConfigPath())
+		client, _, err := serverapi.GetOpenShiftClient(info.GetKubeConfigPath(), nil)
 		return client, err
 	}
 }

@@ -9,14 +9,14 @@ import (
 	"github.com/go-openapi/errors"
 	"github.com/go-openapi/runtime"
 
-	"github.com/radanalyticsio/oshinko-rest/handlers"
-	oe "github.com/radanalyticsio/oshinko-rest/helpers/errors"
-	"github.com/radanalyticsio/oshinko-rest/helpers/flags"
-	"github.com/radanalyticsio/oshinko-rest/helpers/logging"
-	"github.com/radanalyticsio/oshinko-rest/restapi/operations"
-	"github.com/radanalyticsio/oshinko-rest/restapi/operations/clusters"
-	"github.com/radanalyticsio/oshinko-rest/restapi/operations/server"
-	"github.com/radanalyticsio/oshinko-rest/version"
+	"github.com/radanalyticsio/oshinko-cli/rest/handlers"
+	oe "github.com/radanalyticsio/oshinko-cli/rest/helpers/errors"
+	"github.com/radanalyticsio/oshinko-cli/rest/helpers/flags"
+	"github.com/radanalyticsio/oshinko-cli/rest/helpers/logging"
+	"github.com/radanalyticsio/oshinko-cli/rest/restapi/operations"
+	"github.com/radanalyticsio/oshinko-cli/rest/restapi/operations/clusters"
+	"github.com/radanalyticsio/oshinko-cli/rest/restapi/operations/server"
+	"github.com/radanalyticsio/oshinko-cli/rest/version"
 )
 
 // This file is safe to edit. Once it exists it will not be overwritten
