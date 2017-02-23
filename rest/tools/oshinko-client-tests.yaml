@@ -25,7 +25,7 @@ objects:
         ref: ${SOURCE_REF}
       dockerfile: |-
         FROM golang
-        ADD . /go/src/github.com/radanalyticsio/oshinko-cli/rest/
+        ADD . /go/src/github.com/radanalyticsio/oshinko-cli/
         WORKDIR /go/src/github.com/radanalyticsio/oshinko-cli/rest
         RUN chmod a+rwX -R .
         RUN go get gopkg.in/check.v1

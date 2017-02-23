@@ -116,7 +116,7 @@ case "$REQUESTED_TEST" in
 
         if [ -z "$SOURCE_REPO" ]
         then
-            SOURCE_REPO=https://github.com/radanalyticsio/oshinko-cli/rest
+            SOURCE_REPO=https://github.com/radanalyticsio/oshinko-cli
         fi
 
         if [ -z "$SOURCE_REF" ]
