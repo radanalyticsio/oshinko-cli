@@ -10,13 +10,13 @@ while getopts :s:w:h opt; do
             WEBROUTE=$OPTARG
             ;;
         h)
-            echo "Usage: oshinko-setup.sh [-w <hostname to use in exposed route to oshinko-web]"
-            echo "Example: oshinko-setup.sh -w mywebui.10.16.40.70.xip.io"
+            echo "Usage: oshinko-dev-setup.sh [-w <hostname to use in exposed route to oshinko-web]"
+            echo "Example: oshinko-dev-setup.sh -w mywebui.10.16.40.70.xip.io"
             echo "    results in the oshinko web service exposed at mywebui.10.16.40.70.xip.io"
             echo "If -w is not set, the default route will be used based on routing suffix, etc set at installation"
             echo ""
-            echo "Usage: oshinko-setup.sh [-s <spark docker image to use for clusters>]"
-            echo "Example: oshinko-setup.sh -s myregistry.com:5000/sparkimage"
+            echo "Usage: oshinko-dev-setup.sh [-s <spark docker image to use for clusters>]"
+            echo "Example: oshinko-dev-setup.sh -s myregistry.com:5000/sparkimage"
             echo ""
             echo "Note, it is important that the version of spark used in the pyspark builder image"
             echo "matches the version used in clusters. Therefore, if the -s flag is specified the"
