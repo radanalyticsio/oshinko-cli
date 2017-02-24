@@ -49,8 +49,8 @@ export GOPATH=$CURRDIR/oshinko
 SRCDIR=$CURRDIR/oshinko/src/github.com/radanalyticsio
 mkdir -p $SRCDIR
 cd $SRCDIR
-if [ ! -d "oshinko-rest" ]; then
-    git clone git@github.com:radanalyticsio/oshinko-rest
+if [ ! -d "oshinko-cli" ]; then
+    git clone git@github.com:radanalyticsio/oshinko-cli
 fi
 if [ ! -d "oshinko-webui" ]; then
     git clone git@github.com:radanalyticsio/oshinko-webui
@@ -59,7 +59,7 @@ if [ ! -d "oshinko-s2i" ]; then
     git clone git@github.com:radanalyticsio/oshinko-s2i
 fi
 
-cd $SRCDIR/oshinko-rest; sudo make image
+cd $SRCDIR/oshinko-cli/rest; sudo make image
 cd $SRCDIR/oshinko-webui; sudo docker build -t oshinko-webui .
 
 if [ -z $SPARK_IMAGE ]; then
@@ -71,27 +71,27 @@ if [ -z $SPARK_IMAGE ]; then
     # have to download each time. Maybe we can check for current images?
     cd $SRCDIR/openshift-spark; sudo make build
 
-    # Make the openshift-spark-py27-sti image for oshinko-s2i
-    cd $SRCDIR/openshift-spark/openshift-spark-py27-sti
-    make artifacts && sudo make build
-
-    # Make the s2i image since we are using defaults
-    cd $SRCDIR/oshinko-s2i; make build
+    # Make the s2i images since we are using defaults
+    cd $SRCDIR/oshinko-s2i/pyspark; make build
+    cd $SRCDIR/oshinko-s2i/java; make build
 fi
 
 ########### get the origin image and run oc cluster up
 ########### this part can be replaced with some other openshift install recipe
 
 cd $CURRDIR
-ORIGIN_VERSION=v1.3.0-alpha.3
-ORIGIN_TARBALL=openshift-origin-server-v1.3.0-alpha.3-7998ae4-linux-64bit.tar.gz
-ORIGIN_DIR=${ORIGIN_TARBALL%.tar.gz}
+ORIGIN_VERSION=v1.4.1
+ORIGIN_TARBALL=openshift-origin-server-v1.4.1-3f9807a-linux-64bit.tar.gz
+ORIGIN_DIR=$CURRDIR/`tar -tzf $ORIGIN_TARBALL | head -1 | cut -f1 -d"/"`
 
 if [ ! -d "$ORIGIN_DIR" ]; then
     wget https://github.com/openshift/origin/releases/download/$ORIGIN_VERSION/$ORIGIN_TARBALL
     tar -xvzf $ORIGIN_TARBALL
-    sudo cp ${ORIGIN_DIR}/* /usr/bin
 fi
+if [ -d "$ORIGIN_DIR" ]; then
+    export PATH=$ORIGIN_DIR:$PATH
+fi
+echo Using `which oc` for oc
 
 sudo sed -i -e "/^# INSECURE_REGISTRY/{ s/.*/INSECURE_REGISTRY='--insecure-registry 172.30.0.0\/16'/ }" /etc/sysconfig/docker
 sudo systemctl restart docker
@@ -109,7 +109,7 @@ REGISTRY=$(sudo oc get service docker-registry --template='{{index .spec.cluster
 ROUTERIP=$(sudo oc get service router --template='{{index .spec.clusterIP}}')
 
 # Push to a default oshinko project for a default oshinko user
-oc login -u oshinko -p oshinko
+oc login https://localhost:8443 -u oshinko -p oshinko
 oc new-project oshinko
 
 # Wait for the registry to be fully up
@@ -142,7 +142,7 @@ if [ -n "$WEBROUTE" ] ; then
     ROUTEVALUE=$WEBROUTE
 fi
 
-cd $SRCDIR/oshinko-rest
+cd $SRCDIR/oshinko-cli/rest
 
 oc process -f tools/server-ui-template.yaml \
 OSHINKO_SERVER_IMAGE=$REGISTRY/oshinko/oshinko-rest \
