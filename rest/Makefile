@@ -1,4 +1,6 @@
 .PHONY : build clean install test validate-api image generate
+DOCKERFILE=../Dockerfile.rest
+DOCKERCONTEXT=..
 
 build:
 	tools/build.sh build
@@ -16,7 +18,7 @@ validate-api:
 	swagger validate api/swagger.yaml
 
 image:
-	docker build -t oshinko-rest ..
+	docker build -t oshinko-rest -f $(DOCKERFILE) $(DOCKERCONTEXT)
 
 generate:
 	swagger generate server -f api/swagger.yaml -A oshinko-rest
