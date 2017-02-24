@@ -57,7 +57,7 @@ or as the `root` user for an all-in-one deployment.
 
 ## Sample script to deploy oshinko from sources in a local OpenShift instance
 
-Use `tools/oshinko-setup.sh` to quickly set up a development environment
+Use `tools/oshinko-dev-setup.sh` to quickly set up a development environment
 for oshinko. The script will download the necessary source repositories,
 build local images, create a new OpenShift installation using
 `oc cluster up`, push images to the integrated registry, and deploy
@@ -65,14 +65,14 @@ oshinko in a default project.
 
 Example usage:
 
-    $ oshinko-setup.sh -w mywebui.10.16.40.70.xip.io
+    $ oshinko-dev-setup.sh -w mywebui.10.16.40.70.xip.io
 
 This will setup a cluster and install oshinko with the oshinko web ui
 accessible at mywebui.10.16.40.70.xip.io (using xip.io is a way to
 get DNS to resolve to the IP, 10.16.40.70 in the example).  You would
 need to use a routeable IP address of your machine.
 
-    $ oshinko-setup.sh -w myweb.10.16.40.70.xip.io -s myregistry.com:5000/sparkimage
+    $ oshinko-dev-setup.sh -w myweb.10.16.40.70.xip.io -s myregistry.com:5000/sparkimage
 
 This will setup a cluster and install the oshinko bits as in the previous
 example, but will use a custom Spark image that you specified with the
