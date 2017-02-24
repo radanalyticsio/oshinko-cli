@@ -29,8 +29,8 @@ server.
 This project is using the vendor experiment that was merged in Go language
 version 1.5[[1]][ref1][[2]][ref2]. As such, **all** dependencies required by
 oshinko-rest should be stored in the `vendor` directory at the top of the
-project, they should not be included through the standard `$GOPATH`
-mechanism.
+project oshinko-cli (../vendor), they should not be included through the standard
+`$GOPATH` mechanism.
 
 The files under the vendor directory should be structured as if they were
 under the `$GOPATH/src` directory for a Go language installation, with the
@@ -40,7 +40,7 @@ with its fully qualified path as seen in an import statement.
 
 For example, if I wish to add source code that requires me to import
 `github.com/foo/bar`, then I should copy the contents of that repository
-to the directory `vendor/github.com/foo/bar` in this project.
+to the directory `../vendor/github.com/foo/bar` in this project.
 
 In this manner, we can ensure that the dependency chain for the oshinko-rest
 application will be frozen around the sources that are contained in the
