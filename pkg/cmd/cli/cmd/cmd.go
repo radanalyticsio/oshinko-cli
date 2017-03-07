@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+	"github.com/radanalyticsio/oshinko-cli/core/clusters"
 )
 
 type CmdOptions struct {
@@ -27,9 +28,9 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	o.Image = defaultImage
 
 	// Pod counts will be assigned by the default config in oshinko-core,
-	// here values should be defaulted to 0
-	o.WorkerCount = 0
-	o.MasterCount = 0
+	// here values should be defaulted to the sentinel value
+	o.WorkerCount = clusters.SentinelCountValue
+	o.MasterCount = clusters.SentinelCountValue
 
 	currentCluster, err := NameFromCommandArgs(cmd, args)
 	if err != nil {

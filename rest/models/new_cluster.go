@@ -81,7 +81,7 @@ type NewClusterConfig struct {
 
 	/* The count of master nodes requested in the cluster (must be > 0)
 	 */
-	MasterCount int64 `json:"masterCount,omitempty"`
+	MasterCount *int64 `json:"masterCount,omitempty"`
 
 	/* The name of a stored cluster configuration
 	 */
@@ -101,7 +101,7 @@ type NewClusterConfig struct {
 
 	/* The count of worker nodes requested in the cluster (must be > 0)
 	 */
-	WorkerCount int64 `json:"workerCount,omitempty"`
+	WorkerCount *int64 `json:"workerCount,omitempty"`
 }
 
 // Validate validates this new cluster config
