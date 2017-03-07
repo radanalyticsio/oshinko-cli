@@ -23,7 +23,7 @@ os::cmd::expect_success "_output/oshinko-cli scale abc --workers=2 --token=`oc w
 os::cmd::try_until_text "_output/oshinko-cli get abc --token=`oc whoami -t` -o json" '"workerCount": 0' 2
 #delete
 os::cmd::expect_success "_output/oshinko-cli delete abc --token=`oc whoami -t`"
-VERBOSE=true os::cmd::expect_success "_output/oshinko-cli get abc --token=`oc whoami -t` -o json"
+VERBOSE=true os::cmd::expect_failure_and_text "_output/oshinko-cli get abc --token=`oc whoami -t` -o json" "no such cluster 'abc'"
 
 os::cmd::expect_success "oc project default/127-0-0-1:28443/system:admin"
 os::cmd::expect_success "oc delete ns oshinko"
