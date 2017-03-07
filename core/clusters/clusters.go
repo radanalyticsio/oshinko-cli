@@ -25,11 +25,12 @@ const clusterConfigMsg = "invalid cluster configuration"
 const missingConfigMsg = "unable to find spark configuration '%s'"
 const findDepConfigMsg = "unable to find deployment configs"
 const createDepConfigMsg = "unable to create deployment config '%s'"
-const replMsgWorker = "unable to find replication controller for spark workers"
+const replMsgWorker = "unable to find replication controller for spark worker"
 const replMsgMaster = "unable to find replication controller for spark master"
+const depMsg = "unable to find deployment config for spark %s"
 const masterSrvMsg = "unable to create spark master service endpoint"
 const mastermsg = "unable to find spark masters"
-const updateReplMsg = "unable to update replication controller for spark workers"
+const updateDepMsg = "unable to update deployment config for spark %s"
 const noSuchClusterMsg = "no such cluster '%s'"
 const podListMsg = "unable to retrive pod list"
 const sparkImageMsg = "no spark image specified"
@@ -258,7 +259,7 @@ func countWorkers(client kclient.PodInterface, clustername string) (int, *kapi.P
 	return cnt, pods, err
 }
 
-// CreateClusterResponse create a cluster and return the representation
+// Create a cluster and return the representation
 func CreateCluster(clustername, namespace, sparkimage string, config *ClusterConfig, osclient *oclient.Client, client *kclient.Client) (SparkCluster, error) {
 
 	var masterconfdir string
@@ -485,7 +486,7 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 	return strings.Join(info, ", "), nil
 }
 
-// FindSingleClusterResponse find a cluster and return its representation
+// Find a cluster and return its representation
 func FindSingleCluster(name, namespace string, osclient *oclient.Client, client *kclient.Client) (SparkCluster, error) {
 
 	addpod := func(p kapi.Pod) SparkPod {
@@ -568,7 +569,7 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 	return result, nil
 }
 
-// FindClusters find a cluster and return its representation
+// Find all clusters and return their representation
 func FindClusters(namespace string, client *kclient.Client) ([]SparkCluster, error) {
 
 	var result []SparkCluster = []SparkCluster{}
@@ -656,7 +657,31 @@ func getDepConfig(client oclient.DeploymentConfigInterface, clustername, otype s
 	return &newestDep, nil
 }
 
-// UpdateSingleClusterResponse update a cluster and return the new representation
+func scaleDep(dcc oclient.DeploymentConfigInterface, clustername string, count int, otype string) error {
+	if count <= SentinelCountValue {
+		return nil
+	}
+	dep, err := getDepConfig(dcc, clustername, otype)
+	if err != nil {
+		return generalErr(err, fmt.Sprintf(depMsg, otype), ClientOperationCode)
+	} else if dep == nil {
+		return generalErr(err, fmt.Sprintf(depMsg, otype), ClusterIncompleteCode)
+	}
+
+	// If the current replica count does not match the request, update the replication controller
+	if int(dep.Spec.Replicas) != count {
+		dep.Spec.Replicas = int32(count)
+		_, err = dcc.Update(dep)
+		if err != nil {
+			return generalErr(err, fmt.Sprintf(updateDepMsg, otype), ClientOperationCode)
+		}
+	}
+	return nil
+}
+
+// Update a cluster and return the new representation
+// This routine supports the same stored config semantics as used in cluster creation
+// but at this point only allows updating the master and worker counts.
 func UpdateCluster(name, namespace string, config *ClusterConfig, osclient *oclient.Client, client *kclient.Client) (SparkCluster, error) {
 
 	var result SparkCluster = SparkCluster{}
@@ -680,6 +705,7 @@ func UpdateCluster(name, namespace string, config *ClusterConfig, osclient *ocli
 		return result, generalErr(err, clusterConfigMsg, ErrorCode(err))
 	}
 	workercount := int(finalconfig.WorkerCount)
+	mastercount := int(finalconfig.MasterCount)
 
 	// TODO(tmckay) we need some way to track the current spark config for a cluster,
 	// maybe in annotations. If someone tries to change the spark config for a cluster,
@@ -687,24 +713,50 @@ func UpdateCluster(name, namespace string, config *ClusterConfig, osclient *ocli
 	// redeploy)
 
 	dcc := osclient.DeploymentConfigs(namespace)
-	dep, err := getDepConfig(dcc, clustername, workerType)
+	err = scaleDep(dcc, clustername, workercount, workerType)
 	if err != nil {
-		return result, generalErr(err, replMsgWorker, ClientOperationCode)
-	} else if dep == nil {
-		return result, generalErr(err, replMsgWorker, ClusterIncompleteCode)
+		return result, err
 	}
-
-	// If the current replica count does not match the request, update the replication controller
-	if int(dep.Spec.Replicas) != workercount {
-		dep.Spec.Replicas = int32(workercount)
-		_, err = dcc.Update(dep)
-		if err != nil {
-			return result, generalErr(err, updateReplMsg, ClientOperationCode)
-		}
+	err = scaleDep(dcc, clustername, mastercount, masterType)
+	if err != nil {
+		return result, err
 	}
 
 	result.Name = name
 	result.Namespace = namespace
 	result.Config = finalconfig
 	return result, nil
+}
+
+
+// Scale a cluster
+// This routine supports a specific scale operation based on immediate values for
+// master and worker counts and does not consider stored configs.
+func ScaleCluster(name, namespace string, masters, workers int, osclient *oclient.Client, client *kclient.Client) error {
+
+	clustername := name
+
+	// Before we do further checks, make sure that we have deploymentconfigs
+	// If either the master or the worker deploymentconfig are missing, we
+	// assume that the cluster is missing. These are the base objects that
+	// we use to create a cluster
+	ok, err := checkForDeploymentConfigs(osclient.DeploymentConfigs(namespace), clustername)
+	if err != nil {
+		return generalErr(err, findDepConfigMsg, ClientOperationCode)
+	}
+	if !ok {
+		return generalErr(nil, fmt.Sprintf(noSuchClusterMsg, clustername), NoSuchClusterCode)
+	}
+
+	// Allow sale to zero, allow sentinel values
+	if masters > 1 {
+		return NewClusterError(MasterCountMustBeOne, ClusterConfigCode)
+	}
+
+	dcc := osclient.DeploymentConfigs(namespace)
+	err = scaleDep(dcc, clustername, workers, workerType)
+	if err != nil {
+		return err
+	}
+	return scaleDep(dcc, clustername, masters, masterType)
 }

@@ -20,6 +20,9 @@ os::cmd::expect_success "_output/oshinko-cli create abc --workers=1 --token=`oc 
 VERBOSE=true os::cmd::expect_success "_output/oshinko-cli get abc --token=`oc whoami -t` -o json"
 
 #scale
+os::cmd::expect_success_and_text "_output/oshinko-cli scale abc --token=`oc whoami -t`" "neither masters nor workers specified, cluster \"abc\" not scaled"
+os::cmd::expect_failure_and_text "_output/oshinko-cli scale abc --masters=2 --token=`oc whoami -t`" "cluster configuration must have a masterCount of 1"
+os::cmd::expect_success "_output/oshinko-cli scale abc --workers=0 --masters=0 --token=`oc whoami -t`"
 os::cmd::expect_success "_output/oshinko-cli scale abc --workers=2 --token=`oc whoami -t`"
 os::cmd::try_until_text "_output/oshinko-cli get abc --token=`oc whoami -t` -o json" '"workerCount": 0' 2
 

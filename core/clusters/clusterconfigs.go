@@ -29,9 +29,11 @@ const failOnMissing = true
 const allowMissing = false
 
 const MasterCountMustBeOne = "cluster configuration must have a masterCount of 1"
-const WorkerCountMustBeAtLeastOne = "cluster configuration may not have a workerCount less than 1"
+const WorkerCountMustBeAtLeastZero = "cluster configuration may not have a workerCount less than 0"
 const ErrorWhileProcessing = "'%s', %s"
 const NamedConfigDoesNotExist = "named config '%s' does not exist"
+
+const SentinelCountValue = -1
 
 // This function is meant to support testability
 func GetDefaultConfig() ClusterConfig {
@@ -42,10 +44,12 @@ func assignConfig(res *ClusterConfig, src ClusterConfig) {
 	if src.Name != "" {
 		res.Name = src.Name
 	}
-	if src.MasterCount != 0 {
+
+	if src.MasterCount > SentinelCountValue {
 		res.MasterCount = src.MasterCount
 	}
-	if src.WorkerCount != 0 {
+
+	if src.WorkerCount > SentinelCountValue {
 		res.WorkerCount = src.WorkerCount
 	}
 
@@ -64,8 +68,8 @@ func checkConfiguration(config ClusterConfig) error {
 	var err error
 	if config.MasterCount != 1 {
 		err = NewClusterError(MasterCountMustBeOne, ClusterConfigCode)
-	} else if config.WorkerCount < 1 {
-		err = NewClusterError(WorkerCountMustBeAtLeastOne, ClusterConfigCode)
+	} else if config.WorkerCount < 0 {
+		err = NewClusterError(WorkerCountMustBeAtLeastZero, ClusterConfigCode)
 	}
 	return err
 }
@@ -87,9 +91,21 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 	// the first element in the name
 	switch name {
 	case "mastercount":
-		config.MasterCount, err = getInt(value, configmapname+".mastercount")
+		val, err := getInt(value, configmapname+".mastercount")
+		if err != nil {
+			return err
+		}
+		if val > SentinelCountValue {
+			config.MasterCount = val
+		}
 	case "workercount":
-		config.WorkerCount, err = getInt(value, configmapname+".workercount")
+		val, err := getInt(value, configmapname+".workercount")
+		if err != nil {
+			return err
+		}
+		if val > SentinelCountValue {
+			config.WorkerCount = val
+		}
 	case "sparkmasterconfig":
 		config.SparkMasterConfig = strings.Trim(value, "\n")
 	case "sparkworkerconfig":

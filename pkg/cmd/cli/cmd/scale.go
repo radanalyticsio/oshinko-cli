@@ -37,19 +37,23 @@ func CmdScale(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Comm
 			}
 		},
 	}
-	cmd.Flags().Int("masters", -1, "Numbers of workers in spark cluster")
-	cmd.Flags().Int("workers", -1, "Numbers of workers in spark cluster")
+	cmd.Flags().Int("masters", clusters.SentinelCountValue, fmt.Sprintf("Number of masters in the spark cluster. A value of %s" +
+		" means that the flag is unset and the number of masters will not be changed.", clusters.SentinelCountValue))
+	cmd.Flags().Int("workers", clusters.SentinelCountValue, fmt.Sprintf("Number of workers in the spark cluster. A value of %s" +
+		" means that the flag is unset and the number of workers will not be changed.", clusters.SentinelCountValue))
 	cmd.MarkFlagRequired("workers")
 	return cmd
 }
 
 func (o *CmdOptions) RunScale() error {
-	config := clusters.ClusterConfig{}
-	config.WorkerCount = o.WorkerCount
-	_, err := clusters.UpdateCluster(o.Name, o.Project, &config, o.Client, o.KClient)
-	if err != nil {
-		return err
+	if o.MasterCount <= clusters.SentinelCountValue && o.WorkerCount <= clusters.SentinelCountValue {
+		fmt.Fprintf(o.Out, "neither masters nor workers specified, cluster \"%s\" not scaled \n", o.Name)
+	} else {
+		err := clusters.ScaleCluster(o.Name, o.Project, o.MasterCount, o.WorkerCount, o.Client, o.KClient)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(o.Out, "cluster \"%s\" scaled \n", o.Name)
 	}
-	fmt.Fprintf(o.Out, "cluster \"%s\" scaled \n", o.Name)
 	return nil
 }

@@ -47,6 +47,14 @@ func getErrorCode(err error) int32 {
 
 }
 
+func int64ptr(val int) *int64 {
+	if val <= coreclusters.SentinelCountValue {
+		return nil
+	}
+	ret := int64(val)
+	return &ret
+}
+
 func singleClusterResponse(sc coreclusters.SparkCluster) *models.SingleCluster {
 
 	addpod := func(p coreclusters.SparkPod) *models.ClusterModelPodsItems0 {
@@ -73,11 +81,18 @@ func singleClusterResponse(sc coreclusters.SparkCluster) *models.SingleCluster {
 	cluster.Cluster.Config = &models.NewClusterConfig{
 		SparkMasterConfig: sc.Config.SparkMasterConfig,
 		SparkWorkerConfig: sc.Config.SparkWorkerConfig,
-		MasterCount: int64(sc.Config.MasterCount),
-		WorkerCount: int64(sc.Config.WorkerCount),
+		MasterCount: int64ptr(sc.Config.MasterCount),
+		WorkerCount: int64ptr(sc.Config.WorkerCount),
 		Name: sc.Config.Name,
 	}
 	return cluster
+}
+
+func getModelCount(val *int64) int {
+	if val == nil {
+		return coreclusters.SentinelCountValue
+	}
+	return int(*val)
 }
 
 func assignConfig(config *models.NewClusterConfig) *coreclusters.ClusterConfig {
@@ -86,8 +101,8 @@ func assignConfig(config *models.NewClusterConfig) *coreclusters.ClusterConfig {
 	}
 	result := &coreclusters.ClusterConfig{
 		Name: config.Name,
-		MasterCount: int(config.MasterCount),
-		WorkerCount: int(config.WorkerCount),
+		MasterCount: getModelCount(config.MasterCount),
+		WorkerCount: getModelCount(config.WorkerCount),
 		SparkMasterConfig: config.SparkMasterConfig,
 		SparkWorkerConfig: config.SparkWorkerConfig,
 		SparkImage: config.SparkImage,
