@@ -79,7 +79,7 @@ func (s *OshinkoRestTestSuite) TestCreateAndDeleteCluster(c *check.C) {
 	mcount := int64(1)
 	wcount := int64(3)
 
-	cconfig := models.NewClusterConfig{MasterCount: mcount, WorkerCount: wcount}
+	cconfig := models.NewClusterConfig{MasterCount: &mcount, WorkerCount: &wcount}
 	cdetails := models.NewCluster{Name: &cname, Config: &cconfig}
 	clparams := clusters.NewCreateClusterParams().WithCluster(&cdetails)
 
@@ -109,7 +109,7 @@ func (s *OshinkoRestTestSuite) TestCreateAndDeleteCluster(c *check.C) {
 	// the creation test, this test will loop for a number of retries to
 	// give time for the new worker to be created.
 	uwcount := int64(wcount + 1)
-	ucconfig := models.NewClusterConfig{MasterCount: mcount, WorkerCount: uwcount}
+	ucconfig := models.NewClusterConfig{MasterCount: &mcount, WorkerCount: &uwcount}
 	ucdetails := models.NewCluster{Name: &cname, Config: &ucconfig}
 	uclparams := clusters.NewUpdateSingleClusterParams().WithCluster(&ucdetails).WithName(cname)
 
@@ -131,7 +131,7 @@ func (s *OshinkoRestTestSuite) TestCreateAndDeleteCluster(c *check.C) {
 
 	// scale down the cluster
 	uwcount = int64(wcount - 1)
-	ucconfig = models.NewClusterConfig{MasterCount: mcount, WorkerCount: uwcount}
+	ucconfig = models.NewClusterConfig{MasterCount: &mcount, WorkerCount: &uwcount}
 	ucdetails = models.NewCluster{Name: &cname, Config: &ucconfig}
 	uclparams = clusters.NewUpdateSingleClusterParams().WithCluster(&ucdetails).WithName(cname)
 
