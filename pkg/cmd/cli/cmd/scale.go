@@ -37,10 +37,10 @@ func CmdScale(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Comm
 			}
 		},
 	}
-	cmd.Flags().Int("masters", clusters.SentinelCountValue, fmt.Sprintf("Number of masters in the spark cluster. A value of %s" +
-		" means that the flag is unset and the number of masters will not be changed.", clusters.SentinelCountValue))
-	cmd.Flags().Int("workers", clusters.SentinelCountValue, fmt.Sprintf("Number of workers in the spark cluster. A value of %s" +
-		" means that the flag is unset and the number of workers will not be changed.", clusters.SentinelCountValue))
+	cmd.Flags().Int("masters", clusters.SentinelCountValue, fmt.Sprintf("Number of masters in the spark cluster (%d" +
+		" means leave masters unchanged)", clusters.SentinelCountValue))
+	cmd.Flags().Int("workers", clusters.SentinelCountValue, fmt.Sprintf("Number of workers in the spark cluster (%d" +
+		" means leave workers unchanged)", clusters.SentinelCountValue))
 	cmd.MarkFlagRequired("workers")
 	return cmd
 }

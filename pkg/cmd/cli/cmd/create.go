@@ -51,12 +51,10 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Com
 		},
 	}
 
-	cmd.Flags().Int("masters", clusters.SentinelCountValue, fmt.Sprintf("Number of masters in the spark cluster. A value of %s" +
-		" means that the flag is unset and the number of masters will be determined " +
-		"based on the storedconfig and/or oshinko defaults.", clusters.SentinelCountValue))
-	cmd.Flags().Int("workers", clusters.SentinelCountValue, fmt.Sprintf("Number of workers in the spark cluster. A value of %s" +
-		" means that the flag is unset and the number of workers will be determined " +
-		"based on the storedconfig and/or oshinko defaults.", clusters.SentinelCountValue))
+	cmd.Flags().Int("masters", clusters.SentinelCountValue, fmt.Sprintf("Number of masters in the spark cluster (%d" +
+		" means take masters from storedconfig and/or defaults)", clusters.SentinelCountValue))
+	cmd.Flags().Int("workers", clusters.SentinelCountValue, fmt.Sprintf("Number of workers in the spark cluster (%d" +
+		" means take workers from storedconfig and/or defaults)", clusters.SentinelCountValue))
 	cmd.Flags().String("masterconfig", "", "ConfigMap name for spark master")
 	cmd.Flags().String("workerconfig", "", "ConfigMap name for spark worker")
 	cmd.Flags().String("storedconfig", "", "ConfigMap name for spark cluster")
