@@ -33,7 +33,7 @@ var brokenMaster clusters.ClusterConfig = clusters.ClusterConfig{
 var nonIntMaster clusters.ClusterConfig = clusters.ClusterConfig{Name: "cow"}
 var nonIntWorker clusters.ClusterConfig = clusters.ClusterConfig{Name: "pig"}
 var userDefault = clusters.ClusterConfig{MasterCount: 3, WorkerCount: 3,
-	SparkMasterConfig: "master-default", SparkWorkerConfig: "worker-default", Name: "default"}
+	SparkMasterConfig: "master-default", SparkWorkerConfig: "worker-default", Name: "default-oshinko-cluster-config"}
 
 func makeConfigMap(cfg clusters.ClusterConfig) *api.ConfigMap {
 	var res api.ConfigMap = api.ConfigMap{Data: map[string]string{}}
@@ -351,7 +351,7 @@ func (s *OshinkoUnitTestSuite) TestGetClusterNonInts(c *check.C) {
 
 func (s *OshinkoUnitTestSuite) TestGetClusterUserDefault(c *check.C) {
 	// Test that defaults can be overridden optionally with a named
-	// "default" config
+	// "default-oshinko-cluster-config" config
 	var cm *FakeConfigMapsClient = &FakeConfigMapsClient{}
 
 	defaultconfig := clusters.GetDefaultConfig()
