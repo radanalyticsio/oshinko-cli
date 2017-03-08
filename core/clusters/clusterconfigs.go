@@ -16,6 +16,8 @@ type ClusterConfig struct {
 	SparkImage        string
 }
 
+const Defaultname = "default-oshinko-cluster-config"
+
 var defaultConfig ClusterConfig = ClusterConfig{
 	MasterCount:       1,
 	WorkerCount:       1,
@@ -24,7 +26,6 @@ var defaultConfig ClusterConfig = ClusterConfig{
 	SparkWorkerConfig: "",
 	SparkImage:        ""}
 
-const Defaultname = "default"
 const failOnMissing = true
 const allowMissing = false
 
@@ -100,8 +101,9 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 	return err
 }
 
-func readConfig(name string, res *ClusterConfig, failOnMissing bool, cm kclient.ConfigMapsInterface) (err error) {
+func readConfig(name string, res *ClusterConfig, failOnMissing bool, cm kclient.ConfigMapsInterface) (found bool, err error) {
 
+	found = false
 	cmap, err := cm.Get(name)
 	if err != nil {
 		if strings.Index(err.Error(), "not found") != -1 {
@@ -115,6 +117,9 @@ func readConfig(name string, res *ClusterConfig, failOnMissing bool, cm kclient.
 		}
 	}
 	if err == nil && cmap != nil {
+		// Kube will give us an empty configmap if the named one does not exist,
+		// so we test for a Name to see if we foud it
+		found = cmap.Name != ""
 		for n, v := range cmap.Data {
 			err = process(res, n, v, name)
 			if err != nil {
@@ -122,15 +127,19 @@ func readConfig(name string, res *ClusterConfig, failOnMissing bool, cm kclient.
 			}
 		}
 	}
-	return err
+	return found, err
 }
 
 func loadConfig(name string, cm kclient.ConfigMapsInterface) (res ClusterConfig, err error) {
 	// If the default config has been modified use those mods.
 	res = defaultConfig
-	err = readConfig(Defaultname, &res, allowMissing, cm)
-	if err == nil && name != "" && name != Defaultname {
-		err = readConfig(name, &res, failOnMissing, cm)
+	found, err := readConfig(Defaultname, &res, allowMissing, cm)
+	if err == nil {
+		if name != "" && name != Defaultname {
+			_, err = readConfig(name, &res, failOnMissing, cm)
+		} else if found {
+			res.Name = Defaultname
+		}
 	}
 	return res, err
 }
