@@ -18,12 +18,18 @@ os::cmd::expect_success "oc whoami"
 #create
 os::cmd::expect_success "_output/oshinko-cli create abc --workers=1 --token=`oc whoami -t`"
 VERBOSE=true os::cmd::expect_success "_output/oshinko-cli get abc --token=`oc whoami -t` -o json"
+
 #scale
 os::cmd::expect_success "_output/oshinko-cli scale abc --workers=2 --token=`oc whoami -t`"
 os::cmd::try_until_text "_output/oshinko-cli get abc --token=`oc whoami -t` -o json" '"workerCount": 0' 2
+
 #delete
 os::cmd::expect_success "_output/oshinko-cli delete abc --token=`oc whoami -t`"
 os::cmd::expect_failure_and_text "_output/oshinko-cli get abc --token=`oc whoami -t` -o json" "no such cluster 'abc'"
+
+#flags
+os::cmd::expect_failure_and_text "_output/oshinko-cli get --token=`oc whoami -t` --verbose --namespace=bob" "Using project \"bob\""
+os::cmd::expect_success_and_text "_output/oshinko-cli get --token=`oc whoami -t` --verbose" "Using project \"oshinko\""
 
 os::cmd::expect_success "oc project default/127-0-0-1:28443/system:admin"
 os::cmd::expect_success "oc delete ns oshinko"
