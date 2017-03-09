@@ -99,6 +99,11 @@ func (o *AuthOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args 
 	apiVersionString := kcmdutil.GetFlagString(cmd, "api-version")
 	o.APIVersion = unversioned.GroupVersion{}
 
+	namespaceFlag := kcmdutil.GetFlagString(cmd, "namespace")
+	if namespaceFlag != "" {
+		o.Project = namespaceFlag
+	}
+
 	// if the API version isn't explicitly passed, use the API version from the default context (same rules as the server above)
 	if len(apiVersionString) == 0 {
 		if defaultContext, defaultContextExists := o.StartingKubeConfig.Contexts[o.StartingKubeConfig.CurrentContext]; defaultContextExists {
@@ -300,6 +305,9 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 
 func (o *AuthOptions) GatherProjectInfo() (string, error) {
 	var msg string
+	if o.Project != "" {
+		return fmt.Sprintf("Using project %q.\n", o.Project), nil
+	}
 	me, err := o.whoAmI()
 	if err != nil {
 		return "", err
