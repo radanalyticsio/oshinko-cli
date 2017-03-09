@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"k8s.io/kubernetes/pkg/util/logs"
+
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli"
 	// install all APIs
 	_ "github.com/openshift/origin/pkg/api/install"
@@ -15,6 +17,7 @@ import (
 )
 
 func main() {
+	logs.InitLogs()
 	if len(os.Getenv("GOMAXPROCS")) == 0 {
 		runtime.GOMAXPROCS(runtime.NumCPU())
 	}
