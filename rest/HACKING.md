@@ -171,8 +171,10 @@ Now you're ready to run:
 ### Logs
 
 Basic log-level debugging can be improved by running the server with the
-debug option enabled (`--debug` or `-d`). With debug enabled, the server
-will print all request and response bodies to the log.
+debug option enabled (`--debug` or `-d`). The server can print all
+interactions with OpenShift and Kubernetes by setting the `--loglevel`
+command line flag. This flag acts in a similar manner as the `oshinko-cli`
+and `oc` applications.
 
 To add debug-only logs to your code, please use the `Debug` function in the
 logging helper package.

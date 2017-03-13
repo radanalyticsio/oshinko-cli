@@ -49,7 +49,7 @@ func (s *OshinkoRestTestSuite) SetUpSuite(c *check.C) {
 			log.Fatalln(err)
 		}
 	}
-	args := []string{"--debug"}
+	args := []string{"--loglevel=10"}
 	parser.ParseArgs(args)
 
 	server.ConfigureAPI()
