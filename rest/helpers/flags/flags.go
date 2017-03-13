@@ -17,6 +17,7 @@ var optionsGroups *[]swag.CommandLineOptionsGroup
 type oshinkoOptions struct {
 	LogFile    string `short:"l" long:"log-file" description:"the file to write logs into, defaults to stdout"`
 	DebugState bool   `short:"d" long:"debug" description:"enable debug mode in the server"`
+	LogLevel   string `long:"loglevel" description:"set the log level (0-10)" default:"0"`
 }
 
 // GetLineOptionsGroups returns the CommandLineOptionsGroup structure that
@@ -60,6 +61,20 @@ func DebugEnabled() bool {
 			opts, ok := optsGroup.Options.(*oshinkoOptions)
 			if ok == true {
 				retval = opts.DebugState
+			}
+		}
+	}
+	return retval
+}
+
+// Return the requested log level
+func LogLevel() string {
+	retval := "0"
+	if optionsGroups != nil {
+		for _, optsGroup := range *optionsGroups {
+			opts, ok := optsGroup.Options.(*oshinkoOptions)
+			if ok == true {
+				retval = opts.LogLevel
 			}
 		}
 	}

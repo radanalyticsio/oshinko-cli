@@ -2,6 +2,7 @@ package restapi
 
 import (
 	"crypto/tls"
+	"flag"
 	"net/http"
 
 	"github.com/rs/cors"
@@ -17,6 +18,7 @@ import (
 	"github.com/radanalyticsio/oshinko-cli/rest/restapi/operations/clusters"
 	"github.com/radanalyticsio/oshinko-cli/rest/restapi/operations/server"
 	"github.com/radanalyticsio/oshinko-cli/rest/version"
+	"k8s.io/kubernetes/pkg/util/logs"
 )
 
 // This file is safe to edit. Once it exists it will not be overwritten
@@ -41,6 +43,11 @@ func configureAPI(api *operations.OshinkoRestAPI) http.Handler {
 	api.ClustersUpdateSingleClusterHandler = clusters.UpdateSingleClusterHandlerFunc(handlers.UpdateSingleClusterResponse)
 
 	api.ServerShutdown = func() {}
+
+	logs.InitLogs()
+
+	logging.Debug("Setting log level ", flags.LogLevel())
+	flag.Set("v", flags.LogLevel())
 
 	if logFile := flags.GetLogFile(); logFile != "" {
 		err := logging.SetLoggerFile(logFile)
@@ -75,7 +82,6 @@ func setupMiddlewares(handler http.Handler) http.Handler {
 func setupGlobalMiddleware(handler http.Handler) (finalHandler http.Handler) {
 	finalHandler = handler
 	finalHandler = oe.AddErrorHandler(finalHandler)
-	finalHandler = logging.AddLoggingHandler(finalHandler)
 	corsHeaders := cors.New(cors.Options{
 		AllowedMethods: []string{"GET", "HEAD", "POST", "DELETE", "PUT", "OPTIONS"},
 	})
