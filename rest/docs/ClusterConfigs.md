@@ -53,12 +53,14 @@ as the resource type.
 
 ## The default configuration
 
-There is a default configuration named `default` which specifies a cluster
-with one spark master and one spark worker. All cluster configurations
-start with the values from `default` and then optionally update values.
+There is a default configuration named `default` which specifies a cluster with
+one spark master and one spark worker. All cluster configurations start with the
+values from `default` and then optionally update values.
 
 Note, the `default` configuration itself can be modified in a project by
-creating a configmap named `default`.
+creating a configmap named `default-oshinko-cluster-config`. If that configmap
+is present in a project, the fields it contains will override the
+corresponding fields in the `default` configuration.
 
 ## Where configuration names may be used
 
