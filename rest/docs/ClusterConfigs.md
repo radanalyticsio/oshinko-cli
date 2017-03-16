@@ -2,26 +2,28 @@
 
 Oshinko uses configmaps to store named cluster configurations.
 This document describes how to add or edit named configurations and
-how to use them with oshinko-rest.
+how to use them with oshinko.
 
 ## Named cluster configuration fields
 
 A named cluster configuration can contain the following fields:
 
-* mastercount -- the number of master nodes, currently limited to 1
+* mastercount -- the number of master nodes (currently max of 1)
 * workercount -- the number of worker nodes
 * sparkmasterconfig -- the name of a configmap that holds spark configuration files for the spark master
 * sparkworkerconfig -- the name of a configmap that holds spark configuration files for the spark workers
+* sparkimage -- the pull spec for the spark master and worker image
 
 A fully populated configmap called `myconfigs` might look like this:
 
     $ oc export configmap myconfigs
     apiVersion: v1
     data:
+      mastercount: "1"
+      workercount: "4"
       sparkmasterconfig: master-config
       sparkworkerconfig: worker-config
-      workercount: "4"
-      mastercount: "1"
+      sparkimage: mydockeruser/openshift-spark:test
     kind: ConfigMap
     metadata:
       creationTimestamp: null
@@ -32,6 +34,9 @@ empty and then edit it as shown below to add fields (for other methods of
 creating configmaps, refer to the OpenShift documentation):
 
     $ oc create configmap mynewconfig
+
+Any field omitted from a named cluster configuration will inherit the value
+set in the default cluster configuration (described below).
 
 ## Editing a named configuration
 
@@ -51,16 +56,24 @@ From the OpenShift console configmaps may be edited
 by going to `Resources -> other resources` and selecting `ConfigMap`
 as the resource type.
 
-## The default configuration
+## The default cluster configuration
 
-There is a default configuration named `default` which specifies a cluster with
-one spark master and one spark worker. All cluster configurations start with the
-values from `default` and then optionally update values.
+The default cluster configuration used by oshinko uses the following
+values:
 
-Note, the `default` configuration itself can be modified in a project by
+    mastercount: "1"
+    workercount: "1"
+    sparkmasterconfig: ""
+    sparkworkerconfig: ""
+    sparkimage: "radanalyticsio/openshift-spark"
+
+All named cluster configurations will inherit values from the default
+configuration for any fields that they do not explicitly set.
+
+Note, the default configuration itself can be modified in a project by
 creating a configmap named `default-oshinko-cluster-config`. If that configmap
 is present in a project, the fields it contains will override the
-corresponding fields in the `default` configuration.
+corresponding fields in the default configuration.
 
 ## Where configuration names may be used
 
