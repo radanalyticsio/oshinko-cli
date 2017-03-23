@@ -158,9 +158,7 @@ func makeWorkerEnvVars(clustername, sparkconfdir string) []kapi.EnvVar {
 	return envs
 }
 
-func sparkWorker(namespace string,
-	image string,
-	replicas int, clustername, sparkconfdir, sparkworkerconfig string) *odc.ODeploymentConfig {
+func sparkWorker(namespace, image string, replicas int, clustername, sparkconfdir, sparkworkerconfig string) *odc.ODeploymentConfig {
 
 	// Create the basic deployment config
 	// We will use a label and pod selector based on the cluster name.
@@ -191,7 +189,7 @@ func sparkWorker(namespace string,
 	return dc.PodTemplateSpec(pt.Containers(cont))
 }
 
-func sparkMaster(namespace, image, clustername, sparkconfdir, sparkmasterconfig string) *odc.ODeploymentConfig {
+func sparkMaster(namespace, image string, replicas int, clustername, sparkconfdir, sparkmasterconfig string) *odc.ODeploymentConfig {
 
 	// Create the basic deployment config
 	// We will use a label and pod selector based on the cluster name
@@ -200,7 +198,7 @@ func sparkMaster(namespace, image, clustername, sparkconfdir, sparkmasterconfig 
 	dc := odc.DeploymentConfig(clustername+"-m", namespace).
 		TriggerOnConfigChange().RollingStrategy().Label(clusterLabel, clustername).
 		Label(typeLabel, masterType).
-		PodSelector(clusterLabel, clustername)
+		PodSelector(clusterLabel, clustername).Replicas(replicas)
 
 	// Create a pod template spec with the matching label
 	pt := opt.PodTemplateSpec().Label(clusterLabel, clustername).
@@ -286,6 +284,7 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 		return result, generalErr(nil, sparkImageMsg, ClusterConfigCode)
 	}
 
+	mastercount := int(finalconfig.MasterCount)
 	workercount := int(finalconfig.WorkerCount)
 
 	// Check if finalconfig contains the names of ConfigMaps to use for spark
@@ -310,7 +309,7 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 	}
 
 	// Create the master deployment config
-	masterdc := sparkMaster(namespace, sparkimage, clustername, masterconfdir, finalconfig.SparkMasterConfig)
+	masterdc := sparkMaster(namespace, sparkimage, mastercount, clustername, masterconfdir, finalconfig.SparkMasterConfig)
 
 	// Create the services that will be associated with the master pod
 	// They will be created with selectors based on the pod labels
@@ -750,7 +749,7 @@ func ScaleCluster(name, namespace string, masters, workers int, osclient *oclien
 
 	// Allow sale to zero, allow sentinel values
 	if masters > 1 {
-		return NewClusterError(MasterCountMustBeOne, ClusterConfigCode)
+		return NewClusterError(MasterCountMustBeZeroOrOne, ClusterConfigCode)
 	}
 
 	dcc := osclient.DeploymentConfigs(namespace)
