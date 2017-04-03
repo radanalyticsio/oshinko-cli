@@ -29,7 +29,7 @@ var defaultConfig ClusterConfig = ClusterConfig{
 const failOnMissing = true
 const allowMissing = false
 
-const MasterCountMustBeZeroOrOne = "cluster configuration must have a master count between 0 and 1"
+const MasterCountMustBeZeroOrOne = "cluster configuration must have a master count of 0 or 1"
 const WorkerCountMustBeAtLeastZero = "cluster configuration may not have a worker count less than 0"
 const ErrorWhileProcessing = "'%s', %s"
 const NamedConfigDoesNotExist = "named config '%s' does not exist"
