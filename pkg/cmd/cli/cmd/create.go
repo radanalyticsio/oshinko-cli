@@ -59,6 +59,7 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Com
 	cmd.Flags().String("workerconfig", "", "ConfigMap name for spark worker")
 	cmd.Flags().String("storedconfig", "", "ConfigMap name for spark cluster")
 	cmd.Flags().String("image", "", "spark image to be used. Default image is radanalyticsio/openshift-spark.")
+	cmd.Flags().Bool("exposeui", true, "True will expose the Spark WebUI via a route")
 	//cmd.MarkFlagRequired("workers")
 	return cmd
 }
@@ -71,6 +72,7 @@ func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string)
 	config.SparkMasterConfig = o.MasterConfig
 	config.SparkImage = o.Image
 	config.Name = o.StoredConfig
+	config.ExposeWebUI = o.ExposeWebUI
 	_, err := clusters.CreateCluster(o.Name, o.Project, defaultImage, &config, o.Client, o.KClient)
 	if err != nil {
 		return err
