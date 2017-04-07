@@ -33,7 +33,8 @@ var brokenMaster clusters.ClusterConfig = clusters.ClusterConfig{
 var nonIntMaster clusters.ClusterConfig = clusters.ClusterConfig{Name: "cow"}
 var nonIntWorker clusters.ClusterConfig = clusters.ClusterConfig{Name: "pig"}
 var userDefault = clusters.ClusterConfig{MasterCount: 3, WorkerCount: 3,
-	SparkMasterConfig: "master-default", SparkWorkerConfig: "worker-default", Name: "default-oshinko-cluster-config"}
+	SparkMasterConfig: "master-default", SparkWorkerConfig: "worker-default", Name: "default-oshinko-cluster-config",
+        ExposeWebUI: true}
 
 func makeConfigMap(cfg clusters.ClusterConfig) *api.ConfigMap {
 	var res api.ConfigMap = api.ConfigMap{Data: map[string]string{}}

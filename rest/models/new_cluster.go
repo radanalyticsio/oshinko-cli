@@ -79,6 +79,10 @@ swagger:model NewClusterConfig
 */
 type NewClusterConfig struct {
 
+	/* If true (which is the default), cluster create will also expose the Spark Web UI
+	 */
+	ExposeWebUI *bool `json:"exposeWebUI,omitempty"`
+
 	/* The count of master nodes requested in the cluster (must be > 0)
 	 */
 	MasterCount *int64 `json:"masterCount,omitempty"`
