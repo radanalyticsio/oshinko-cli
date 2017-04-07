@@ -13,6 +13,7 @@ import (
 	odc "github.com/radanalyticsio/oshinko-cli/core/clusters/deploymentconfigs"
 	opt "github.com/radanalyticsio/oshinko-cli/core/clusters/podtemplates"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters/probes"
+	ort "github.com/radanalyticsio/oshinko-cli/core/clusters/routes"
 	osv "github.com/radanalyticsio/oshinko-cli/core/clusters/services"
 	kapi "k8s.io/kubernetes/pkg/api"
 	kclient "k8s.io/kubernetes/pkg/client/unversioned"
@@ -324,6 +325,8 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 		clustername, webuiType,
 		masterdc.GetPodTemplateSpecLabels())
 
+	webuiroute := ort.NewRoute(websv.GetName() + "-route", websv.GetName(), clustername, "webui")
+
 	// Create the worker deployment config
 	workerdc := sparkWorker(namespace, sparkimage, workercount, clustername, workerconfdir, finalconfig.SparkWorkerConfig)
 
@@ -351,6 +354,11 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 	// Note, if spark webui service fails for some reason we can live without it
 	// TODO ties into cluster status, make a note if the service is missing
 	sc.Create(&websv.Service)
+
+	if config.ExposeWebUI {
+		rc := osclient.Routes(namespace)
+		_, err = rc.Create(webuiroute)
+	}
 
 	// Wait for the replication controllers to exist before building the response.
 	rcc := client.ReplicationControllers(namespace)
@@ -459,6 +467,13 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 		if err != nil {
 			info = append(info, "unable to delete replication controller "+name+" ("+err.Error()+")")
 		}
+	}
+
+	rc := osclient.Routes(namespace)
+	webUIRouteName := clustername + "-ui-route"
+	err = rc.Delete(webUIRouteName)
+	if err != nil {
+		info = append(info, "unable to delete route " + webUIRouteName + " (" + err.Error() + ")")
 	}
 
 	// Delete the services

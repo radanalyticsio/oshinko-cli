@@ -18,6 +18,7 @@ type CmdOptions struct {
 	MasterConfig string `json:"sparkMasterConfig,omitempty"`
 	WorkerConfig string `json:"workerConfig,omitempty"`
 	StoredConfig string `json:"storedConfig,omitempty"`
+	ExposeWebUI  bool   `json:"exposeui,omitempty"`
 	Verbose      bool
 	Output       string
 
@@ -69,6 +70,9 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	}
 	if cmd.Flags().Lookup("storedconfig") != nil {
 		o.StoredConfig = kcmdutil.GetFlagString(cmd, "storedconfig")
+	}
+	if cmd.Flags().Lookup("exposeui") != nil {
+		o.ExposeWebUI = kcmdutil.GetFlagBool(cmd, "exposeui")
 	}
 	return nil
 }
