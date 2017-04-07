@@ -133,6 +133,11 @@ definitions:
             description: |-
               The docker pull specification of a custom image to use for spark pods
             type: string
+          exposeWebUI:
+            description: |-
+              If true (which is the default), cluster create will also expose the Spark Web UI
+            type: boolean
+            default: true
     required:
       - name
     additionalProperties: false

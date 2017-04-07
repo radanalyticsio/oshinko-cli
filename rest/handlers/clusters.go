@@ -106,6 +106,7 @@ func assignConfig(config *models.NewClusterConfig) *coreclusters.ClusterConfig {
 		SparkMasterConfig: config.SparkMasterConfig,
 		SparkWorkerConfig: config.SparkWorkerConfig,
 		SparkImage: config.SparkImage,
+		ExposeWebUI: config.ExposeWebUI,
 	}
 	return result
 }
