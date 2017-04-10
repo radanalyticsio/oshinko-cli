@@ -3,123 +3,6 @@
 # This script provides common script functions for the hacks
 # Requires OS_ROOT to be set
 
-readonly OS_BUILD_ENV_GOLANG1="${OS_BUILD_ENV_GOLANG1:-1.6}"
-readonly OS_BUILD_ENV_IMAGE="${OS_BUILD_ENV_IMAGE:-openshift/origin-release:golang-${OS_BUILD_ENV_GOLANG1}}"
-
-readonly OS_OUTPUT_SUBPATH="${OS_OUTPUT_SUBPATH:-_output/local}"
-readonly OS_OUTPUT="${OS_ROOT}/${OS_OUTPUT_SUBPATH}"
-readonly OS_LOCAL_RELEASEPATH="${OS_OUTPUT}/releases"
-readonly OS_OUTPUT_BINPATH="${OS_OUTPUT}/bin"
-readonly OS_OUTPUT_PKGDIR="${OS_OUTPUT}/pkgdir"
-
-readonly OS_GO_PACKAGE=github.com/openshift/origin
-
-# Asks golang what it thinks the host platform is.  The go tool chain does some
-# slightly different things when the target platform matches the host platform.
-function os::build::host_platform() {
-  echo "$(go env GOHOSTOS)/$(go env GOHOSTARCH)"
-}
-readonly -f os::build::host_platform
-
-readonly OS_IMAGE_COMPILE_PLATFORMS=("$(os::build::host_platform)")
-
-readonly OS_SDN_COMPILE_TARGETS_LINUX=(
-  pkg/sdn/plugin/sdn-cni-plugin
-  vendor/github.com/containernetworking/cni/plugins/ipam/host-local
-  vendor/github.com/containernetworking/cni/plugins/main/loopback
-)
-readonly OS_IMAGE_COMPILE_TARGETS=(
-  images/pod
-  cmd/dockerregistry
-  cmd/gitserver
-  "${OS_SDN_COMPILE_TARGETS_LINUX[@]}"
-)
-readonly OS_IMAGE_COMPILE_GOFLAGS="-tags 'include_gcs include_oss'"
-readonly OS_SCRATCH_IMAGE_COMPILE_TARGETS=(
-  examples/hello-openshift
-  examples/deployment
-)
-readonly OS_IMAGE_COMPILE_BINARIES=("${OS_SCRATCH_IMAGE_COMPILE_TARGETS[@]##*/}" "${OS_IMAGE_COMPILE_TARGETS[@]##*/}")
-
-OS_CROSS_COMPILE_PLATFORMS=(
-  linux/amd64
-  darwin/amd64
-  windows/amd64
-  linux/386
-)
-if [[ "$(os::build::host_platform)" == "linux/ppc64le" ]]; then
-  OS_CROSS_COMPILE_PLATFORMS+=(
-    "linux/ppc64le"
-  )
-fi
-
-readonly OS_IMAGE_COMPILE_PLATFORMS
-
-readonly OS_CROSS_COMPILE_TARGETS=(
-  cmd/openshift
-  cmd/oc
-)
-readonly OS_CROSS_COMPILE_BINARIES=("${OS_CROSS_COMPILE_TARGETS[@]##*/}")
-
-readonly OS_ALL_TARGETS=(
-  "${OS_CROSS_COMPILE_TARGETS[@]}"
-)
-readonly OS_ALL_BINARIES=("${OS_ALL_TARGETS[@]##*/}")
-
-#If you update this list, be sure to get the images/origin/Dockerfile
-readonly OPENSHIFT_BINARY_SYMLINKS=(
-  openshift-router
-  openshift-deploy
-  openshift-recycle
-  openshift-sti-build
-  openshift-docker-build
-  origin
-  atomic-enterprise
-  osc
-  oadm
-  osadm
-  kubectl
-  kubernetes
-  kubelet
-  kube-proxy
-  kube-apiserver
-  kube-controller-manager
-  kube-scheduler
-)
-readonly OPENSHIFT_BINARY_COPY=(
-  oadm
-  kubelet
-  kube-proxy
-  kube-apiserver
-  kube-controller-manager
-  kube-scheduler
-)
-readonly OC_BINARY_COPY=(
-  kubectl
-)
-readonly OS_BINARY_RELEASE_CLIENT_WINDOWS=(
-  oc.exe
-  README.md
-  ./LICENSE
-)
-readonly OS_BINARY_RELEASE_CLIENT_MAC=(
-  oc
-  README.md
-  ./LICENSE
-)
-readonly OS_BINARY_RELEASE_CLIENT_LINUX=(
-  ./oc
-  ./README.md
-  ./LICENSE
-)
-readonly OS_BINARY_RELEASE_SERVER_LINUX=(
-  './*'
-)
-readonly OS_BINARY_RELEASE_CLIENT_EXTRA=(
-  ${OS_ROOT}/README.md
-  ${OS_ROOT}/LICENSE
-)
-
 # os::build::binaries_from_targets take a list of build targets and return the
 # full go package to be built
 function os::build::binaries_from_targets() {
@@ -129,6 +12,13 @@ function os::build::binaries_from_targets() {
   done
 }
 readonly -f os::build::binaries_from_targets
+
+# Asks golang what it thinks the host platform is.  The go tool chain does some
+# slightly different things when the target platform matches the host platform.
+function os::build::host_platform() {
+  echo "$(go env GOHOSTOS)/$(go env GOHOSTARCH)"
+}
+readonly -f os::build::host_platform
 
 # Create a user friendly version of host_platform for end users
 function os::build::host_platform_friendly() {
@@ -144,6 +34,12 @@ function os::build::host_platform_friendly() {
     echo "linux-32bit"
   elif [[ $platform == "linux/amd64" ]]; then
     echo "linux-64bit"
+  elif [[ $platform == "linux/ppc64le" ]]; then
+    echo "linux-powerpc64"
+  elif [[ $platform == "linux/arm64" ]]; then
+    echo "linux-arm64"
+  elif [[ $platform == "linux/s390x" ]]; then
+    echo "linux-s390"
   else
     echo "$(go env GOHOSTOS)-$(go env GOHOSTARCH)"
   fi
@@ -255,6 +151,9 @@ readonly -f os::build::build_static_binaries
 #   OS_BUILD_PLATFORMS - Incoming variable of targets to build for.  If unset
 #     then just the host architecture is built.
 function os::build::build_binaries() {
+  if [[ $# -eq 0 ]]; then
+    return
+  fi
   local -a binaries=( "$@" )
   # Create a sub-shell so that we don't pollute the outer environment
   ( os::build::internal::build_binaries "${binaries[@]+"${binaries[@]}"}" )
@@ -317,16 +216,15 @@ os::build::internal::build_binaries() {
         unset GOBIN
       fi
 
-      if [[ ${#nonstatics[@]} -gt 0 ]]; then
-        # allow per-os/arch build flags like OS_GOFLAGS_LINUX_AMD64
-        local platform_goflags_envvar=OS_GOFLAGS_$(echo ${platform} | tr '[:lower:]/' '[:upper:]_')
-        local platform_goflags
-        eval "platform_goflags=(${!platform_goflags_envvar:-})"
+      local platform_gotags_envvar=OS_GOFLAGS_TAGS_$(echo ${platform} | tr '[:lower:]/' '[:upper:]_')
+      local platform_gotags_test_envvar=OS_GOFLAGS_TAGS_TEST_$(echo ${platform} | tr '[:lower:]/' '[:upper:]_')
 
+      if [[ ${#nonstatics[@]} -gt 0 ]]; then
         GOOS=${platform%/*} GOARCH=${platform##*/} go install \
-          -pkgdir "${OS_OUTPUT_PKGDIR}" \
-          "${goflags[@]:+${goflags[@]}}" "${platform_goflags[@]:+${platform_goflags[@]}}" \
+          -pkgdir "${OS_OUTPUT_PKGDIR}/${platform}" \
+          -tags "${OS_GOFLAGS_TAGS-} ${!platform_gotags_envvar:-}" \
           -ldflags "${version_ldflags}" \
+          "${goflags[@]:+${goflags[@]}}" \
           "${nonstatics[@]}"
 
         # GOBIN is not supported on cross-compile in Go 1.5+ - move to the correct target
@@ -338,11 +236,13 @@ os::build::internal::build_binaries() {
 
       for test in "${tests[@]:+${tests[@]}}"; do
         local outfile="${OS_OUTPUT_BINPATH}/${platform}/$(basename ${test})"
-        GOOS=${platform%/*} GOARCH=${platform##*/} go test \
-          -pkgdir "${OS_OUTPUT_PKGDIR}" \
+        # disabling cgo allows use of delve
+        CGO_ENABLED="${OS_TEST_CGO_ENABLED:-}" GOOS=${platform%/*} GOARCH=${platform##*/} go test \
+          -pkgdir "${OS_OUTPUT_PKGDIR}/${platform}" \
+          -tags "${OS_GOFLAGS_TAGS-} ${!platform_gotags_test_envvar:-}" \
+          -ldflags "${version_ldflags}" \
           -i -c -o "${outfile}" \
           "${goflags[@]:+${goflags[@]}}" \
-          -ldflags "${version_ldflags}" \
           "$(dirname ${test})"
       done
     done
@@ -369,10 +269,6 @@ function os::build::export_targets() {
   binaries=($(os::build::binaries_from_targets "${targets[@]}"))
 
   platforms=("${OS_BUILD_PLATFORMS[@]:+${OS_BUILD_PLATFORMS[@]}}")
-  if [[ ${#platforms[@]} -eq 0 ]]; then
-    echo "No platforms to build for!"
-    exit 1
-  fi
 }
 readonly -f os::build::export_targets
 
@@ -391,8 +287,6 @@ function os::build::place_bins() {
   (
     local host_platform
     host_platform=$(os::build::host_platform)
-
-    echo "++ Placing binaries"
 
     if [[ "${OS_RELEASE_ARCHIVE-}" != "" ]]; then
       os::build::get_version_vars
@@ -451,31 +345,35 @@ function os::build::place_bins() {
       done
 
       # Create the release archive.
-      local platform_segment="${platform//\//-}"
+      platform="$( os::build::host_platform_friendly "${platform}" )"
       if [[ ${OS_RELEASE_ARCHIVE} == "openshift-origin" ]]; then
         for file in "${OS_BINARY_RELEASE_CLIENT_EXTRA[@]}"; do
           cp "${file}" "${release_binpath}/"
         done
-        if [[ $platform == "windows/amd64" ]]; then
-          platform="windows" OS_RELEASE_ARCHIVE="openshift-origin-client-tools" os::build::archive_zip "${OS_BINARY_RELEASE_CLIENT_WINDOWS[@]}"
-        elif [[ $platform == "darwin/amd64" ]]; then
-          platform="mac" OS_RELEASE_ARCHIVE="openshift-origin-client-tools" os::build::archive_zip "${OS_BINARY_RELEASE_CLIENT_MAC[@]}"
-        elif [[ $platform == "linux/386" ]]; then
-          platform="linux/32bit" OS_RELEASE_ARCHIVE="openshift-origin-client-tools" os::build::archive_tar "${OS_BINARY_RELEASE_CLIENT_LINUX[@]}"
-        elif [[ $platform == "linux/amd64" ]]; then
-          platform="linux/64bit" OS_RELEASE_ARCHIVE="openshift-origin-client-tools" os::build::archive_tar "${OS_BINARY_RELEASE_CLIENT_LINUX[@]}"
-          platform="linux/64bit" OS_RELEASE_ARCHIVE="openshift-origin-server" os::build::archive_tar "${OS_BINARY_RELEASE_SERVER_LINUX[@]}"
-        elif [[ $platform == "linux/ppc64le" ]]; then
-          platform="linux/ppc64le" OS_RELEASE_ARCHIVE="openshift-origin-client-tools" os::build::archive_tar "${OS_BINARY_RELEASE_CLIENT_LINUX[@]}"
-          platform="linux/ppc64le" OS_RELEASE_ARCHIVE="openshift-origin-server" os::build::archive_tar "${OS_BINARY_RELEASE_SERVER_LINUX[@]}"
+        if [[ $platform == "windows" ]]; then
+          OS_RELEASE_ARCHIVE="openshift-origin-client-tools" os::build::archive_zip "${OS_BINARY_RELEASE_CLIENT_WINDOWS[@]}"
+        elif [[ $platform == "mac" ]]; then
+          OS_RELEASE_ARCHIVE="openshift-origin-client-tools" os::build::archive_zip "${OS_BINARY_RELEASE_CLIENT_MAC[@]}"
+        elif [[ $platform == "linux-32bit" ]]; then
+          OS_RELEASE_ARCHIVE="openshift-origin-client-tools" os::build::archive_tar "${OS_BINARY_RELEASE_CLIENT_LINUX[@]}"
+        elif [[ $platform == "linux-64bit" ]]; then
+          OS_RELEASE_ARCHIVE="openshift-origin-client-tools" os::build::archive_tar "${OS_BINARY_RELEASE_CLIENT_LINUX[@]}"
+          OS_RELEASE_ARCHIVE="openshift-origin-server" os::build::archive_tar "${OS_BINARY_RELEASE_SERVER_LINUX[@]}"
+        elif [[ $platform == "linux-powerpc64" ]]; then
+          OS_RELEASE_ARCHIVE="openshift-origin-client-tools" os::build::archive_tar "${OS_BINARY_RELEASE_CLIENT_LINUX[@]}"
+          OS_RELEASE_ARCHIVE="openshift-origin-server" os::build::archive_tar "${OS_BINARY_RELEASE_SERVER_LINUX[@]}"
+        elif [[ $platform == "linux-arm64" ]]; then
+          OS_RELEASE_ARCHIVE="openshift-origin-client-tools" os::build::archive_tar "${OS_BINARY_RELEASE_CLIENT_LINUX[@]}"
+          OS_RELEASE_ARCHIVE="openshift-origin-server" os::build::archive_tar "${OS_BINARY_RELEASE_SERVER_LINUX[@]}"
+        elif [[ $platform == "linux-s390" ]]; then
+          OS_RELEASE_ARCHIVE="openshift-origin-client-tools" os::build::archive_tar "${OS_BINARY_RELEASE_CLIENT_LINUX[@]}"
+          OS_RELEASE_ARCHIVE="openshift-origin-server" os::build::archive_tar "${OS_BINARY_RELEASE_SERVER_LINUX[@]}"
         else
           echo "++ ERROR: No release type defined for $platform"
         fi
       else
-        if [[ $platform == "linux/amd64" ]]; then
-          platform="linux/64bit" os::build::archive_tar "./*"
-        elif [[ $platform == "linux/ppc64le" ]]; then
-          platform="linux/ppc64le" os::build::archive_tar "./*"
+        if [[ $platform == "linux-64bit" || $platform == "linux-powerpc64" || $platform == "linux-arm64" || $platform == "linux-s390" ]]; then
+          os::build::archive_tar "./*"
         else
           echo "++ ERROR: No release type defined for $platform"
         fi
@@ -487,14 +385,13 @@ function os::build::place_bins() {
 readonly -f os::build::place_bins
 
 function os::build::archive_name() {
-  echo "${OS_RELEASE_ARCHIVE}-${OS_GIT_VERSION}-$1"
+  echo "${OS_RELEASE_ARCHIVE}-${OS_GIT_VERSION}-$1" | tr '+' '-'
 }
 readonly -f os::build::archive_name
 
 function os::build::archive_zip() {
-  local platform_segment="${platform//\//-}"
   local default_name
-  default_name="$( os::build::archive_name "${platform_segment}" ).zip"
+  default_name="$( os::build::archive_name "${platform}" ).zip"
   local archive_name="${archive_name:-$default_name}"
   echo "++ Creating ${archive_name}"
   for file in "$@"; do
@@ -507,9 +404,8 @@ function os::build::archive_zip() {
 readonly -f os::build::archive_zip
 
 function os::build::archive_tar() {
-  local platform_segment="${platform//\//-}"
   local base_name
-  base_name="$( os::build::archive_name "${platform_segment}" )"
+  base_name="$( os::build::archive_name "${platform}" )"
   local default_name="${base_name}.tar.gz"
   local archive_name="${archive_name:-$default_name}"
   echo "++ Creating ${archive_name}"
@@ -653,9 +549,16 @@ readonly -f os::build::detect_local_release_tars
 # os::build::get_version_vars loads the standard version variables as
 # ENV vars
 function os::build::get_version_vars() {
-  if [[ -n ${OS_VERSION_FILE-} ]]; then
-    source "${OS_VERSION_FILE}"
-    return
+  if [[ -n "${OS_VERSION_FILE-}" ]]; then
+    if [[ -f "${OS_VERSION_FILE}" ]]; then
+      source "${OS_VERSION_FILE}"
+      return
+    fi
+    if [[ ! -d "${OS_ROOT}/.git" ]]; then
+      os::log::warn "No version file at ${OS_VERSION_FILE}"
+      exit 1
+    fi
+    os::log::warn "No version file at ${OS_VERSION_FILE}, falling back to git versions"
   fi
   os::build::os_version_vars
   os::build::kube_version_vars
@@ -681,7 +584,7 @@ function os::build::os_version_vars() {
       # Try to match the "git describe" output to a regex to try to extract
       # the "major" and "minor" versions and whether this is the exact tagged
       # version or whether the tree is between two tagged versions.
-      if [[ "${OS_GIT_VERSION}" =~ ^v([0-9]+)\.([0-9]+)(\.[0-9]+)?([-].*)?$ ]]; then
+      if [[ "${OS_GIT_VERSION}" =~ ^v([0-9]+)\.([0-9]+)(\.[0-9]+)*([-].*)?$ ]]; then
         OS_GIT_MAJOR=${BASH_REMATCH[1]}
         OS_GIT_MINOR=${BASH_REMATCH[2]}
         if [[ -n "${BASH_REMATCH[4]}" ]]; then
@@ -729,7 +632,7 @@ function os::build::kube_version_vars() {
   # Try to match the "git describe" output to a regex to try to extract
   # the "major" and "minor" versions and whether this is the exact tagged
   # version or whether the tree is between two tagged versions.
-  if [[ "${KUBE_GIT_VERSION}" =~ ^v([0-9]+)\.([0-9]+)(\.[0-9]+)?([-].*)?$ ]]; then
+  if [[ "${KUBE_GIT_VERSION}" =~ ^v([0-9]+)\.([0-9]+)(\.[0-9]+)*([-].*)?$ ]]; then
     KUBE_GIT_MAJOR=${BASH_REMATCH[1]}
     KUBE_GIT_MINOR=${BASH_REMATCH[2]}
     if [[ -n "${BASH_REMATCH[4]}" ]]; then
@@ -742,10 +645,10 @@ readonly -f os::build::kube_version_vars
 # Saves the environment flags to $1
 function os::build::save_version_vars() {
   local version_file=${1-}
-  [[ -n ${version_file} ]] || {
+  if [[ -z ${version_file} ]]; then
     echo "!!! Internal error.  No file specified in os::build::save_version_vars"
     return 1
-  }
+  fi
 
   cat <<EOF >"${version_file}"
 OS_GIT_COMMIT='${OS_GIT_COMMIT-}'
@@ -760,6 +663,13 @@ ETCD_GIT_COMMIT='${ETCD_GIT_COMMIT-}'
 EOF
 }
 readonly -f os::build::save_version_vars
+
+# os::build::get_product_vars exports variables that we expect to change
+# depending on the distribution of Origin
+function os::build::get_product_vars() {
+  export OS_BUILD_LDFLAGS_IMAGE_PREFIX="${OS_IMAGE_PREFIX:-"openshift/origin"}"
+  export OS_BUILD_LDFLAGS_DEFAULT_IMAGE_STREAMS="${OS_BUILD_LDFLAGS_DEFAULT_IMAGE_STREAMS:-"centos7"}"
+}
 
 # golang 1.5 wants `-X key=val`, but golang 1.4- REQUIRES `-X key val`
 function os::build::ldflag() {
@@ -785,11 +695,14 @@ function os::build::ldflags() {
   cd "${OS_ROOT}"
 
   os::build::get_version_vars
+  os::build::get_product_vars
 
   local buildDate="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
   declare -a ldflags=()
 
+  ldflags+=($(os::build::ldflag "${OS_GO_PACKAGE}/pkg/bootstrap/docker.defaultImageStreams" "${OS_BUILD_LDFLAGS_DEFAULT_IMAGE_STREAMS}"))
+  ldflags+=($(os::build::ldflag "${OS_GO_PACKAGE}/pkg/cmd/util/variable.DefaultImagePrefix" "${OS_BUILD_LDFLAGS_IMAGE_PREFIX}"))
   ldflags+=($(os::build::ldflag "${OS_GO_PACKAGE}/pkg/version.majorFromGit" "${OS_GIT_MAJOR}"))
   ldflags+=($(os::build::ldflag "${OS_GO_PACKAGE}/pkg/version.minorFromGit" "${OS_GIT_MINOR}"))
   ldflags+=($(os::build::ldflag "${OS_GO_PACKAGE}/pkg/version.versionFromGit" "${OS_GIT_VERSION}"))
@@ -804,6 +717,51 @@ function os::build::ldflags() {
   echo "${ldflags[*]-}"
 }
 readonly -f os::build::ldflags
+
+# os::build::image builds an image from a directory, to a tag, with an optional dockerfile to
+# use as the third argument. The environment variable OS_BUILD_IMAGE_ARGS adds additional
+# options to the command. The default is to use the imagebuilder binary if it is available
+# on the path with fallback to docker build if it is not available.
+function os::build::image() {
+  local directory=$1
+  local tag=$2
+  local dockerfile="${3-}"
+  local extra_tag="${4-}"
+  local options="${OS_BUILD_IMAGE_ARGS-}"
+  local mode="${OS_BUILD_IMAGE_TYPE:-imagebuilder}"
+
+  if [[ "${mode}" == "imagebuilder" ]]; then
+    if os::util::find::system_binary 'imagebuilder'; then
+      if [[ -n "${extra_tag}" ]]; then
+        extra_tag="-t '${extra_tag}'"
+      fi
+      if [[ -n "${dockerfile}" ]]; then
+        eval "imagebuilder -f '${dockerfile}' -t '${tag}' ${extra_tag} ${options} '${directory}'"
+        return $?
+      fi
+      eval "imagebuilder -t '${tag}' ${extra_tag} ${options} '${directory}'"
+      return $?
+    fi
+
+    os::log::warn "Unable to locate 'imagebuilder' on PATH, falling back to Docker build"
+    # clear options since we were unable to select imagebuilder
+    options=""
+  fi
+
+  if [[ -n "${dockerfile}" ]]; then
+    eval "docker build -f '${dockerfile}' -t '${tag}' ${options} '${directory}'"
+    if [[ -n "${extra_tag}" ]]; then
+      docker tag "${tag}" "${extra_tag}"
+    fi
+    return $?
+  fi
+  eval "docker build -t '${tag}' ${options} '${directory}'"
+  if [[ -n "${extra_tag}" ]]; then
+    docker tag "${tag}" "${extra_tag}"
+  fi
+  return $?
+}
+readonly -f os::build::image
 
 # os::build::enable_swap attempts to enable swap for the system if a) this is Linux and b)
 # the amount of physical memory is less than 10GB. This is a stopgap until we have
@@ -994,84 +952,6 @@ function os::build::gen-completions() {
 }
 readonly -f os::build::gen-completions
 
-function os::build::gen-man() {
-  local cmd="$1"
-  local dest="$2"
-  local cmdName="$3"
-  local filestore=".files_generated_$3"
-  local skipprefix="${4:-}"
-
-  # We do this in a tmpdir in case the dest has other non-autogenned files
-  # We don't want to include them in the list of gen'd files
-  local tmpdir="${OS_ROOT}/_tmp/gen_man"
-  mkdir -p "${tmpdir}"
-  # generate the new files
-  ${cmd} "${tmpdir}" "${cmdName}"
-  # create the list of generated files
-  ls "${tmpdir}" | LC_ALL=C sort > "${tmpdir}/${filestore}"
-
-  # remove all old generated file from the destination
-  while read file; do
-    if [[ -e "${tmpdir}/${file}" && -n "${skipprefix}" ]]; then
-      local original generated
-      original=$(grep -v "^${skipprefix}" "${dest}/${file}") || :
-      generated=$(grep -v "^${skipprefix}" "${tmpdir}/${file}") || :
-      if [[ "${original}" == "${generated}" ]]; then
-        # overwrite generated with original.
-        mv "${dest}/${file}" "${tmpdir}/${file}"
-      fi
-    else
-      rm "${dest}/${file}" || true
-    fi
-  done <"${dest}/${filestore}"
-
-  # put the new generated file into the destination
-  find "${tmpdir}" -exec rsync -pt {} "${dest}" \; >/dev/null
-  #cleanup
-  rm -rf "${tmpdir}"
-
-  echo "Assets generated in ${dest}"
-}
-readonly -f os::build::gen-man
-
-function os::build::gen-docs() {
-  local cmd="$1"
-  local dest="$2"
-  local skipprefix="${3:-}"
-
-  # We do this in a tmpdir in case the dest has other non-autogenned files
-  # We don't want to include them in the list of gen'd files
-  local tmpdir="${OS_ROOT}/_tmp/gen_doc"
-  mkdir -p "${tmpdir}"
-  # generate the new files
-  ${cmd} "${tmpdir}"
-  # create the list of generated files
-  ls "${tmpdir}" | LC_ALL=C sort > "${tmpdir}/.files_generated"
-
-  # remove all old generated file from the destination
-  while read file; do
-    if [[ -e "${tmpdir}/${file}" && -n "${skipprefix}" ]]; then
-      local original generated
-      original=$(grep -v "^${skipprefix}" "${dest}/${file}") || :
-      generated=$(grep -v "^${skipprefix}" "${tmpdir}/${file}") || :
-      if [[ "${original}" == "${generated}" ]]; then
-        # overwrite generated with original.
-        mv "${dest}/${file}" "${tmpdir}/${file}"
-      fi
-    else
-      rm "${dest}/${file}" || true
-    fi
-  done <"${dest}/.files_generated"
-
-  # put the new generated file into the destination
-  find "${tmpdir}" -exec rsync -pt {} "${dest}" \; >/dev/null
-  #cleanup
-  rm -rf "${tmpdir}"
-
-  echo "Assets generated in ${dest}"
-}
-readonly -f os::build::gen-docs
-
 function os::build::get-bin-output-path() {
   local os_root="${1:-}"
 
@@ -1081,175 +961,3 @@ function os::build::get-bin-output-path() {
   echo ${os_root}_output/local/bin/$(os::build::host_platform)
 }
 readonly -f os::build::get-bin-output-path
-
-# os::build::find-binary locates a locally built binary for the current
-# platform and returns the path to the binary.  The base path to search
-# from will default to the current working directory but can be
-# overridden via the optional second argument.
-function os::build::find-binary() {
-  local bin="$1"
-  local os_root="${2:-}"
-
-  local path=$( (ls -t $(os::build::get-bin-output-path "${os_root}")/${bin}) 2>/dev/null || true | head -1 )
-  echo "$path"
-}
-readonly -f os::build::find-binary
-
-# os::build::environment::create creates a docker container with the default variables.
-# arguments are passed directly to the container, OS_BUILD_ENV_GOLANG, OS_BUILD_ENV_IMAGE,
-# and OS_RELEASE_DOCKER_ARGS can be used to customize the container. The docker socket
-# is mounted by default and the output of the command is the container id.
-function os::build::environment::create() {
-  set -o errexit
-  local release_image="${OS_BUILD_ENV_IMAGE}"
-  local additional_context="${OS_BUILD_ENV_DOCKER_ARGS:-}"
-  if [[ "${OS_BUILD_ENV_USE_DOCKER:-y}" == "y" ]]; then
-    additional_context+="--privileged -v /var/run/docker.sock:/var/run/docker.sock"
-
-    if [[ "${OS_BUILD_ENV_LOCAL_DOCKER:-n}" == "y" ]]; then
-      # if OS_BUILD_ENV_LOCAL_DOCKER==y, add the local OS_ROOT as the bind mount to the working dir
-      # and set the running user to the current user
-      local workingdir
-      workingdir=$( os::build::environment::release::workingdir )
-      additional_context+=" -v ${OS_ROOT}:${workingdir} -u $(id -u)"
-    elif [[ -n "${OS_BUILD_ENV_REUSE_VOLUME:-}" ]]; then
-      # if OS_BUILD_ENV_REUSE_VOLUME is set, create a docker volume to store the working output so
-      # successive iterations can reuse shared code.
-      local workingdir
-      workingdir=$( os::build::environment::release::workingdir )
-      name="$( echo "${OS_BUILD_ENV_REUSE_VOLUME}" | tr '[:upper:]' '[:lower:]' )"
-      docker volume create --name "${name}" > /dev/null
-      additional_context+=" -v ${name}:${workingdir}"
-    fi
-  fi
-
-  local args
-  if [[ $# -eq 0 ]]; then
-    args=( "echo" "docker create ${additional_context} ${release_image}" )
-  else
-    args=( "$@" )
-  fi
-
-  # Create a new container to from the release environment
-  docker create ${additional_context} "${release_image}" "${args[@]}"
-}
-readonly -f os::build::environment::create
-
-# os::build::environment::release::workingdir calculates the working directory for the current
-# release image.
-function os::build::environment::release::workingdir() {
-  set -o errexit
-  # get working directory
-  local container
-  container="$(docker create "${release_image}")"
-  local workingdir
-  workingdir="$(docker inspect -f '{{ index . "Config" "WorkingDir" }}' "${container}")"
-  docker rm "${container}" > /dev/null
-  echo "${workingdir}"
-}
-readonly -f os::build::environment::release::workingdir
-
-# os::build::environment::cleanup stops and removes the container named in the argument
-# (unless OS_BUILD_ENV_LEAVE_CONTAINER is set, in which case it will only stop the container).
-function os::build::environment::cleanup() {
-  local container=$1
-  docker stop --time=0 "${container}" > /dev/null || true
-  if [[ -z "${OS_BUILD_ENV_LEAVE_CONTAINER:-}" ]]; then
-    docker rm "${container}" > /dev/null
-  fi
-}
-readonly -f os::build::environment::cleanup
-
-# os::build::environment::start starts the container provided as the first argument
-# using whatever content exists in the container already.
-function os::build::environment::start() {
-  local container=$1
-
-  docker start "${container}" > /dev/null
-  docker logs -f "${container}"
-
-  local exitcode
-  exitcode="$( docker inspect --type container -f '{{ .State.ExitCode }}' "${container}" )"
-
-  # extract content from the image
-  if [[ -n "${OS_BUILD_ENV_PRESERVE-}" ]]; then
-    local workingdir
-    workingdir="$(docker inspect -f '{{ index . "Config" "WorkingDir" }}' "${container}")"
-    local oldIFS="${IFS}"
-    IFS=:
-    for path in ${OS_BUILD_ENV_PRESERVE}; do
-      local parent=.
-      if [[ "${path}" != "." ]]; then
-        parent="$( dirname ${path} )"
-        mkdir -p "${parent}"
-      fi
-      docker cp "${container}:${workingdir}/${path}" "${parent}"
-    done
-    IFS="${oldIFS}"
-  fi
-  return $exitcode
-}
-readonly -f os::build::environment::start
-
-# os::build::environment::withsource starts the container provided as the first argument
-# after copying in the contents of the current Git repository at HEAD (or, if specified,
-# the ref specified in the second argument).
-function os::build::environment::withsource() {
-  local container=$1
-  local commit=${2:-HEAD}
-
-  if [[ -n "${OS_BUILD_ENV_LOCAL_DOCKER-}" ]]; then
-    # running locally, no change necessary
-    os::build::get_version_vars
-    os::build::save_version_vars "${OS_ROOT}/os-version-defs"
-  else
-    local workingdir
-    workingdir="$(docker inspect -f '{{ index . "Config" "WorkingDir" }}' "${container}")"
-    if [[ -n "${OS_BUILD_ENV_REUSE_VOLUME-}" ]]; then
-      local excluded=()
-      local oldIFS="${IFS}"
-      IFS=:
-      for exclude in ${OS_BUILD_ENV_EXCLUDE:-_output}; do
-        excluded+=("--exclude=${exclude}")
-      done
-      IFS="${oldIFS}"
-      if which rsync &>/dev/null; then
-        local name
-        name="$( echo "${OS_BUILD_ENV_REUSE_VOLUME}" | tr '[:upper:]' '[:lower:]' )"
-        if ! rsync -a --blocking-io ${excluded[@]} --omit-dir-times --numeric-ids -e "docker run --rm -i -v \"${name}:${workingdir}\" --entrypoint=/bin/bash \"${OS_BUILD_ENV_IMAGE}\" -c '\$@'" . remote:"${workingdir}"; then
-          # fall back to a tar if rsync is not in container
-          tar -cf - ${excluded[@]} . | docker cp - "${container}:${workingdir}"
-        fi
-      else
-        tar -cf - ${excluded[@]} . | docker cp - "${container}:${workingdir}"
-      fi
-    else
-      # Generate version definitions. Tree state is clean because we are pulling from git directly.
-      OS_GIT_TREE_STATE=clean os::build::get_version_vars
-      os::build::save_version_vars "/tmp/os-version-defs"
-
-      tar -cf - -C /tmp/ os-version-defs | docker cp - "${container}:${workingdir}"
-      git archive --format=tar "${commit}" | docker cp - "${container}:${workingdir}"
-    fi
-  fi
-
-  os::build::environment::start "${container}"
-}
-readonly -f os::build::environment::withsource
-
-# os::build::environment::run launches the container with the provided arguments and
-# the current commit (defaults to HEAD). The container is automatically cleaned up.
-function os::build::environment::run() {
-  local commit="${OS_GIT_COMMIT:-HEAD}"
-  local volume="${OS_BUILD_ENV_REUSE_VOLUME:-}"
-  if [[ -z "${volume}" ]]; then
-    volume="origin-build-$( git rev-parse "${commit}" )"
-  fi
-
-  local container
-  container="$( OS_BUILD_ENV_REUSE_VOLUME=${volume} os::build::environment::create "$@" )"
-  trap "os::build::environment::cleanup ${container}" EXIT
-
-  os::build::environment::withsource "${container}" "${commit}"
-}
-readonly -f os::build::environment::run
