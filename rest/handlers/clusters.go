@@ -55,6 +55,10 @@ func int64ptr(val int) *int64 {
 	return &ret
 }
 
+func boolptr(val bool) *bool {
+	return &val
+}
+
 func singleClusterResponse(sc coreclusters.SparkCluster) *models.SingleCluster {
 
 	addpod := func(p coreclusters.SparkPod) *models.ClusterModelPodsItems0 {
@@ -84,6 +88,7 @@ func singleClusterResponse(sc coreclusters.SparkCluster) *models.SingleCluster {
 		MasterCount: int64ptr(sc.Config.MasterCount),
 		WorkerCount: int64ptr(sc.Config.WorkerCount),
 		Name: sc.Config.Name,
+		ExposeWebUI: boolptr(sc.Config.ExposeWebUI),
 	}
 	return cluster
 }
@@ -93,6 +98,13 @@ func getModelCount(val *int64) int {
 		return coreclusters.SentinelCountValue
 	}
 	return int(*val)
+}
+
+func getBoolVal(val *bool) bool {
+	if val == nil {
+		return true
+	}
+	return bool(*val)
 }
 
 func assignConfig(config *models.NewClusterConfig) *coreclusters.ClusterConfig {
@@ -106,6 +118,7 @@ func assignConfig(config *models.NewClusterConfig) *coreclusters.ClusterConfig {
 		SparkMasterConfig: config.SparkMasterConfig,
 		SparkWorkerConfig: config.SparkWorkerConfig,
 		SparkImage: config.SparkImage,
+		ExposeWebUI: getBoolVal(config.ExposeWebUI),
 	}
 	return result
 }
