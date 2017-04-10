@@ -124,6 +124,7 @@ func (s *OshinkoUnitTestSuite) TestDefaultConfig(c *check.C) {
 	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
 	c.Assert(myconfig.SparkMasterConfig, check.Equals, defconfig.SparkMasterConfig)
 	c.Assert(myconfig.SparkWorkerConfig, check.Equals, defconfig.SparkWorkerConfig)
+	c.Assert(myconfig.ExposeWebUI, check.Equals, defconfig.ExposeWebUI)
 	c.Assert(myconfig.Name, check.Equals, "default")
 	c.Assert(err, check.IsNil)
 
