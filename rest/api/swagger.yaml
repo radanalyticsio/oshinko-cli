@@ -29,6 +29,10 @@ definitions:
             description: |-
               URL to the spark master web UI
             type: string
+          masterWebRoute:
+            description: |-
+              Route to the spark master web UI
+            type: string
           pods:
             description: |-
               Pods that make up the cluster

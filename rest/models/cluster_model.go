@@ -24,6 +24,10 @@ type ClusterModel struct {
 	*/
 	MasterURL *string `json:"masterUrl"`
 
+	/* Route to the spark master web UI
+	 */
+	MasterWebRoute string `json:"masterWebRoute,omitempty"`
+
 	/* URL to the spark master web UI
 
 	Required: true
