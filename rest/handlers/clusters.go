@@ -74,7 +74,7 @@ func singleClusterResponse(sc coreclusters.SparkCluster) *models.SingleCluster {
 	cluster.Cluster.Name = tostrptr(sc.Name)
 	cluster.Cluster.MasterURL = tostrptr(sc.MasterURL)
 	cluster.Cluster.MasterWebURL = tostrptr(sc.MasterWebURL)
-	cluster.Cluster.MasterWebRoute = tostrptr(sc.MasterWebRoute)
+	cluster.Cluster.MasterWebRoute = sc.MasterWebRoute
 
 	cluster.Cluster.Status = tostrptr(sc.Status)
 
