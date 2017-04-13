@@ -228,11 +228,15 @@ func FindClustersResponse(params apiclusters.FindClustersParams) middleware.Resp
 		return reterr(fail(err, nameSpaceMsg, 500))
 	}
 
+	osclient, err := osa.GetOpenShiftClient()
+	if err != nil {
+		return reterr(fail(err, clientMsg, 500))
+	}
 	client, err := osa.GetKubeClient()
 	if err != nil {
 		return reterr(fail(err, clientMsg, 500))
 	}
-	scs, err := coreclusters.FindClusters(namespace, client)
+	scs, err := coreclusters.FindClusters(namespace, osclient, client)
 	if err != nil {
 		return reterr(fail(err, "", getErrorCode(err)))
 	}
