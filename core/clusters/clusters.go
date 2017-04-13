@@ -598,7 +598,7 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 }
 
 // Find all clusters and return their representation
-func FindClusters(namespace string, client *kclient.Client) ([]SparkCluster, error) {
+func FindClusters(namespace string, osclient *oclient.Client, client *kclient.Client) ([]SparkCluster, error) {
 
 	var result []SparkCluster = []SparkCluster{}
 
@@ -637,6 +637,7 @@ func FindClusters(namespace string, client *kclient.Client) ([]SparkCluster, err
 			citem.WorkerCount = cnt
 			citem.MasterURL = retrieveServiceURL(sc, masterType, clustername)
 			citem.MasterWebURL = retrieveServiceURL(sc, webuiType, clustername)
+			citem.MasterWebRoute = retrieveRouteForService(osclient.Routes(namespace), webuiType, clustername)
 
 			// TODO make something real for status
 			if citem.MasterURL == "" {

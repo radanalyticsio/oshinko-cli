@@ -44,7 +44,7 @@ func (o *CmdOptions) RunClusters() error {
 		}
 		clist = []clusters.SparkCluster{c}
 	} else {
-		clist, err = clusters.FindClusters(o.Project, o.KClient)
+		clist, err = clusters.FindClusters(o.Project, o.Client, o.KClient)
 		if err != nil {
 			return err
 		}
