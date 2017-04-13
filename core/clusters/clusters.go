@@ -66,6 +66,7 @@ type SparkCluster struct {
 	Image        string `json:"image"`
 	MasterURL    string `json:"masterUrl"`
 	MasterWebURL string `json:"masterWebUrl"`
+	MasterWebRoute string `json:"masterWebRoute"`
 	Status       string `json:"status"`
 	WorkerCount  int    `json:"workerCount"`
 	MasterCount  int    `json:"masterCount,omitempty"`
@@ -108,6 +109,16 @@ func retrieveServiceURL(client kclient.ServiceInterface, stype, clustername stri
 			scheme = "spark://"
 		}
 		return scheme + srv.Name + ":" + strconv.Itoa(int(srv.Spec.Ports[0].Port))
+	}
+	return ""
+}
+
+func retrieveRouteForService(client oclient.RouteInterface, stype, clustername string) string {
+	selectorlist := makeSelector(stype, clustername)
+	routes, err := client.List(selectorlist)
+	if err == nil && len(routes.Items) != 0 {
+		route := routes.Items[0]
+		return route.Spec.Host
 	}
 	return ""
 }
@@ -355,6 +366,7 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 	// TODO ties into cluster status, make a note if the service is missing
 	sc.Create(&websv.Service)
 
+	// We will expose the Spark master webui unless we are told not to do it
 	if config.ExposeWebUI {
 		rc := osclient.Routes(namespace)
 		_, err = rc.Create(webuiroute)
@@ -556,6 +568,7 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 	result.Config.MasterCount = int(mrepl.Spec.Replicas)
 	result.MasterURL = retrieveServiceURL(sc, masterType, clustername)
 	result.MasterWebURL = retrieveServiceURL(sc, webuiType, clustername)
+	result.MasterWebRoute = retrieveRouteForService(osclient.Routes(namespace), webuiType, clustername)
 	if result.MasterURL == "" {
 		result.Status = "MasterServiceMissing"
 	} else {
