@@ -15,22 +15,20 @@ function os::test::extended::setup () {
 
 	os::util::environment::setup_time_vars
 
-	# TODO: we shouldn't have to do this much work just to get tests to run against a real
-	#   cluster, until then
-
 	if [[ -n "${TEST_ONLY-}" ]]; then
 		function cleanup() {
 			out=$?
-			#os::log::info "Exiting"
+			echo "Exiting"
 			return $out
 		}
 		trap "exit" INT TERM
 		trap "cleanup" EXIT
 
-		#os::log::info "Not starting server"
+		echo "Not starting server"
 		return 0
-	fi
+	else
 
-	return 1
+	    return 1
+	fi
 
 }
