@@ -12,11 +12,16 @@ import (
 )
 
 func NewCmdDelete(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) *cobra.Command {
-	cmd := CmdDelete(f, in, out)
+	cmd := CmdDelete(f, in, out, false)
 	return cmd
 }
 
-func CmdDelete(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Command {
+func NewCmdDeleteExtended(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) *cobra.Command {
+	cmd := CmdDelete(f, in, out, true)
+	return cmd
+}
+
+func CmdDelete(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended bool) *cobra.Command {
 	authOptions := &auth.AuthOptions{
 		Reader: reader,
 		Out:    out,
@@ -37,13 +42,15 @@ func CmdDelete(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Com
 			}
 		},
 	}
-
+	if extended {
+		cmd.Flags().String("app-status", "", "How the application has ended ('completed' or 'terminated')")
+	}
 	return cmd
 }
 
 func (o *CmdOptions) RunDelete(out io.Writer, cmd *cobra.Command, args []string) error {
 
-	info, err := clusters.DeleteCluster(o.Name, o.Project, o.Client, o.KClient)
+	info, err := clusters.DeleteCluster(o.Name, o.Project, o.Client, o.KClient, o.AppStatus)
 	if err != nil {
 		return err
 	}
