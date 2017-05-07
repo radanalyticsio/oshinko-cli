@@ -20,8 +20,8 @@ func GetCommandGroups(fullName string, f *clientcmd.Factory, in io.Reader, out i
 			Message: "Basic Commands:",
 			Commands: []*cobra.Command{
 				first,
-				oshinkocmd.NewCmdDelete(fullName, f, in, out),
-				oshinkocmd.NewCmdCreate(fullName, f, in, out),
+				oshinkocmd.NewCmdDeleteExtended(fullName, f, in, out),
+				oshinkocmd.NewCmdCreateExtended(fullName, f, in, out),
 				oshinkocmd.NewCmdScale(fullName, f, in, out),
 			},
 		},

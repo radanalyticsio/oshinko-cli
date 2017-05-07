@@ -23,11 +23,16 @@ var (
 )
 
 func NewCmdCreate(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) *cobra.Command {
-	cmd := CmdCreate(f, in, out)
+	cmd := CmdCreate(f, in, out, false)
 	return cmd
 }
 
-func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Command {
+func NewCmdCreateExtended(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) *cobra.Command {
+	cmd := CmdCreate(f, in, out, true)
+	return cmd
+}
+
+func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended bool) *cobra.Command {
 	authOptions := &auth.AuthOptions{
 		Reader: reader,
 		Out:    out,
@@ -60,7 +65,9 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Com
 	cmd.Flags().String("storedconfig", "", "ConfigMap name for spark cluster")
 	cmd.Flags().String("image", "", "spark image to be used. Default image is radanalyticsio/openshift-spark.")
 	cmd.Flags().Bool("exposeui", true, "True will expose the Spark WebUI via a route")
-	//cmd.MarkFlagRequired("workers")
+	if extended {
+		cmd.Flags().String("app", "", "Treat the cluster as ephemeral and tied to an app (name of pod, rc, or dc)")
+	}
 	return cmd
 }
 
@@ -73,7 +80,7 @@ func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string)
 	config.SparkImage = o.Image
 	config.Name = o.StoredConfig
 	config.ExposeWebUI = o.ExposeWebUI
-	_, err := clusters.CreateCluster(o.Name, o.Project, defaultImage, &config, o.Client, o.KClient)
+	_, err := clusters.CreateCluster(o.Name, o.Project, defaultImage, &config, o.Client, o.KClient, o.App)
 	if err != nil {
 		return err
 	}

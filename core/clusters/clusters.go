@@ -263,7 +263,7 @@ func checkForConfigMap(name string, cm kclient.ConfigMapsInterface) error {
 }
 
 // Create a cluster and return the representation
-func CreateCluster(clustername, namespace, sparkimage string, config *ClusterConfig, osclient *oclient.Client, client kclient.Interface) (SparkCluster, error) {
+func CreateCluster(clustername, namespace, sparkimage string, config *ClusterConfig, osclient *oclient.Client, client kclient.Interface, app string) (SparkCluster, error) {
 
 	var masterconfdir string
 	var workerconfdir string
@@ -342,7 +342,7 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 	_, err = dcc.Create(&workerdc.DeploymentConfig)
 	if err != nil {
 		// Since we created the master deployment config, try to clean up
-		DeleteCluster(clustername, namespace, osclient, client)
+		DeleteCluster(clustername, namespace, osclient, client, "")
 		return result, generalErr(err, fmt.Sprintf(createDepConfigMsg, workerdc.Name), createCode(err))
 	}
 
@@ -350,7 +350,7 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 	_, err = sc.Create(&mastersv.Service)
 	if err != nil {
 		// Since we create the master and workers, try to clean up
-		DeleteCluster(clustername, namespace, osclient, client)
+		DeleteCluster(clustername, namespace, osclient, client, "")
 		return result, generalErr(err, masterSrvMsg, createCode(err))
 	}
 
@@ -415,7 +415,7 @@ func waitForCount(client kclient.ReplicationControllerInterface, name string, co
 	}
 }
 
-func DeleteCluster(clustername, namespace string, osclient *oclient.Client, client kclient.Interface) (string, error) {
+func DeleteCluster(clustername, namespace string, osclient *oclient.Client, client kclient.Interface, appstatus string) (string, error) {
 	var foundSomething bool = false
 	info := []string{}
 	scalerepls := []string{}
