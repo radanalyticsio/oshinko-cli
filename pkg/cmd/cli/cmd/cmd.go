@@ -51,8 +51,8 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	}
 	if cmd.Flags().Lookup("output") != nil {
 		o.Output = kcmdutil.GetFlagString(cmd, "output")
-		if o.Output != "yaml" || o.Output != "json" {
-			cmdutil.UsageError(cmd, "INVALID output format only yaml|json allowed")
+		if o.Output != "" && o.Output != "yaml" && o.Output != "json" {
+			return cmdutil.UsageError(cmd, "INVALID output format, only yaml|json allowed")
 		}
 	}
 	if cmd.Flags().Lookup("workers") != nil {
@@ -76,10 +76,13 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	if cmd.Flags().Lookup("exposeui") != nil {
 		o.ExposeWebUI = kcmdutil.GetFlagBool(cmd, "exposeui")
 	if cmd.Flags().Lookup("app-status") != nil {
-		o.AppStatus = kcmdutil.GetFlagString(cmd, "appstatus")
+		o.AppStatus = kcmdutil.GetFlagString(cmd, "app-status")
+		if o.AppStatus != "" && o.AppStatus != "completed" && o.AppStatus != "terminated" {
+			return cmdutil.UsageError(cmd, "INVALID app-status value, only completed|terminated allowed")
+		}
 	}
 	if cmd.Flags().Lookup("app") != nil {
-		o.AppStatus = kcmdutil.GetFlagString(cmd, "app")
+		o.App = kcmdutil.GetFlagString(cmd, "app")
 	}
 	return nil
 }
