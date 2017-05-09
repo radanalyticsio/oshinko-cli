@@ -285,33 +285,45 @@ func countWorkers(client kclient.PodInterface, clustername string) (int, *kapi.P
 	return cnt, pods, err
 }
 
-func getDriverDC(app, namespace string, client *kclient.Client) string {
+func getDriverDeployment(app, namespace string, client *kclient.Client) (string, string) {
 
 	// When we call from a driver pod, the most likely value we have is a pod name so
 	// check that first
 	pc := client.Pods(namespace)
 	pod, err := pc.Get(app)
 	if err == nil && pod != nil {
-		return pod.Labels["deploymentconfig"]
+		return pod.Labels["deployment"], pod.Labels["deploymentconfig"]
 	} else if err != nil{
 		println(err.Error())
 	}
+
+	// Okay, it wasn't a pod, maybe it's a deployment (rc)
 	rcc := client.ReplicationControllers(namespace)
 	rc, err := rcc.Get(app)
 	if err == nil && rc != nil {
-		return rc.Labels["openshift.io/deployment-config.name"]
+		return app, rc.Labels["openshift.io/deployment-config.name"]
 	} else if err != nil {
 		println(err.Error())
 	}
-	// Well, it wasn't a pod name and it wasn't an rc name so assume it was
-	// an actual deploymentconfig name
-	return app
+
+	// Alright, it might be a deploymentconfig. See if we can find
+	// an rc that references it.
+	// Build a selector list based on type and/or cluster name
+	ls := labels.NewSelector()
+	dc, _ := labels.NewRequirement("openshift.io/deployment-config.name", selection.Equals, sets.NewString(app))
+	ls = ls.Add(*dc)
+	rcs, err := rcc.List(kapi.ListOptions{LabelSelector: ls})
+	if err == nil && len(rcs.Items) != 0 {
+		rc = newestRepl(rcs)
+		return rc.Name, app
+	}
+	return "", ""
 }
 
 // Create a cluster and return the representation
 func CreateCluster(clustername, namespace, sparkimage string, config *ClusterConfig, osclient *oclient.Client, client kclient.Interface, app string) (SparkCluster, error) {
 
-	var driverdc string
+	var driverdeployment string
 	var masterconfdir string
 	var workerconfdir string
 	var result SparkCluster = SparkCluster{}
@@ -363,7 +375,7 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 	// Create the master deployment config
 	masterdc := sparkMaster(namespace, sparkimage, mastercount, clustername, masterconfdir, finalconfig.SparkMasterConfig)
 	if app != "" {
-		driverdc = getDriverDC(app, namespace, client)
+		driverdeployment, _ = getDriverDeployment(app, namespace, client)
 	}
 	masterdc := sparkMaster(namespace, sparkimage, mastercount, clustername, masterconfdir, finalconfig.SparkMasterConfig)
 
@@ -488,14 +500,14 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 			delete = true
 		} else if ephemeral, ok := master.Labels["ephemeral"]; ok {
 			// app may be a pod name, get the dc value
-			appvalue := getDriverDC(app, namespace, client)
-			if appvalue != ephemeral {
+			deployment, driverdc := getDriverDeployment(app, namespace, client)
+			if deployment != ephemeral {
 				info = append(info, "cluster is not linked to app")
 			} else {
 				// Either the driver dc has been deleted, or it's been scaled to zero,
 				// or the application completed and the driver has not been scaled.
 				// In all cases we consider the app complete and delete the cluster
-				driver, err := dcc.Get(ephemeral)
+				driver, err := dcc.Get(driverdc)
 				delete = err != nil ||
 					driver.Spec.Replicas == 0 ||
 					(appstatus == "completed" && driver.Spec.Replicas == 1)
@@ -773,6 +785,16 @@ func FindClusters(namespace string, osclient *oclient.Client, client kclient.Int
 	return result, nil
 }
 
+func newestRepl(list *kapi.ReplicationControllerList ) *kapi.ReplicationController {
+	newestRepl := list.Items[0]
+	for i := 0; i < len(list.Items); i++ {
+		if list.Items[i].CreationTimestamp.Unix() > newestRepl.CreationTimestamp.Unix() {
+			newestRepl = list.Items[i]
+		}
+	}
+	return &newestRepl
+}
+
 func getReplController(client kclient.ReplicationControllerInterface, clustername, otype string) (*kapi.ReplicationController, error) {
 
 	selectorlist := makeSelector(otype, clustername)
@@ -782,13 +804,7 @@ func getReplController(client kclient.ReplicationControllerInterface, clusternam
 	}
 	// Use the latest replication controller.  There could be more than one
 	// if the user did something like oc env to set a new env var on a deployment
-	newestRepl := repls.Items[0]
-	for i := 0; i < len(repls.Items); i++ {
-		if repls.Items[i].CreationTimestamp.Unix() > newestRepl.CreationTimestamp.Unix() {
-			newestRepl = repls.Items[i]
-		}
-	}
-	return &newestRepl, nil
+	return newestRepl(repls), nil
 }
 
 func getDepConfig(client oclient.DeploymentConfigInterface, clustername, otype string) (*deployapi.DeploymentConfig, error) {
