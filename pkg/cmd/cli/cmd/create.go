@@ -66,7 +66,7 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 	cmd.Flags().String("image", "", "spark image to be used. Default image is radanalyticsio/openshift-spark.")
 	cmd.Flags().Bool("exposeui", true, "True will expose the Spark WebUI via a route")
 	if extended {
-		cmd.Flags().String("app", "", "Treat the cluster as ephemeral and tied to an app (name of pod, rc, or dc)")
+		cmd.Flags().String("app", "", "Treat the cluster as ephemeral and tied to an app (name of pod or deployment)")
 	}
 	return cmd
 }
