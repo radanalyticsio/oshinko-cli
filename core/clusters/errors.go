@@ -6,6 +6,7 @@ const ClientOperationCode = 101
 const ClusterIncompleteCode = 102
 const NoSuchClusterCode = 103
 const ComponentExistsCode = 104
+const EphemeralCode = 105
 
 type ClusterError struct {
 	Msg  string

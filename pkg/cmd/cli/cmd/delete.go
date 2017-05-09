@@ -43,6 +43,7 @@ func CmdDelete(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 		},
 	}
 	if extended {
+		cmd.Flags().String("app", "", "The app tied to an ephemeral cluster (name of pod, rc, or dc)")
 		cmd.Flags().String("app-status", "", "How the application has ended ('completed' or 'terminated')")
 	}
 	return cmd
@@ -50,12 +51,15 @@ func CmdDelete(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 
 func (o *CmdOptions) RunDelete(out io.Writer, cmd *cobra.Command, args []string) error {
 
-	info, err := clusters.DeleteCluster(o.Name, o.Project, o.Client, o.KClient, o.AppStatus)
-	if err != nil {
-		return err
+	if (o.App == "" || o.AppStatus == "") && o.App + o.AppStatus != "" {
+		return fmt.Errorf("Both --app and --appstatus must be set")
 	}
+	info, err := clusters.DeleteCluster(o.Name, o.Project, o.Client, o.KClient, o.App, o.AppStatus)
 	if info != "" {
 		fmt.Println(info)
+	}
+	if err != nil {
+		return err
 	}
 	fmt.Fprintf(out, "cluster \"%s\" deleted \n", o.Name)
 	return nil
