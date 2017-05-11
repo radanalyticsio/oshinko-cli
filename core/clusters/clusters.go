@@ -22,6 +22,7 @@ import (
 	"k8s.io/kubernetes/pkg/util/sets"
 )
 
+
 const clusterConfigMsg = "invalid cluster configuration"
 const missingConfigMsg = "unable to find spark configuration '%s'"
 const findDepConfigMsg = "unable to find deployment configs"
@@ -467,21 +468,12 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 	return result, nil
 }
 
-func waitForCount(client kclient.ReplicationControllerInterface, name string, count int) {
-
-	for i := 0; i < 5; i++ {
-		r, _ := client.Get(name)
-		if int(r.Status.Replicas) == count {
-			return
-		}
-		time.Sleep(1 * time.Second)
-	}
-}
-
 func DeleteCluster(clustername, namespace string, osclient *oclient.Client, client kclient.Interface, app, appstatus string) (string, error) {
 	var foundSomething bool = false
+	//var zero int32 = 0
 	info := []string{}
-	scalerepls := []string{}
+	rcnames := []string{}
+
 
 	dcc := osclient.DeploymentConfigs(namespace)
 	rcc := client.ReplicationControllers(namespace)
@@ -525,88 +517,60 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 	}
 
 	// Put a label on the master dc as soon as possible that says "Deleting"
-	// just in case this takes some time and someone does a get on the cluster
-	//selectorlist := makeSelector(masterType, clustername)
-
-	//deployments, err := dcc.List(selectorlist)
-	//if err == nil && len(deployments.Items) == 1 {
-	//	tmp := odc.ODeploymentConfig{deployments.Items[0]}
-	//	tmp.Label("delete_pending", "true")
-	//}
+	// just in case this takes some time and someone does a get on the cluster.
+	// This may never be seen.
+	dc, err := dcc.Get(mastername(clustername))
+	if err == nil && dc != nil {
+		tmp := odc.ODeploymentConfig{*dc}
+		tmp.Label("delete_pending", "true")
+	}
 
 	// Build a selector list for the "oshinko-cluster" label
 	selectorlist := makeSelector("", clustername)
 
-	// Delete the services
-	sc := client.Services(namespace)
-	srvs, err := sc.List(selectorlist)
-	if err != nil {
-		info = append(info, "unable to find services ("+err.Error()+")")
-	} else {
-		foundSomething = foundSomething || len(srvs.Items) > 0
-	}
-	for i := range srvs.Items {
-		name := srvs.Items[i].Name
-		err = sc.Delete(name)
-		if err != nil {
-			info = append(info, "unable to delete service "+name+" ("+err.Error()+")")
-		}
-	}
-
-	// Delete all of the deployment configs
+	// Delete the dcs
 	deployments, err := dcc.List(selectorlist)
-	if err != nil {
-		info = append(info, "unable to find deployment configs ("+err.Error()+")")
-	} else {
-		foundSomething = len(deployments.Items) > 0
-	}
 	for i := range deployments.Items {
-		name := deployments.Items[i].Name
-		err = dcc.Delete(name)
+		err = dcc.Delete(deployments.Items[i].Name)
 		if err != nil {
-			info = append(info, "unable to delete deployment config "+name+" ("+err.Error()+")")
+			info = append(info, "unable to delete deployment config "+deployments.Items[i].Name+" ("+err.Error()+")")
 		}
 	}
 
-        // Verify that the dcs really are gone
-	//deployments, err = dcc.List(selectorlist)
-	//if err == nil && len(deployments.Items) == 0 {
-	//	info = append(info, "dcs really are gone")
-	//} else {
-	//      info = append(info, "dcs might still be there")
-	//}
-
-	// Get a list of all the replication controllers for the cluster
-	// and set all of the replica values to 0
+	// Delete the rcs
 	rcc = client.ReplicationControllers(namespace)
 	repls, err := rcc.List(selectorlist)
-	if err != nil {
-		info = append(info, "unable to find replication controllers ("+err.Error()+")")
-	} else {
-		foundSomething = foundSomething || len(repls.Items) > 0
-	}
 	for i := range repls.Items {
-		name := repls.Items[i].Name
-		repls.Items[i].Spec.Replicas = 0
-		_, err = rcc.Update(&repls.Items[i])
+		rcnames = append(rcnames, repls.Items[i].Name)
+		err = rcc.Delete(repls.Items[i].Name, nil)
 		if err != nil {
-			info = append(info, "unable to scale replication controller "+name+" ("+err.Error()+")")
-		} else {
-			scalerepls = append(scalerepls, name)
+			info = append(info, "unable to delete replication controller " + repls.Items[i].Name + " (" + err.Error() + ")")
 		}
 	}
 
-	// Wait for the replica count to drop to 0 for each one we scaled
-	for i := range scalerepls {
-		waitForCount(rcc, scalerepls[i], 0)
+	pc := client.Pods(namespace)
+	for i := range rcnames {
+		ls := labels.NewSelector()
+		plist, _ := labels.NewRequirement("openshift.io/deployer-pod-for.name", selection.Equals, sets.NewString(rcnames[i]))
+		ls = ls.Add(*plist)
+		pods, err := pc.List(kapi.ListOptions{LabelSelector: ls})
+		if err == nil && len(pods.Items) != 0 {
+			for p := range pods.Items {
+				err = pc.Delete(pods.Items[p].Name, nil)
+				if err != nil {
+					info = append(info, "unable to delete deployer pod " + pods.Items[p].Name + " ("+err.Error()+")")
+				} else {
+					info = append(info, "deleted deployer pod " + pods.Items[p].Name)
+				}
+			}
+		}
 	}
 
-	// Delete each replication controller
-	for i := range repls.Items {
-		name := repls.Items[i].Name
-		err = rcc.Delete(name, nil)
+	pods, err := pc.List(selectorlist)
+	for i := range pods.Items {
+		err = pc.Delete(pods.Items[i].Name, nil)
 		if err != nil {
-			info = append(info, "unable to delete replication controller "+name+" ("+err.Error()+")")
+			info = append(info, "unable to delete replication controller " + repls.Items[i].Name + " (" + err.Error() + ")")
 		}
 	}
 
@@ -620,19 +584,12 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 	// Delete the services
 	sc := client.Services(namespace)
 	srvs, err := sc.List(selectorlist)
-	if err != nil {
-		info = append(info, "unable to find services ("+err.Error()+")")
-	} else {
-		foundSomething = foundSomething || len(srvs.Items) > 0
-	}
 	for i := range srvs.Items {
-		name := srvs.Items[i].Name
-		err = sc.Delete(name)
+		err = sc.Delete(srvs.Items[i].Name)
 		if err != nil {
-			info = append(info, "unable to delete service "+name+" ("+err.Error()+")")
+			info = append(info, "unable to delete service " + srvs.Items[i].Name + " (" + err.Error() + ")")
 		}
 	}
-
 	// If we found some part of a cluster, then there is no error
 	// even though the cluster may not have been fully complete.
 	// If we didn't find any trace of a cluster, then call it an error
