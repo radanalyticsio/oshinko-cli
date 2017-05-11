@@ -74,6 +74,7 @@ type SparkCluster struct {
 	WorkerCount  int    `json:"workerCount"`
 	MasterCount  int    `json:"masterCount"`
 	Config       ClusterConfig
+	Ephemeral    string `json:"ephemeral,omitempty"`
 	Pods         []SparkPod
 }
 
@@ -132,24 +133,25 @@ func retrieveRouteForService(client oclient.RouteInterface, stype, clustername s
 	return ""
 }
 
-func checkForDeploymentConfigs(client oclient.DeploymentConfigInterface, clustername string) (bool, error) {
+func checkForDeploymentConfigs(client oclient.DeploymentConfigInterface, clustername string) (bool, *deployapi.DeploymentConfig, error) {
 	selectorlist := makeSelector(masterType, clustername)
 	dcs, err := client.List(selectorlist)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if len(dcs.Items) == 0 {
-		return false, nil
+		return false, nil, nil
 	}
+	m := dcs.Items[0]
 	selectorlist = makeSelector(workerType, clustername)
 	dcs, err = client.List(selectorlist)
 	if err != nil {
-		return false, err
+		return false, &m, err
 	}
 	if len(dcs.Items) == 0 {
-		return false, nil
+		return false, &m, nil
 	}
-	return true, nil
+	return true, &m, nil
 
 }
 
@@ -214,7 +216,11 @@ func mastername(clustername string) string {
 	return clustername + "-m"
 }
 
-func sparkMaster(namespace, image string, replicas int, clustername, sparkconfdir, sparkmasterconfig string) *odc.ODeploymentConfig {
+func workername(clustername string) string {
+	return clustername + "-w"
+}
+
+func sparkMaster(namespace, image string, replicas int, clustername, sparkconfdir, sparkmasterconfig, driverdc string) *odc.ODeploymentConfig {
 
 	// Create the basic deployment config
 	// We will use a label and pod selector based on the cluster name
@@ -490,7 +496,7 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 			// But this means the cluster is partially broken anyway. Let the normal delete
 			// fall through and cleanup
 			delete = true
-		} else if ephemeral, ok := master.Labels["ephemeral"]; ok {
+		} else if ephemeral, ok := master.Labels[ephemeralLabel]; ok {
 			// app may be a pod name, get the dc value
 			deployment, driverdc := getDriverDeployment(app, namespace, client)
 			if deployment != ephemeral {
@@ -618,7 +624,7 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 	// If either the master or the worker deploymentconfig are missing, we
 	// assume that the cluster is missing. These are the base objects that
 	// we use to create a cluster
-	ok, err := checkForDeploymentConfigs(osclient.DeploymentConfigs(namespace), clustername)
+	ok, master, err := checkForDeploymentConfigs(osclient.DeploymentConfigs(namespace), clustername)
 	if err != nil {
 		return result, generalErr(err, findDepConfigMsg, ClientOperationCode)
 	}
@@ -661,8 +667,13 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 	} else {
 		result.Status = "Running"
 	}
+	if ephemeral, ok := master.Labels[ephemeralLabel]; ok {
+		result.Ephemeral = ephemeral
+	} else {
+		result.Ephemeral = "shared"
+	}
 
-	// Report pos
+	// Report pods
 	result.Pods = []SparkPod{}
 	selectorlist := makeSelector(masterType, clustername)
 	pods, err := pc.List(selectorlist)
@@ -692,6 +703,7 @@ func FindClusters(namespace string, osclient *oclient.Client, client kclient.Int
 	var mcount, wcount int
 	dcc := osclient.DeploymentConfigs(namespace)
 	sc := client.Services(namespace)
+	dc := osclient.DeploymentConfigs(namespace)
 
 	// Create a map so that we can track clusters by name while we
 	// find out information about them
@@ -735,6 +747,15 @@ func FindClusters(namespace string, osclient *oclient.Client, client kclient.Int
 				citem.Status = "MasterServiceMissing"
 			} else {
 				citem.Status = "Running"
+			}
+
+			master, err := dc.Get(mastername(clustername))
+			if err == nil {
+				if ephemeral, ok := master.Labels[ephemeralLabel]; ok {
+					citem.Ephemeral = ephemeral
+				} else {
+					citem.Ephemeral = "shared"
+				}
 			}
 			result = append(result, *citem)
 		}
@@ -809,7 +830,7 @@ func UpdateCluster(name, namespace string, config *ClusterConfig, osclient *ocli
 	// If either the master or the worker deploymentconfig are missing, we
 	// assume that the cluster is missing. These are the base objects that
 	// we use to create a cluster
-	ok, err := checkForDeploymentConfigs(osclient.DeploymentConfigs(namespace), clustername)
+	ok, _, err := checkForDeploymentConfigs(osclient.DeploymentConfigs(namespace), clustername)
 	if err != nil {
 		return result, generalErr(err, findDepConfigMsg, ClientOperationCode)
 	}
@@ -858,7 +879,7 @@ func ScaleCluster(name, namespace string, masters, workers int, osclient *oclien
 	// If either the master or the worker deploymentconfig are missing, we
 	// assume that the cluster is missing. These are the base objects that
 	// we use to create a cluster
-	ok, err := checkForDeploymentConfigs(osclient.DeploymentConfigs(namespace), clustername)
+	ok, _, err := checkForDeploymentConfigs(osclient.DeploymentConfigs(namespace), clustername)
 	if err != nil {
 		return generalErr(err, findDepConfigMsg, ClientOperationCode)
 	}

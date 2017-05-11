@@ -59,8 +59,8 @@ func (o *CmdOptions) RunClusters() error {
 		for _, cluster := range tmpClusters {
 			if o.Name == "" || cluster.Name == o.Name {
 				if o.Output == "" {
-					msg += fmt.Sprintf(linebreak+asterisk+"%s \t  %d\t  %s\t  %s\t  %s\t  %s", cluster.Name,
-						cluster.WorkerCount, cluster.MasterURL, cluster.MasterWebURL, cluster.MasterWebRoute, cluster.Status)
+					msg += fmt.Sprintf(linebreak+asterisk+"%s \t  %d\t  %d\t %s\t  %s\t  %s\t  %s\t  %s", cluster.Name,
+						cluster.Config.WorkerCount, cluster.WorkerCount, cluster.MasterURL, cluster.MasterWebURL, cluster.MasterWebRoute, cluster.Status, cluster.Ephemeral)
 				}
 			}
 		}
@@ -111,6 +111,7 @@ func NewCmdGet(fullName string, f *osclientcmd.Factory, reader io.Reader, out io
 		},
 	}
 	cmds.Flags().StringP("output", "o", "", "Output format. One of: json|yaml")
+	//cmds.Flags().BoolP("ephemeral", "e", false, "List ephemeral clusters")
 	cmds.Flags().BoolVarP(&options.Verbose, "verbose", "v", options.Verbose, "See details for resolving issues.")
 	return cmds
 }
