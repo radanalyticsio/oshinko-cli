@@ -34,12 +34,15 @@ const masterSrvMsg = "unable to create spark master service endpoint"
 const mastermsg = "unable to find spark masters"
 const updateDepMsg = "unable to update deployment config for spark %s"
 const noSuchClusterMsg = "no such cluster '%s'"
+const noClusterForDriverMsg = "no cluster found for app '%s'"
 const ephemeralDelMsg = "cluster not deleted '%s'"
 const podListMsg = "unable to retrive pod list"
 const sparkImageMsg = "no spark image specified"
+const noSuchAppMsg = "did not find app '%s'"
 
 const typeLabel = "oshinko-type"
 const clusterLabel = "oshinko-cluster"
+const driverLabel = "uses-oshinko-cluster"
 const ephemeralLabel = "ephemeral"
 
 const workerType = "worker"
@@ -328,9 +331,12 @@ func getDriverDeployment(app, namespace string, client *kclient.Client) (string,
 }
 
 // Create a cluster and return the representation
-func CreateCluster(clustername, namespace, sparkimage string, config *ClusterConfig, osclient *oclient.Client, client kclient.Interface, app string) (SparkCluster, error) {
+func CreateCluster(
+	clustername, namespace, sparkimage string,
+	config *ClusterConfig, osclient *oclient.Client, client kclient.Interface, app string, ephemeral bool) (SparkCluster, error) {
 
-	var driverdeployment string
+	var driverrc string
+	var driverdc string
 	var masterconfdir string
 	var workerconfdir string
 	var result SparkCluster = SparkCluster{}
@@ -379,12 +385,27 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 		workerconfdir = sparkconfdir
 	}
 
-	// Create the master deployment config
-	masterdc := sparkMaster(namespace, sparkimage, mastercount, clustername, masterconfdir, finalconfig.SparkMasterConfig)
+	// If an app value was passed find the deployment and deploymentconfig
+	// so we can do the cluster association and potentially mark the cluster
+	// as ephemeral
 	if app != "" {
-		driverdeployment, _ = getDriverDeployment(app, namespace, client)
+		driverrc, driverdc = getDriverDeployment(app, namespace, client)
 	}
-	masterdc := sparkMaster(namespace, sparkimage, mastercount, clustername, masterconfdir, finalconfig.SparkMasterConfig)
+
+	// Create the master deployment config
+	if ephemeral {
+		// If we couldn't find an rc (deployment) of a dc it's
+		// an error
+		if driverrc == "" || driverdc == "" {
+			return result, generalErr(err, fmt.Sprintf(noSuchAppMsg, app), ClientOperationCode)
+		}
+	} else {
+		// If the ephemeral flag is not set, wipe out driverrc. This will cause the sparkMaster to
+		// be constructed without the ephemeral label
+		driverrc = ""
+	}
+	// Create the master deployment config
+	masterdc := sparkMaster(namespace, sparkimage, mastercount, clustername, masterconfdir, finalconfig.SparkMasterConfig, driverrc)
 
 	// Create the services that will be associated with the master pod
 	// They will be created with selectors based on the pod labels
@@ -451,6 +472,18 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 				break
 			}
 			time.Sleep(250 * time.Millisecond)
+		}
+	}
+
+	// Now that the creation actually worked, label the dc if the app value was passed
+	if driverdc != "" {
+		driver, err := dcc.Get(driverdc)
+		if err != nil {
+			if driver.Labels == nil {
+				driver.Labels = map[string]string{}
+			}
+			driver.Labels[driverLabel] = clustername
+			dcc.Update(driver)
 		}
 	}
 
@@ -697,13 +730,33 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 }
 
 // Find all clusters and return their representation
-func FindClusters(namespace string, osclient *oclient.Client, client kclient.Interface) ([]SparkCluster, error) {
+func FindClusters(namespace string, osclient *oclient.Client, client kclient.Interface, app string) ([]SparkCluster, error) {
 
 	var result []SparkCluster = []SparkCluster{}
 	var mcount, wcount int
 	dcc := osclient.DeploymentConfigs(namespace)
 	sc := client.Services(namespace)
 	dc := osclient.DeploymentConfigs(namespace)
+
+	// If app is not null, find the matching dc and look for a driver label.
+	// If we find it get the name of the cluster and call FindSingleCluster.
+	// If not, the list is empty
+	if app != "" {
+		_, dcname := getDriverDeployment(app, namespace, client)
+		if dcname != "" {
+			driver, err := dc.Get(dcname)
+			if err == nil && driver != nil {
+				if clustername, ok := driver.Labels[driverLabel]; ok {
+					c, err := FindSingleCluster(clustername, namespace, osclient, client)
+					if err == nil {
+						result = append(result, c)
+					}
+					return result, err
+				}
+			}
+		}
+		return result, generalErr(nil, fmt.Sprintf(noClusterForDriverMsg, app), NoSuchClusterCode)
+	}
 
 	// Create a map so that we can track clusters by name while we
 	// find out information about them

@@ -44,7 +44,7 @@ func (o *CmdOptions) RunClusters() error {
 		}
 		clist = []clusters.SparkCluster{c}
 	} else {
-		clist, err = clusters.FindClusters(o.Project, o.Client, o.KClient)
+		clist, err = clusters.FindClusters(o.Project, o.Client, o.KClient, o.App)
 		if err != nil {
 			return err
 		}
@@ -111,7 +111,7 @@ func NewCmdGet(fullName string, f *osclientcmd.Factory, reader io.Reader, out io
 		},
 	}
 	cmds.Flags().StringP("output", "o", "", "Output format. One of: json|yaml")
-	//cmds.Flags().BoolP("ephemeral", "e", false, "List ephemeral clusters")
+	cmds.Flags().String("app", "", "Get the cluster(s) associated with the app (value may be the name of a pod, deployment, or deploymentcon)")
 	cmds.Flags().BoolVarP(&options.Verbose, "verbose", "v", options.Verbose, "See details for resolving issues.")
 	return cmds
 }
