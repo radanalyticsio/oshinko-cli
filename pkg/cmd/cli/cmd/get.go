@@ -111,7 +111,7 @@ func NewCmdGet(fullName string, f *osclientcmd.Factory, reader io.Reader, out io
 		},
 	}
 	cmds.Flags().StringP("output", "o", "", "Output format. One of: json|yaml")
-	cmds.Flags().String("app", "", "Get the cluster(s) associated with the app (value may be the name of a pod, deployment, or deploymentcon)")
+	cmds.Flags().String("app", "", "Get the cluster(s) associated with the app (value may be the name of a pod or deployment)")
 	cmds.Flags().BoolVarP(&options.Verbose, "verbose", "v", options.Verbose, "See details for resolving issues.")
 	return cmds
 }
