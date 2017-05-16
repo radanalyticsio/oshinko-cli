@@ -478,7 +478,7 @@ func CreateCluster(
 	// Now that the creation actually worked, label the dc if the app value was passed
 	if driverdc != "" {
 		driver, err := dcc.Get(driverdc)
-		if err != nil {
+		if err == nil {
 			if driver.Labels == nil {
 				driver.Labels = map[string]string{}
 			}
