@@ -303,8 +303,6 @@ func getDriverDeployment(app, namespace string, client *kclient.Client) (string,
 	pod, err := pc.Get(app)
 	if err == nil && pod != nil {
 		return pod.Labels["deployment"], pod.Labels["deploymentconfig"]
-	} else if err != nil{
-		println(err.Error())
 	}
 
 	// Okay, it wasn't a pod, maybe it's a deployment (rc)
@@ -312,8 +310,6 @@ func getDriverDeployment(app, namespace string, client *kclient.Client) (string,
 	rc, err := rcc.Get(app)
 	if err == nil && rc != nil {
 		return app, rc.Labels["openshift.io/deployment-config.name"]
-	} else if err != nil {
-		println(err.Error())
 	}
 
 	// Alright, it might be a deploymentconfig. See if we can find
