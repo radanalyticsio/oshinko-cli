@@ -295,35 +295,23 @@ func countWorkers(client kclient.PodInterface, clustername string) (int, *kapi.P
 	return cnt, pods, err
 }
 
-func getDriverDeployment(app, namespace string, client *kclient.Client) (string, string) {
+func getDriverDeployment(app, namespace string, client *kclient.Client) string {
 
-	// When we call from a driver pod, the most likely value we have is a pod name so
-	// check that first
-	pc := client.Pods(namespace)
-	pod, err := pc.Get(app)
-	if err == nil && pod != nil {
-		return pod.Labels["deployment"], pod.Labels["deploymentconfig"]
-	}
-
-	// Okay, it wasn't a pod, maybe it's a deployment (rc)
+	// When we make calls from a driver pod, the most likely value we have is a deployment
+	// so use that first
 	rcc := client.ReplicationControllers(namespace)
 	rc, err := rcc.Get(app)
 	if err == nil && rc != nil {
-		return app, rc.Labels["openshift.io/deployment-config.name"]
+		return app
 	}
 
-	// Alright, it might be a deploymentconfig. See if we can find
-	// an rc that references it.
-	// Build a selector list based on type and/or cluster name
-	ls := labels.NewSelector()
-	dc, _ := labels.NewRequirement("openshift.io/deployment-config.name", selection.Equals, sets.NewString(app))
-	ls = ls.Add(*dc)
-	rcs, err := rcc.List(kapi.ListOptions{LabelSelector: ls})
-	if err == nil && len(rcs.Items) != 0 {
-		rc = newestRepl(rcs)
-		return rc.Name, app
+	// Okay, it wasn't a deployment, maybe it's a pod
+	pc := client.Pods(namespace)
+	pod, err := pc.Get(app)
+	if err == nil && pod != nil {
+		return pod.Labels["deployment"]
 	}
-	return "", ""
+	return ""
 }
 
 // Create a cluster and return the representation
@@ -332,7 +320,7 @@ func CreateCluster(
 	config *ClusterConfig, osclient *oclient.Client, client kclient.Interface, app string, ephemeral bool) (SparkCluster, error) {
 
 	var driverrc string
-	var driverdc string
+	var ephem_val string
 	var masterconfdir string
 	var workerconfdir string
 	var result SparkCluster = SparkCluster{}
@@ -381,27 +369,21 @@ func CreateCluster(
 		workerconfdir = sparkconfdir
 	}
 
-	// If an app value was passed find the deployment and deploymentconfig
-	// so we can do the cluster association and potentially mark the cluster
-	// as ephemeral
+	// If an app value was passed find the deployment so we can do the cluster
+	// association and potentially mark the cluster as ephemeral
 	if app != "" {
-		driverrc, driverdc = getDriverDeployment(app, namespace, client)
+		driverrc = getDriverDeployment(app, namespace, client)
+	}
+	if ephemeral {
+		// If we couldn't find an rc (deployment) it's an error
+		if driverrc == "" {
+			return result, generalErr(err, fmt.Sprintf(noSuchAppMsg, app), ClientOperationCode)
+		}
+		ephem_val = driverrc
 	}
 
 	// Create the master deployment config
-	if ephemeral {
-		// If we couldn't find an rc (deployment) of a dc it's
-		// an error
-		if driverrc == "" || driverdc == "" {
-			return result, generalErr(err, fmt.Sprintf(noSuchAppMsg, app), ClientOperationCode)
-		}
-	} else {
-		// If the ephemeral flag is not set, wipe out driverrc. This will cause the sparkMaster to
-		// be constructed without the ephemeral label
-		driverrc = ""
-	}
-	// Create the master deployment config
-	masterdc := sparkMaster(namespace, sparkimage, mastercount, clustername, masterconfdir, finalconfig.SparkMasterConfig, driverrc)
+	masterdc := sparkMaster(namespace, sparkimage, mastercount, clustername, masterconfdir, finalconfig.SparkMasterConfig, ephem_val)
 
 	// Create the services that will be associated with the master pod
 	// They will be created with selectors based on the pod labels
@@ -472,14 +454,14 @@ func CreateCluster(
 	}
 
 	// Now that the creation actually worked, label the dc if the app value was passed
-	if driverdc != "" {
-		driver, err := dcc.Get(driverdc)
+	if driverrc != "" {
+		driver, err := rcc.Get(driverrc)
 		if err == nil {
 			if driver.Labels == nil {
 				driver.Labels = map[string]string{}
 			}
 			driver.Labels[driverLabel] = clustername
-			dcc.Update(driver)
+			rcc.Update(driver)
 		}
 	}
 
@@ -526,18 +508,17 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 			// fall through and cleanup
 			delete = true
 		} else if ephemeral, ok := master.Labels[ephemeralLabel]; ok {
-			// app may be a pod name, get the dc value
-			deployment, driverdc := getDriverDeployment(app, namespace, client)
+			deployment := getDriverDeployment(app, namespace, client)
 			if deployment != ephemeral {
 				info = append(info, "cluster is not linked to app")
 			} else {
-				// Either the driver dc has been deleted, or it's been scaled to zero,
-				// or the application completed and the driver has not been scaled.
-				// In all cases we consider the app complete and delete the cluster
-				driver, err := dcc.Get(driverdc)
+				// If the driver has been scaled to zero, or if the application
+				// completed and the repl count is 1 then delete (because in the
+				// completed case the driver is the only instance)
+				repl, err := rcc.Get(deployment)
 				delete = err != nil ||
-					driver.Spec.Replicas == 0 ||
-					(appstatus == "completed" && driver.Spec.Replicas == 1)
+					repl.Spec.Replicas == 0 ||
+					(appstatus == "completed" && repl.Spec.Replicas == 1)
 				if !delete {
 					info = append(info, "driver replica count > 0 (or > 1 for completed app)")
 				}
@@ -569,6 +550,8 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 		err = dcc.Delete(deployments.Items[i].Name)
 		if err != nil {
 			info = append(info, "unable to delete deployment config "+deployments.Items[i].Name+" ("+err.Error()+")")
+		} else {
+			foundSomething = true
 		}
 	}
 
@@ -580,6 +563,8 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 		err = rcc.Delete(repls.Items[i].Name, nil)
 		if err != nil {
 			info = append(info, "unable to delete replication controller " + repls.Items[i].Name + " (" + err.Error() + ")")
+		} else {
+			foundSomething = true
 		}
 	}
 
@@ -596,6 +581,7 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 					info = append(info, "unable to delete deployer pod " + pods.Items[p].Name + " ("+err.Error()+")")
 				} else {
 					info = append(info, "deleted deployer pod " + pods.Items[p].Name)
+					foundSomething = true
 				}
 			}
 		}
@@ -606,6 +592,8 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 		err = pc.Delete(pods.Items[i].Name, nil)
 		if err != nil {
 			info = append(info, "unable to delete replication controller " + repls.Items[i].Name + " (" + err.Error() + ")")
+		} else {
+			foundSomething = true
 		}
 	}
 
@@ -623,6 +611,8 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 		err = sc.Delete(srvs.Items[i].Name)
 		if err != nil {
 			info = append(info, "unable to delete service " + srvs.Items[i].Name + " (" + err.Error() + ")")
+		} else {
+			foundSomething = true
 		}
 	}
 	// If we found some part of a cluster, then there is no error
@@ -732,15 +722,16 @@ func FindClusters(namespace string, osclient *oclient.Client, client kclient.Int
 	var mcount, wcount int
 	dcc := osclient.DeploymentConfigs(namespace)
 	sc := client.Services(namespace)
+	rc := client.ReplicationControllers(namespace)
 	dc := osclient.DeploymentConfigs(namespace)
 
-	// If app is not null, find the matching dc and look for a driver label.
+	// If app is not null, look for a driver label.
 	// If we find it get the name of the cluster and call FindSingleCluster.
 	// If not, the list is empty
 	if app != "" {
-		_, dcname := getDriverDeployment(app, namespace, client)
-		if dcname != "" {
-			driver, err := dc.Get(dcname)
+		deployment := getDriverDeployment(app, namespace, client)
+		if deployment != "" {
+			driver, err := rc.Get(deployment)
 			if err == nil && driver != nil {
 				if clustername, ok := driver.Labels[driverLabel]; ok {
 					c, err := FindSingleCluster(clustername, namespace, osclient, client)
