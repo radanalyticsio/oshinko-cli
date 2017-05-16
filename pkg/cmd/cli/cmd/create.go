@@ -67,7 +67,7 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 	cmd.Flags().Bool("exposeui", true, "True will expose the Spark WebUI via a route")
 	if extended {
 		cmd.Flags().BoolP("ephemeral", "e", false, "Treat the cluster as ephemeral. The 'app' flag must also be set.")
-		cmd.Flags().String("app", "", "Associate the cluster with an app (value may be the name of a pod, deployment, or deploymentconfig)")
+		cmd.Flags().String("app", "", "Associate the cluster with an app (value may be the name of a pod or deployment)")
 	}
 	return cmd
 }
