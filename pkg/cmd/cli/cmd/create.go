@@ -81,10 +81,14 @@ func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string)
 	config.SparkImage = o.Image
 	config.Name = o.StoredConfig
 	config.ExposeWebUI = o.ExposeWebUI
-	_, err := clusters.CreateCluster(o.Name, o.Project, defaultImage, &config, o.Client, o.KClient, o.App, o.Ephemeral)
+	result, err := clusters.CreateCluster(o.Name, o.Project, defaultImage, &config, o.Client, o.KClient, o.App, o.Ephemeral)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "cluster \"%s\" created \n", o.Name)
+	if result.Ephemeral == "<shared>" {
+		fmt.Fprintf(out, "shared cluster \"%s\" created \n", o.Name)
+	} else {
+		fmt.Fprintf(out, "ephemeral cluster \"%s\" created \n", o.Name)
+	}
 	return nil
 }
