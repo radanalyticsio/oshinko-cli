@@ -375,10 +375,12 @@ func CreateCluster(
 		driverrc = getDriverDeployment(app, namespace, client)
 	}
 	if ephemeral {
-		// If we couldn't find an rc (deployment) it's an error
-		if driverrc == "" {
-			return result, generalErr(err, fmt.Sprintf(noSuchAppMsg, app), ClientOperationCode)
-		}
+		// // If we couldn't find an rc (deployment) it's an error
+		// if driverrc == "" {
+		// 	return result, generalErr(err, fmt.Sprintf(noSuchAppMsg, app), ClientOperationCode)
+		// }
+
+		// If we can't find an rc then we just make a long-running cluster
 		ephem_val = driverrc
 	}
 
@@ -481,6 +483,11 @@ func CreateCluster(
 	result.MasterCount = 0
 	result.WorkerCount = 0
 	result.Pods = []SparkPod{}
+	if ephem_val != "" {
+		result.Ephemeral = ephem_val
+	} else {
+		result.Ephemeral = "<shared>"
+	}
 
 	return result, nil
 }
@@ -689,7 +696,7 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 	if ephemeral, ok := master.Labels[ephemeralLabel]; ok {
 		result.Ephemeral = ephemeral
 	} else {
-		result.Ephemeral = "shared"
+		result.Ephemeral = "<shared>"
 	}
 
 	// Report pods
@@ -794,7 +801,7 @@ func FindClusters(namespace string, osclient *oclient.Client, client kclient.Int
 				if ephemeral, ok := master.Labels[ephemeralLabel]; ok {
 					citem.Ephemeral = ephemeral
 				} else {
-					citem.Ephemeral = "shared"
+					citem.Ephemeral = "<shared>"
 				}
 			}
 			result = append(result, *citem)
