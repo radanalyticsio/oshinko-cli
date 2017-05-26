@@ -243,14 +243,15 @@ func sparkMaster(namespace, image string, replicas int, clustername, sparkconfdi
 		Label(typeLabel, masterType)
 
 	// Create a container with the correct ports and start command
-	httpProbe := probes.NewExecProbe([]string{"/bin/bash", "-c", "curl localhost:8080 | grep -e Status.*ALIVE"})
-	httpProbe.InitialDelaySeconds = 10
+	liveness := probes.NewExecProbe([]string{"/bin/bash", "-c", "curl localhost:8080 | grep -e Status.*ALIVE"})
+	liveness.InitialDelaySeconds = 10
+	readiness := probes.NewHTTPGetProbe(webPort)
 	masterp := ocon.ContainerPort(masterPortName, masterPort)
 	webp := ocon.ContainerPort(webPortName, webPort)
 	cont := ocon.Container(dc.Name, image).
 		Ports(masterp, webp).
-		SetLivenessProbe(httpProbe).
-		SetReadinessProbe(httpProbe).EnvVars(makeEnvVars(clustername, sparkconfdir))
+		SetLivenessProbe(liveness).
+		SetReadinessProbe(readiness).EnvVars(makeEnvVars(clustername, sparkconfdir))
 
 	if sparkmasterconfig != "" {
 		pt = pt.SetConfigMapVolume(sparkmasterconfig)
