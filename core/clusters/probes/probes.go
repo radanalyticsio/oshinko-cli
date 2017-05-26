@@ -13,3 +13,10 @@ func NewHTTPGetProbe(port int) kapi.Probe {
 	prb := kapi.Probe{Handler: hnd}
 	return prb
 }
+
+func NewExecProbe(cmd []string) kapi.Probe {
+	act := kapi.ExecAction{Command: cmd}
+	hnd := kapi.Handler{Exec: &act}
+	prb := kapi.Probe{Handler: hnd}
+	return prb
+}
