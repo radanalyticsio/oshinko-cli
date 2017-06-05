@@ -7,7 +7,7 @@ os::test::junit::declare_suite_start "cmd/get"
 os::cmd::expect_success "oc whoami"
 os::cmd::expect_success "oc project default/127-0-0-1:28443/system:admin"
 # verify some default commands
-os::cmd::expect_failure_and_text "_output/oshinko-cli get" "The token is not provided."
+os::cmd::expect_success_and_text "_output/oshinko-cli get" "There are no clusters in any projects. You can create a cluster with the 'create' command."
 os::cmd::expect_success "_output/oshinko-cli version"
 os::cmd::expect_success "oc login -u oshinko -p password"
 os::cmd::expect_success "oc new-project oshinko"
