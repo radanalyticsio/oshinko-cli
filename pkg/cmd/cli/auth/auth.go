@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"io"
 	"os"
+	"strings"
 
 	kapi "k8s.io/kubernetes/pkg/api"
 	kapierrors "k8s.io/kubernetes/pkg/api/errors"
@@ -18,7 +19,7 @@ import (
 	"k8s.io/kubernetes/pkg/util/sets"
 
 	"github.com/openshift/origin/pkg/client"
-	"github.com/openshift/origin/pkg/cmd/cli/config"
+	cliconfig "github.com/openshift/origin/pkg/cmd/cli/config"
 	"github.com/openshift/origin/pkg/cmd/flagtypes"
 	osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	"github.com/openshift/origin/pkg/user/api"
@@ -43,15 +44,14 @@ type AuthOptions struct {
 	Reader             io.Reader
 	Out                io.Writer
 	Client             *client.Client
-	KClient            *kclient.Client
+	KClient            kclient.Interface
 
 	// cert data to be used when authenticating
 	CertFile string
 	KeyFile  string
-
 	Token string
-
 	PathOptions *kclientcmd.PathOptions
+	ClientFn     func() (*client.Client, kclient.Interface, error)
 }
 
 func (o *AuthOptions) tokenProvided() bool {
@@ -63,7 +63,6 @@ func (o AuthOptions) whoAmI() (*api.User, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	return whoAmI(client)
 }
 
@@ -121,10 +120,23 @@ func (o *AuthOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args 
 	o.CAFile = kcmdutil.GetFlagString(cmd, "certificate-authority")
 	o.InsecureTLS = kcmdutil.GetFlagBool(cmd, "insecure-skip-tls-verify")
 	o.Token = kcmdutil.GetFlagString(cmd, "token")
-
 	o.DefaultNamespace, _, _ = f.OpenShiftClientConfig.Namespace()
+	o.PathOptions = cliconfig.NewPathOptions(cmd)
 
-	o.PathOptions = config.NewPathOptions(cmd)
+	// for looking at kubeconfig
+	o.Config, err = f.OpenShiftClientConfig.ClientConfig()
+	if err != nil {
+		var errstrings []string
+		if (strings.Contains(err.Error(), "Missing or incomplete configuration info")){
+			errstrings = append(errstrings, "oshinko-cli cannot find KUBECONFIG file.Please login or provide --token value.")
+		} else {
+			errstrings = append(errstrings, err.Error())
+		}
+		return fmt.Errorf(strings.Join(errstrings, "\n"))
+	}
+	o.ClientFn = func() (*client.Client, kclient.Interface, error) {
+		return f.Clients()
+	}
 
 	return nil
 }
@@ -158,7 +170,7 @@ func (o *AuthOptions) getClientConfig() (*restclient.Config, error) {
 	}
 
 	// normalize the provided server to a format expected by config
-	serverNormalized, err := config.NormalizeServerURL(o.Server)
+	serverNormalized, err := cliconfig.NormalizeServerURL(o.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -233,10 +245,7 @@ func (o *AuthOptions) getClientConfig() (*restclient.Config, error) {
 	if !o.APIVersion.Empty() {
 		clientConfig.GroupVersion = &o.APIVersion
 	}
-
 	o.Config = clientConfig
-	//o.KClient = kclient.New(clientConfig)
-
 	return o.Config, nil
 }
 
@@ -295,12 +304,63 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 			return "", fmt.Errorf("The token provided is invalid or expired.\n\n")
 		}
 	} else {
-		return "", fmt.Errorf("The token is not provided.\n\n")
+		config := o.StartingKubeConfig
+		currentContext := config.Contexts[config.CurrentContext]
+		var currentProject string
+		if currentContext != nil {
+			currentProject = currentContext.Namespace
+		}
+
+		var err error
+		o.Client, o.KClient, err = o.ClientFn()
+		if err != nil {
+			return msg, err
+		}
+		me, err := whoAmI(o.Client)
+		if err != nil {
+			return "", err
+		}
+		o.Username = me.Name
+		msg += fmt.Sprintf("Logged into %q as %q using the token provided.\n\n", o.Config.Host, o.Username)
+
+		switch err := confirmProjectAccess(currentProject, o.Client, o.KClient); {
+		case osclientcmd.IsForbidden(err):
+			return msg, fmt.Errorf("you do not have rights to view project %q.", currentProject)
+		case kapierrors.IsNotFound(err):
+			return msg, fmt.Errorf("the project %q specified in your config does not exist.", currentProject)
+		case err != nil:
+			return msg, err
+		}
+
+		defaultContextName := cliconfig.GetContextNickname(currentContext.Namespace, currentContext.Cluster, currentContext.AuthInfo)
+
+		// if they specified a project name and got a generated context, then only show the information they care about.  They won't recognize
+		// a context name they didn't choose
+		if config.CurrentContext == defaultContextName {
+			msg += fmt.Sprintf( "Using project %q on server %q.\n", currentProject, o.Config.Host)
+
+		} else {
+			msg += fmt.Sprintf("Using project %q from context named %q on server %q.\n", currentProject, config.CurrentContext, o.Config.Host)
+		}
 	}
 
 	msg += fmt.Sprintf("Login successful.\n\n")
-
 	return msg, nil
+}
+
+func confirmProjectAccess(currentProject string, oClient *client.Client, kClient kclient.Interface) error {
+	_, projectErr := oClient.Projects().Get(currentProject)
+	if !kapierrors.IsNotFound(projectErr) {
+		return projectErr
+	}
+
+	// at this point we know the error is a not found, but we'll test namespaces just in case we're running on kube
+	if _, err := kClient.Namespaces().Get(currentProject); err == nil {
+		return nil
+	}
+
+	// otherwise return the openshift error default
+	return projectErr
 }
 
 func (o *AuthOptions) GatherProjectInfo() (string, error) {

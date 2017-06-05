@@ -272,7 +272,7 @@ func countWorkers(client kclient.PodInterface, clustername string) (int, *kapi.P
 }
 
 // Create a cluster and return the representation
-func CreateCluster(clustername, namespace, sparkimage string, config *ClusterConfig, osclient *oclient.Client, client *kclient.Client) (SparkCluster, error) {
+func CreateCluster(clustername, namespace, sparkimage string, config *ClusterConfig, osclient *oclient.Client, client kclient.Interface) (SparkCluster, error) {
 
 	var masterconfdir string
 	var workerconfdir string
@@ -423,7 +423,7 @@ func waitForCount(client kclient.ReplicationControllerInterface, name string, co
 	}
 }
 
-func DeleteCluster(clustername, namespace string, osclient *oclient.Client, client *kclient.Client) (string, error) {
+func DeleteCluster(clustername, namespace string, osclient *oclient.Client, client kclient.Interface) (string, error) {
 	var foundSomething bool = false
 	info := []string{}
 	scalerepls := []string{}
@@ -514,7 +514,7 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 }
 
 // Find a cluster and return its representation
-func FindSingleCluster(name, namespace string, osclient *oclient.Client, client *kclient.Client) (SparkCluster, error) {
+func FindSingleCluster(name, namespace string, osclient *oclient.Client, client kclient.Interface) (SparkCluster, error) {
 
 	addpod := func(p kapi.Pod) SparkPod {
 		return SparkPod{
@@ -598,7 +598,7 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 }
 
 // Find all clusters and return their representation
-func FindClusters(namespace string, osclient *oclient.Client, client *kclient.Client) ([]SparkCluster, error) {
+func FindClusters(namespace string, osclient *oclient.Client, client kclient.Interface) ([]SparkCluster, error) {
 
 	var result []SparkCluster = []SparkCluster{}
 
@@ -711,7 +711,7 @@ func scaleDep(dcc oclient.DeploymentConfigInterface, clustername string, count i
 // Update a cluster and return the new representation
 // This routine supports the same stored config semantics as used in cluster creation
 // but at this point only allows updating the master and worker counts.
-func UpdateCluster(name, namespace string, config *ClusterConfig, osclient *oclient.Client, client *kclient.Client) (SparkCluster, error) {
+func UpdateCluster(name, namespace string, config *ClusterConfig, osclient *oclient.Client, client kclient.Interface) (SparkCluster, error) {
 
 	var result SparkCluster = SparkCluster{}
 	clustername := name
@@ -761,7 +761,7 @@ func UpdateCluster(name, namespace string, config *ClusterConfig, osclient *ocli
 // Scale a cluster
 // This routine supports a specific scale operation based on immediate values for
 // master and worker counts and does not consider stored configs.
-func ScaleCluster(name, namespace string, masters, workers int, osclient *oclient.Client, client *kclient.Client) error {
+func ScaleCluster(name, namespace string, masters, workers int, osclient *oclient.Client, client kclient.Interface) error {
 
 	clustername := name
 
