@@ -600,7 +600,7 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 	for i := range pods.Items {
 		err = pc.Delete(pods.Items[i].Name, nil)
 		if err != nil {
-			info = append(info, "unable to delete replication controller " + repls.Items[i].Name + " (" + err.Error() + ")")
+			info = append(info, "unable to delete pod " + pods.Items[i].Name + " (" + err.Error() + ")")
 		} else {
 			foundSomething = true
 		}
