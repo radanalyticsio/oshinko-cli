@@ -27,8 +27,6 @@ const clusterConfigMsg = "invalid cluster configuration"
 const missingConfigMsg = "unable to find spark configuration '%s'"
 const findDepConfigMsg = "unable to find deployment configs"
 const createDepConfigMsg = "unable to create deployment config '%s'"
-const replMsgWorker = "unable to find replication controller for spark worker"
-const replMsgMaster = "unable to find replication controller for spark master"
 const depMsg = "unable to find deployment config for spark %s"
 const masterSrvMsg = "unable to create spark master service endpoint"
 const masterWebSrvMsg = "unable to create spark master web service endpoint"
@@ -39,7 +37,7 @@ const noClusterForDriverMsg = "no cluster found for app '%s'"
 const ephemeralDelMsg = "cluster not deleted '%s'"
 const podListMsg = "unable to retrive pod list"
 const sparkImageMsg = "no spark image specified"
-const noSuchAppMsg = "did not find app '%s'"
+const clusterExistsMsg = "cluster '%s' already exists%s"
 
 const typeLabel = "oshinko-type"
 const clusterLabel = "oshinko-cluster"
@@ -124,7 +122,7 @@ func retrieveServiceURL(client kclient.ServiceInterface, stype, clustername stri
 		}
 		return scheme + srv.Name + ":" + strconv.Itoa(int(srv.Spec.Ports[0].Port))
 	}
-	return ""
+	return "<missing>"
 }
 
 func retrieveRouteForService(client oclient.RouteInterface, stype, clustername string) string {
@@ -337,6 +335,20 @@ func CreateCluster(
 
 	masterhost := clustername
 
+	// Check to see if a cluster already exists of the same name (complete or incomplete)
+	existing := SparkCluster{}
+	findClusterBody(clustername, namespace, osclient, client, &existing)
+	if !CheckNoCluster(&existing) {
+		var msg string
+		if existing.Status != "Running" {
+			msg = fmt.Sprintf(clusterExistsMsg, clustername, " (incomplete)")
+		} else {
+			msg = fmt.Sprintf(clusterExistsMsg, clustername, "")
+		}
+		return result, generalErr(nil, msg, ComponentExistsCode)
+	}
+
+
 	// Copy any named config referenced and update it with any explicit config values
 	finalconfig, err := GetClusterConfig(config, client.ConfigMaps(namespace))
 	if err != nil {
@@ -378,11 +390,6 @@ func CreateCluster(
 		driverrc = getDriverDeployment(app, namespace, client)
 	}
 	if ephemeral {
-		// // If we couldn't find an rc (deployment) it's an error
-		// if driverrc == "" {
-		// 	return result, generalErr(err, fmt.Sprintf(noSuchAppMsg, app), ClientOperationCode)
-		// }
-
 		// If we can't find an rc then we just make a long-running cluster
 		ephem_val = driverrc
 	}
@@ -480,12 +487,7 @@ func CreateCluster(
 	result.Image = sparkimage
 	result.MasterURL = retrieveServiceURL(sc, masterType, clustername)
 	result.MasterWebURL = retrieveServiceURL(sc, webuiType, clustername)
-	if result.MasterURL == "" {
-		result.Status = "MasterServiceMissing"
-
-	} else {
-		result.Status = "Running"
-	}
+	result.Status = "Running"
 	result.Config = finalconfig
 	result.MasterCount = 0
 	result.WorkerCount = 0
@@ -638,6 +640,61 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 	return strings.Join(info, ", "), nil
 }
 
+func findClusterBody(clustername, namespace string, osclient *oclient.Client, client *kclient.Client, result *SparkCluster) {
+
+	sc := client.Services(namespace)
+	dc := osclient.DeploymentConfigs(namespace)
+
+	result.Name = clustername
+	result.Namespace = namespace
+	result.Href = "/clusters/" + clustername
+
+	// TODO make something real for status
+	result.Status = "Running"
+
+	// Note, we do not report an error here since we are
+	// reporting on multiple clusters. Instead cnt will be 0.
+	worker, err := dc.Get(workername(clustername))
+	if err == nil {
+		result.WorkerCount = int(worker.Status.Replicas)
+		result.Config.WorkerCount = int(worker.Spec.Replicas)
+	} else {
+		result.WorkerCount = -1
+		result.Config.WorkerCount = -1
+		result.Status = "Incomplete"
+	}
+
+	// TODO we only want to count running pods (not terminating)
+	result.MasterURL = retrieveServiceURL(sc, masterType, clustername)
+	if result.MasterURL == "<missing>" {
+		result.Status = "Incomplete"
+	}
+	result.MasterWebURL = retrieveServiceURL(sc, webuiType, clustername)
+	if result.MasterWebURL == "<missing>" {
+		result.Status = "Incomplete"
+	}
+	result.MasterWebRoute = retrieveRouteForService(osclient.Routes(namespace), webuiType, clustername)
+
+	result.Ephemeral = "<shared>"
+	master, err := dc.Get(mastername(clustername))
+	if err == nil {
+		result.MasterCount = int(master.Status.Replicas)
+		result.Config.MasterCount = int(master.Spec.Replicas)
+		if ephemeral, ok := master.Labels[ephemeralLabel]; ok {
+			result.Ephemeral = ephemeral
+		}
+	} else {
+		result.MasterCount = -1
+		result.Config.MasterCount = -1
+		result.Status = "Incomplete"
+	}
+}
+
+func CheckNoCluster(cluster *SparkCluster) bool {
+	return cluster.Status == "Incomplete" && cluster.WorkerCount == -1 && cluster.MasterCount == -1 &&
+	       cluster.MasterURL == "<missing>" && cluster.MasterWebURL == "<missing>" && len(cluster.Pods) == 0
+}
+
 // Find a cluster and return its representation
 func FindSingleCluster(name, namespace string, osclient *oclient.Client, client kclient.Interface) (SparkCluster, error) {
 
@@ -648,125 +705,57 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 			Type:   p.Labels[typeLabel],
 		}
 	}
-
-	clustername := name
-
-	var result SparkCluster = SparkCluster{}
-
-	// Before we do further checks, make sure that we have deploymentconfigs
-	// If either the master or the worker deploymentconfig are missing, we
-	// assume that the cluster is missing. These are the base objects that
-	// we use to create a cluster
-	ok, master, err := checkForDeploymentConfigs(osclient.DeploymentConfigs(namespace), clustername)
-	if err != nil {
-		return result, generalErr(err, findDepConfigMsg, ClientOperationCode)
-	}
-	if !ok {
-		return result, generalErr(nil, fmt.Sprintf(noSuchClusterMsg, clustername), NoSuchClusterCode)
-	}
+        var result SparkCluster
+	findClusterBody(name, namespace, osclient, client, &result)
 
 	pc := client.Pods(namespace)
-	sc := client.Services(namespace)
-
-	rcc := client.ReplicationControllers(namespace)
-	mrepl, err := getReplController(rcc, clustername, masterType)
+	pods, err := pc.List(makeSelector("", name))
 	if err != nil {
-		return result, generalErr(err, replMsgMaster, ClientOperationCode)
-	} else if mrepl == nil {
-		return result, generalErr(err, replMsgMaster, ClusterIncompleteCode)
-	}
-	wrepl, err := getReplController(rcc, clustername, workerType)
-	if err != nil {
-		return result, generalErr(err, replMsgWorker, ClientOperationCode)
-	} else if wrepl == nil {
-		return result, generalErr(err, replMsgWorker, ClusterIncompleteCode)
-	}
-	// TODO (tmckay) we should add the spark master and worker configuration values here.
-	// the most likely thing to do is store them in an annotation
-
-	// TODO (tmckay) we need to figure out how to do desired/actual count like the oc
-	result.Name = name
-	result.Namespace = namespace
-	result.Href = "/clusters/" + clustername
-	result.WorkerCount = int(wrepl.Status.Replicas)
-	result.MasterCount = int(mrepl.Status.Replicas)
-	result.Config.WorkerCount = int(wrepl.Spec.Replicas)
-	result.Config.MasterCount = int(mrepl.Spec.Replicas)
-	result.MasterURL = retrieveServiceURL(sc, masterType, clustername)
-	result.MasterWebURL = retrieveServiceURL(sc, webuiType, clustername)
-	result.MasterWebRoute = retrieveRouteForService(osclient.Routes(namespace), webuiType, clustername)
-	if result.MasterURL == "" {
-		result.Status = "MasterServiceMissing"
-	} else {
-		result.Status = "Running"
-	}
-	if ephemeral, ok := master.Labels[ephemeralLabel]; ok {
-		result.Ephemeral = ephemeral
-	} else {
-		result.Ephemeral = "<shared>"
+		return result, generalErr(err, podListMsg, ClientOperationCode)
 	}
 
 	// Report pods
 	result.Pods = []SparkPod{}
-	selectorlist := makeSelector(masterType, clustername)
-	pods, err := pc.List(selectorlist)
-	if err != nil {
-		return result, generalErr(err, podListMsg, ClientOperationCode)
-	}
 	for i := range pods.Items {
 		result.Pods = append(result.Pods, addpod(pods.Items[i]))
 	}
-
-	selectorlist = makeSelector(workerType, clustername)
-	pods, err = pc.List(selectorlist)
-	if err != nil {
-		return result, generalErr(err, podListMsg, ClientOperationCode)
+	if CheckNoCluster(&result) {
+		return result, generalErr(nil, fmt.Sprintf(noSuchClusterMsg, name), NoSuchClusterCode)
 	}
-	for i := range pods.Items {
-		result.Pods = append(result.Pods, addpod(pods.Items[i]))
-	}
-
 	return result, nil
 }
 
 // Find all clusters and return their representation
 func FindClusters(namespace string, osclient *oclient.Client, client kclient.Interface, app string) ([]SparkCluster, error) {
 
-	var result []SparkCluster = []SparkCluster{}
-	var mcount, wcount int
 	dcc := osclient.DeploymentConfigs(namespace)
-	sc := client.Services(namespace)
-	rc := client.ReplicationControllers(namespace)
-	dc := osclient.DeploymentConfigs(namespace)
+	pc := client.Pods(namespace)
 
 	// If app is not null, look for a driver label.
 	// If we find it get the name of the cluster and call FindSingleCluster.
-	// If not, the list is empty
 	if app != "" {
 		deployment := getDriverDeployment(app, namespace, client)
 		if deployment != "" {
 			driver, err := rc.Get(deployment)
 			if err == nil && driver != nil {
 				if clustername, ok := driver.Labels[driverLabel]; ok {
-					c, err := FindSingleCluster(clustername, namespace, osclient, client)
-					if err == nil {
-						result = append(result, c)
-					}
+					result := make([]SparkCluster, 1, 1)
+					result[0], err = FindSingleCluster(clustername, namespace, osclient, client)
 					return result, err
 				}
 			}
 		}
-		return result, generalErr(nil, fmt.Sprintf(noClusterForDriverMsg, app), NoSuchClusterCode)
+		return []SparkCluster{}, generalErr(nil, fmt.Sprintf(noClusterForDriverMsg, app), NoSuchClusterCode)
 	}
 
 	// Create a map so that we can track clusters by name while we
 	// find out information about them
-	clist := map[string]*SparkCluster{}
+	clist := map[string]bool{}
 
 	// Get all of the master dcs
 	dcs, err := dcc.List(makeSelector(masterType, ""))
 	if err != nil {
-		return result, generalErr(err, mastermsg, ClientOperationCode)
+		return []SparkCluster{}, generalErr(err, mastermsg, ClientOperationCode)
 	}
 
 	// From the list of master pods, figure out which clusters we have
@@ -813,6 +802,12 @@ func FindClusters(namespace string, osclient *oclient.Client, client kclient.Int
 			}
 			result = append(result, *citem)
 		}
+	}
+	result := make([]SparkCluster, len(clist), len(clist))
+	idx := 0
+	for k, _ := range clist {
+		findClusterBody(k, namespace, osclient, client, &result[idx])
+		idx++
 	}
 	return result, nil
 }
