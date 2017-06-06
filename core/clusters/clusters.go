@@ -31,6 +31,7 @@ const replMsgWorker = "unable to find replication controller for spark worker"
 const replMsgMaster = "unable to find replication controller for spark master"
 const depMsg = "unable to find deployment config for spark %s"
 const masterSrvMsg = "unable to create spark master service endpoint"
+const masterWebSrvMsg = "unable to create spark master web service endpoint"
 const mastermsg = "unable to find spark masters"
 const updateDepMsg = "unable to update deployment config for spark %s"
 const noSuchClusterMsg = "no such cluster '%s'"
@@ -422,14 +423,18 @@ func CreateCluster(
 	sc := client.Services(namespace)
 	_, err = sc.Create(&mastersv.Service)
 	if err != nil {
-		// Since we create the master and workers, try to clean up
+		// Since we've created things, try to clean up
 		DeleteCluster(clustername, namespace, osclient, client, "", "")
 		return result, generalErr(err, masterSrvMsg, createCode(err))
 	}
 
-	// Note, if spark webui service fails for some reason we can live without it
-	// TODO ties into cluster status, make a note if the service is missing
-	sc.Create(&websv.Service)
+
+	_, err = sc.Create(&websv.Service)
+	if err != nil {
+		// Since we've created things, try to clean up
+		DeleteCluster(clustername, namespace, osclient, client, "", "")
+		return result, generalErr(err, masterWebSrvMsg, createCode(err))
+	}
 
 	// We will expose the Spark master webui unless we are told not to do it
 	if config.ExposeWebUI {
