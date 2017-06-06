@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 	osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
-	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters"
+	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	"github.com/spf13/cobra"
 	"io"
 	kapierrors "k8s.io/kubernetes/pkg/api/errors"

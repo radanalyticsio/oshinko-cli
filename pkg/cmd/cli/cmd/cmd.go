@@ -3,11 +3,11 @@ package cmd
 import (
 	"fmt"
 	osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	"github.com/radanalyticsio/oshinko-cli/core/clusters"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"github.com/radanalyticsio/oshinko-cli/core/clusters"
 )
 
 type CmdOptions struct {
