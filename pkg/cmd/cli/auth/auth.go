@@ -2,9 +2,13 @@ package auth
 
 import (
 	//"errors"
+	"crypto/x509"
 	"fmt"
 	"github.com/spf13/cobra"
 	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -22,8 +26,15 @@ import (
 	cliconfig "github.com/openshift/origin/pkg/cmd/cli/config"
 	"github.com/openshift/origin/pkg/cmd/flagtypes"
 	osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
+
+	"bytes"
+	"crypto/tls"
+	"github.com/openshift/origin/pkg/cmd/util/term"
 	"github.com/openshift/origin/pkg/user/api"
+	kterm "k8s.io/kubernetes/pkg/util/term"
 )
+
+const defaultClusterURL = "https://localhost:8443"
 
 //=====================================
 type AuthOptions struct {
@@ -47,11 +58,11 @@ type AuthOptions struct {
 	KClient            kclient.Interface
 
 	// cert data to be used when authenticating
-	CertFile string
-	KeyFile  string
-	Token string
+	CertFile    string
+	KeyFile     string
+	Token       string
 	PathOptions *kclientcmd.PathOptions
-	ClientFn     func() (*client.Client, kclient.Interface, error)
+	ClientFn    func() (*client.Client, kclient.Interface, error)
 }
 
 func (o *AuthOptions) tokenProvided() bool {
@@ -64,6 +75,10 @@ func (o AuthOptions) whoAmI() (*api.User, error) {
 		return nil, err
 	}
 	return whoAmI(client)
+}
+
+func (o *AuthOptions) serverProvided() bool {
+	return (len(o.Server) > 0)
 }
 
 func (o *AuthOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args []string) error {
@@ -127,7 +142,7 @@ func (o *AuthOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args 
 	o.Config, err = f.OpenShiftClientConfig.ClientConfig()
 	if err != nil {
 		var errstrings []string
-		if (strings.Contains(err.Error(), "Missing or incomplete configuration info")){
+		if strings.Contains(err.Error(), "Missing or incomplete configuration info") {
 			errstrings = append(errstrings, "oshinko-cli cannot find KUBECONFIG file.Please login or provide --token value.")
 		} else {
 			errstrings = append(errstrings, err.Error())
@@ -159,14 +174,13 @@ func (o *AuthOptions) getClientConfig() (*restclient.Config, error) {
 
 	if len(o.Server) == 0 {
 		// we need to have a server to talk to
-		//if term.IsTerminal(o.Reader) {
-		//	for !o.serverProvided() {
-		//		defaultServer := defaultClusterURL
-		//		promptMsg := fmt.Sprintf("Server [%s]: ", defaultServer)
-		//
-		//		o.Server = cmdutil.PromptForStringWithDefault(o.Reader, o.Out, defaultServer, promptMsg)
-		//	}
-		//}
+		if kterm.IsTerminal(o.Reader) {
+			for !o.serverProvided() {
+				defaultServer := defaultClusterURL
+				promptMsg := fmt.Sprintf("Server [%s]: ", defaultServer)
+				o.Server = term.PromptForStringWithDefault(o.Reader, o.Out, defaultServer, promptMsg)
+			}
+		}
 	}
 
 	// normalize the provided server to a format expected by config
@@ -177,67 +191,44 @@ func (o *AuthOptions) getClientConfig() (*restclient.Config, error) {
 	o.Server = serverNormalized
 	clientConfig.Host = o.Server
 
+	// use specified CA or find existing CA
 	if len(o.CAFile) > 0 {
 		clientConfig.CAFile = o.CAFile
-
-	} else {
-		// check all cluster stanzas to see if we already have one with this URL that contains a client cert
-		for _, cluster := range o.StartingKubeConfig.Clusters {
-			if cluster.Server == clientConfig.Host {
-				if len(cluster.CertificateAuthority) > 0 {
-					clientConfig.CAFile = cluster.CertificateAuthority
-					break
-				}
-
-				if len(cluster.CertificateAuthorityData) > 0 {
-					clientConfig.CAData = cluster.CertificateAuthorityData
-					break
-				}
+		clientConfig.CAData = nil
+	} else if caFile, caData, ok := findExistingClientCA(clientConfig.Host, *o.StartingKubeConfig); ok {
+		clientConfig.CAFile = caFile
+		clientConfig.CAData = caData
+	}
+	// try to TCP connect to the server to make sure it's reachable, and discover
+	// about the need of certificates or insecure TLS
+	if err := dialToServer(*clientConfig); err != nil {
+		switch err.(type) {
+		// certificate authority unknown, check or prompt if we want an insecure
+		// connection or if we already have a cluster stanza that tells us to
+		// connect to this particular server insecurely
+		case x509.UnknownAuthorityError, x509.HostnameError, x509.CertificateInvalidError:
+			if o.InsecureTLS ||
+				hasExistingInsecureCluster(*clientConfig, *o.StartingKubeConfig) ||
+				promptForInsecureTLS(o.Reader, o.Out, err) {
+				clientConfig.Insecure = true
+				clientConfig.CAFile = ""
+				clientConfig.CAData = nil
+			} else {
+				return nil, osclientcmd.GetPrettyErrorForServer(err, o.Server)
 			}
-		}
-	}
-
-	// ping to check if server is reachable
-	osClient, err := client.New(clientConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	result := osClient.Get().AbsPath("/").Do()
-	if result.Error() != nil {
-		switch {
-		case o.InsecureTLS:
-			clientConfig.Insecure = true
-			// insecure, clear CA info
-			clientConfig.CAFile = ""
-			clientConfig.CAData = nil
-
-		// certificate issue, prompt user for insecure connection
-		case osclientcmd.IsCertificateAuthorityUnknown(result.Error()):
-			// check to see if we already have a cluster stanza that tells us to use --insecure for this particular server.  If we don't, then prompt
-			//clientConfigToTest := *clientConfig
-			//clientConfigToTest.Insecure = true
-			//matchingClusters := getMatchingClusters(clientConfigToTest, *o.StartingKubeConfig)
-			//
-			//if len(matchingClusters) > 0 {
-			//	clientConfig.Insecure = true
-			//
-			//} else if term.IsTerminal(o.Reader) {
-			fmt.Fprintln(o.Out, "The server uses a certificate signed by an unknown authority.")
-			//	fmt.Fprintln(o.Out, "You can bypass the certificate check, but any data you send to the server could be intercepted by others.")
-			//
-			//	clientConfig.Insecure = cmdutil.PromptForBool(os.Stdin, o.Out, "Use insecure connections? (y/n): ")
-			//	if !clientConfig.Insecure {
-			//		return nil, fmt.Errorf(clientcmd.GetPrettyMessageFor(result.Error()))
-			//	}
-			//	// insecure, clear CA info
-			//	clientConfig.CAFile = ""
-			//	clientConfig.CAData = nil
-			//	fmt.Fprintln(o.Out)
-			//}
-
+		// TLS record header errors, like oversized record which usually means
+		// the server only supports "http"
+		case tls.RecordHeaderError:
+			return nil, osclientcmd.GetPrettyErrorForServer(err, o.Server)
 		default:
-			return nil, result.Error()
+			// suggest the port used in the cluster URL by default, in case we're not already using it
+			host, port, parsed, err1 := getHostPort(o.Server)
+			_, defaultClusterPort, _, err2 := getHostPort(defaultClusterURL)
+			if err1 == nil && err2 == nil && port != defaultClusterPort {
+				parsed.Host = net.JoinHostPort(host, defaultClusterPort)
+				return nil, fmt.Errorf("%s\nYou may want to try using the default cluster port: %s", err.Error(), parsed.String())
+			}
+			return nil, err
 		}
 	}
 
@@ -247,6 +238,107 @@ func (o *AuthOptions) getClientConfig() (*restclient.Config, error) {
 	}
 	o.Config = clientConfig
 	return o.Config, nil
+}
+
+// getHostPort returns the host and port parts of the given URL string. It's
+// expected that the provided URL is already normalized (always has host and port).
+func getHostPort(hostURL string) (string, string, *url.URL, error) {
+	parsedURL, err := url.Parse(hostURL)
+	if err != nil {
+		return "", "", nil, err
+	}
+	host, port, err := net.SplitHostPort(parsedURL.Host)
+	return host, port, parsedURL, err
+}
+
+func promptForInsecureTLS(reader io.Reader, out io.Writer, reason error) bool {
+	var insecureTLSRequestReason string
+	if reason != nil {
+		switch reason.(type) {
+		case x509.UnknownAuthorityError:
+			insecureTLSRequestReason = "The server uses a certificate signed by an unknown authority."
+		case x509.HostnameError:
+			insecureTLSRequestReason = fmt.Sprintf("The server is using a certificate that does not match its hostname: %s", reason.Error())
+		case x509.CertificateInvalidError:
+			insecureTLSRequestReason = fmt.Sprintf("The server is using an invalid certificate: %s", reason.Error())
+		}
+	}
+	var input bool
+	if kterm.IsTerminal(reader) {
+		if len(insecureTLSRequestReason) > 0 {
+			fmt.Fprintln(out, insecureTLSRequestReason)
+		}
+		fmt.Fprintln(out, "You can bypass the certificate check, but any data you send to the server could be intercepted by others.")
+		input = term.PromptForBool(os.Stdin, out, "Use insecure connections? (y/n): ")
+		fmt.Fprintln(out)
+	}
+	return input
+}
+
+// dialToServer takes the Server URL from the given clientConfig and dials to
+// make sure the server is reachable. Note the config received is not mutated.
+func dialToServer(clientConfig restclient.Config) error {
+	// take a RoundTripper based on the config we already have (TLS, proxies, etc)
+	rt, err := restclient.TransportFor(&clientConfig)
+	if err != nil {
+		return err
+	}
+
+	parsedURL, err := url.Parse(clientConfig.Host)
+	if err != nil {
+		return err
+	}
+
+	// Do a HEAD request to serverPathToDial to make sure the server is alive.
+	// We don't care about the response, any err != nil is valid for the sake of reachability.
+	serverURLToDial := (&url.URL{Scheme: parsedURL.Scheme, Host: parsedURL.Host, Path: "/"}).String()
+	req, err := http.NewRequest("HEAD", serverURLToDial, nil)
+	if err != nil {
+		return err
+	}
+
+	res, err := rt.RoundTrip(req)
+	if err != nil {
+		return err
+	}
+
+	defer res.Body.Close()
+	return nil
+}
+
+// findExistingClientCA returns *either* the existing client CA file name as a string,
+// *or* data in a []byte for a given host, and true if it exists in the given config
+func findExistingClientCA(host string, kubeconfig kclientcmdapi.Config) (string, []byte, bool) {
+	for _, cluster := range kubeconfig.Clusters {
+		if cluster.Server == host {
+			if len(cluster.CertificateAuthority) > 0 {
+				return cluster.CertificateAuthority, nil, true
+			}
+			if len(cluster.CertificateAuthorityData) > 0 {
+				return "", cluster.CertificateAuthorityData, true
+			}
+		}
+	}
+	return "", nil, false
+}
+
+func hasExistingInsecureCluster(clientConfigToTest restclient.Config, kubeconfig kclientcmdapi.Config) bool {
+	clientConfigToTest.Insecure = true
+	matchingClusters := getMatchingClusters(clientConfigToTest, kubeconfig)
+	return len(matchingClusters) > 0
+}
+
+// getMatchingClusters examines the kubeconfig for all clusters that point to the same server
+func getMatchingClusters(clientConfig restclient.Config, kubeconfig kclientcmdapi.Config) sets.String {
+	ret := sets.String{}
+
+	for key, cluster := range kubeconfig.Clusters {
+		if (cluster.Server == clientConfig.Host) && (cluster.InsecureSkipTLSVerify == clientConfig.Insecure) && (cluster.CertificateAuthority == clientConfig.CAFile) && (bytes.Compare(cluster.CertificateAuthorityData, clientConfig.CAData) == 0) {
+			ret.Insert(key)
+		}
+	}
+
+	return ret
 }
 
 func (o *AuthOptions) GatherAuthInfo() (string, error) {
@@ -337,7 +429,7 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 		// if they specified a project name and got a generated context, then only show the information they care about.  They won't recognize
 		// a context name they didn't choose
 		if config.CurrentContext == defaultContextName {
-			msg += fmt.Sprintf( "Using project %q on server %q.\n", currentProject, o.Config.Host)
+			msg += fmt.Sprintf("Using project %q on server %q.\n", currentProject, o.Config.Host)
 
 		} else {
 			msg += fmt.Sprintf("Using project %q from context named %q on server %q.\n", currentProject, config.CurrentContext, o.Config.Host)

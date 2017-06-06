@@ -8,8 +8,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
-	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters"
+	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 )
 
@@ -51,9 +51,9 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Com
 		},
 	}
 
-	cmd.Flags().Int("masters", clusters.SentinelCountValue, fmt.Sprintf("Number of masters in the spark cluster (%d" +
+	cmd.Flags().Int("masters", clusters.SentinelCountValue, fmt.Sprintf("Number of masters in the spark cluster (%d"+
 		" means take masters from storedconfig and/or defaults)", clusters.SentinelCountValue))
-	cmd.Flags().Int("workers", clusters.SentinelCountValue, fmt.Sprintf("Number of workers in the spark cluster (%d" +
+	cmd.Flags().Int("workers", clusters.SentinelCountValue, fmt.Sprintf("Number of workers in the spark cluster (%d"+
 		" means take workers from storedconfig and/or defaults)", clusters.SentinelCountValue))
 	cmd.Flags().String("masterconfig", "", "ConfigMap name for spark master")
 	cmd.Flags().String("workerconfig", "", "ConfigMap name for spark worker")

@@ -7,8 +7,8 @@ import (
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
-	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters"
+	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 )
 
 func NewCmdScale(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) *cobra.Command {
@@ -37,9 +37,9 @@ func CmdScale(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Comm
 			}
 		},
 	}
-	cmd.Flags().Int("masters", clusters.SentinelCountValue, fmt.Sprintf("Number of masters in the spark cluster (%d" +
+	cmd.Flags().Int("masters", clusters.SentinelCountValue, fmt.Sprintf("Number of masters in the spark cluster (%d"+
 		" means leave masters unchanged)", clusters.SentinelCountValue))
-	cmd.Flags().Int("workers", clusters.SentinelCountValue, fmt.Sprintf("Number of workers in the spark cluster (%d" +
+	cmd.Flags().Int("workers", clusters.SentinelCountValue, fmt.Sprintf("Number of workers in the spark cluster (%d"+
 		" means leave workers unchanged)", clusters.SentinelCountValue))
 	cmd.MarkFlagRequired("workers")
 	return cmd
