@@ -499,8 +499,8 @@ func CreateCluster(
 	result.MasterWebURL = retrieveServiceURL(sc, webuiType, clustername)
 	result.Status = "Running"
 	result.Config = finalconfig
-	result.MasterCount = 0
-	result.WorkerCount = 0
+	result.MasterCount = 1
+	result.WorkerCount = workercount
 	result.Pods = []SparkPod{}
 	if ephem_val != "" {
 		result.Ephemeral = ephem_val
