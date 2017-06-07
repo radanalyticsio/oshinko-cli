@@ -33,7 +33,7 @@ func (checker *lessThanChecker) Check(params []interface{}, names []string) (res
 }
 
 func checkClusterHelper(s *OshinkoRestTestSuite, c *check.C, params *clusters.FindSingleClusterParams, count int) (obsmcount int64, obswcount int64) {
-	const retries = 30
+	const retries = 60
 	var tries int
 
 	for tries = 0; tries < retries; tries++ {
