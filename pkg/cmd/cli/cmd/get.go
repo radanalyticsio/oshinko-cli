@@ -59,8 +59,8 @@ func (o *CmdOptions) RunClusters() error {
 		for _, cluster := range tmpClusters {
 			if o.Name == "" || cluster.Name == o.Name {
 				if o.Output == "" {
-					msg += fmt.Sprintf(linebreak+asterisk+"%-14s \t %d\t  %d\t %-30s\t  %-32s\t  %-32s\t  %s\t  %s", cluster.Name,
-						cluster.Config.WorkerCount, cluster.WorkerCount, cluster.MasterURL, cluster.MasterWebURL, cluster.MasterWebRoute, cluster.Status, cluster.Ephemeral)
+					msg += fmt.Sprintf(linebreak+asterisk+"%-14s\t %d\t %-30s\t %-32s\t %-32s\t %s\t  %s", cluster.Name,
+						cluster.WorkerCount, cluster.MasterURL, cluster.MasterWebURL, cluster.MasterWebRoute, cluster.Status, cluster.Ephemeral)
 				}
 			}
 		}
