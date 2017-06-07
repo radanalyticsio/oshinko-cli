@@ -856,23 +856,34 @@ func getDepConfig(client oclient.DeploymentConfigInterface, clustername, otype s
 }
 
 func scaleDep(dcc oclient.DeploymentConfigInterface, clustername string, count int, otype string) error {
+	var err error
 	if count <= SentinelCountValue {
 		return nil
 	}
-	dep, err := getDepConfig(dcc, clustername, otype)
-	if err != nil {
-		return generalErr(err, fmt.Sprintf(depMsg, otype), ClientOperationCode)
-	} else if dep == nil {
-		return generalErr(err, fmt.Sprintf(depMsg, otype), ClusterIncompleteCode)
+
+	for i := 0; i < 20; i++ {
+		dep, err := getDepConfig(dcc, clustername, otype)
+		if err != nil {
+			return generalErr(err, fmt.Sprintf(depMsg, otype), ClientOperationCode)
+		} else if dep == nil {
+			return generalErr(err, fmt.Sprintf(depMsg, otype), ClusterIncompleteCode)
+		}
+		// If the current replica count does not match the request, update the replication controller
+		if int(dep.Spec.Replicas) != count {
+			dep.Spec.Replicas = int32(count)
+			_, err = dcc.Update(dep)
+			if err == nil {
+				break
+			}
+		} else {
+			break
+		}
+		time.Sleep(250*time.Millisecond)
 	}
 
-	// If the current replica count does not match the request, update the replication controller
-	if int(dep.Spec.Replicas) != count {
-		dep.Spec.Replicas = int32(count)
-		_, err = dcc.Update(dep)
-		if err != nil {
-			return generalErr(err, fmt.Sprintf(updateDepMsg, otype), ClientOperationCode)
-		}
+	// if err has a value here then we failed all retries and err is the last message from a failed update
+	if err != nil {
+		return generalErr(err, fmt.Sprintf(updateDepMsg, otype), ClientOperationCode)
 	}
 	return nil
 }
