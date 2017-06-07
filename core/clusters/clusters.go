@@ -469,15 +469,25 @@ func CreateCluster(
 		}
 	}
 
-	// Now that the creation actually worked, label the dc if the app value was passed
+	// Now that the creation actually worked, label the dc if the app value was passed.
+	// Note that updates can fail if someone updates the object underneath us, so
+	// we have to try again.  Try for 5 seconds
 	if driverrc != "" {
-		driver, err := rcc.Get(driverrc)
-		if err == nil {
-			if driver.Labels == nil {
-				driver.Labels = map[string]string{}
+		for i := 0; i < 20; i++ {
+			driver, err := rcc.Get(driverrc)
+			if err == nil {
+				if driver.Labels == nil {
+					driver.Labels = map[string]string{}
+				}
+				driver.Labels[driverLabel] = clustername
+				_, err = rcc.Update(driver)
+				if err == nil {
+					break
+				}
+				time.Sleep(250 * time.Millisecond)
+			} else {
+				break
 			}
-			driver.Labels[driverLabel] = clustername
-			rcc.Update(driver)
 		}
 	}
 
