@@ -165,7 +165,7 @@ func CreateClusterResponse(params apiclusters.CreateClusterParams) middleware.Re
 	}
 
 	config := assignConfig(params.Cluster.Config)
-	sc, err := coreclusters.CreateCluster(clustername, namespace, image, config, osclient, client)
+	sc, err := coreclusters.CreateCluster(clustername, namespace, image, config, osclient, client, "", false)
 	if err != nil {
 		return reterr(fail(err, "", getErrorCode(err)))
 	}
@@ -200,7 +200,7 @@ func DeleteClusterResponse(params apiclusters.DeleteSingleClusterParams) middlew
 		return reterr(fail(err, clientMsg, 500))
 	}
 
-	info, err := coreclusters.DeleteCluster(params.Name, namespace, osclient, client)
+	info, err := coreclusters.DeleteCluster(params.Name, namespace, osclient, client, "", "")
 	if err != nil {
 		return reterr(fail(err, "", getErrorCode(err)))
 	}
@@ -236,7 +236,8 @@ func FindClustersResponse(params apiclusters.FindClustersParams) middleware.Resp
 	if err != nil {
 		return reterr(fail(err, clientMsg, 500))
 	}
-	scs, err := coreclusters.FindClusters(namespace, osclient, client)
+
+	scs, err := coreclusters.FindClusters(namespace, osclient, client, "")
 	if err != nil {
 		return reterr(fail(err, "", getErrorCode(err)))
 	}
