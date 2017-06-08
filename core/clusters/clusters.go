@@ -701,8 +701,11 @@ func findClusterBody(clustername, namespace string, osclient *oclient.Client, cl
 }
 
 func CheckNoCluster(cluster *SparkCluster) bool {
+	// negative counts here means that there was no dc
+	// we might still have pods but they should be terminating, and even if one is stuck, it bears
+	// a random suffix so not really a problem
 	return cluster.Status == "Incomplete" && cluster.WorkerCount == -1 && cluster.MasterCount == -1 &&
-	       cluster.MasterURL == "<missing>" && cluster.MasterWebURL == "<missing>" && len(cluster.Pods) == 0
+	       cluster.MasterURL == "<missing>" && cluster.MasterWebURL == "<missing>"
 }
 
 // Find a cluster and return its representation
