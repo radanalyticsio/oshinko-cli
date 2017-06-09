@@ -132,7 +132,7 @@ func retrieveRouteForService(client oclient.RouteInterface, stype, clustername s
 		route := routes.Items[0]
 		return route.Spec.Host
 	}
-	return ""
+	return "<no route>"
 }
 
 func checkForDeploymentConfigs(client oclient.DeploymentConfigInterface, clustername string) (bool, *deployapi.DeploymentConfig, error) {
