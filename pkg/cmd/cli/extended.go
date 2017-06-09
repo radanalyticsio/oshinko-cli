@@ -14,7 +14,7 @@ import (
 func GetCommandGroups(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) (
 	templates.CommandGroups,
 	*cobra.Command) {
-	first := oshinkocmd.NewCmdGet(fullName, f, in, out)
+	first := oshinkocmd.NewCmdGetExtended(fullName, f, in, out)
 	return templates.CommandGroups{
 		{
 			Message: "Basic Commands:",

@@ -72,7 +72,17 @@ func (o *CmdOptions) RunClusters() error {
 	return nil
 }
 
-func NewCmdGet(fullName string, f *osclientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Command {
+func NewCmdGet(fullName string, f *osclientcmd.Factory, in io.Reader, out io.Writer) *cobra.Command {
+	cmd := CmdGet(f, in, out, false)
+	return cmd
+}
+
+func NewCmdGetExtended(fullName string, f *osclientcmd.Factory, in io.Reader, out io.Writer) *cobra.Command {
+	cmd := CmdGet(f, in, out, true)
+	return cmd
+}
+
+func CmdGet(f *osclientcmd.Factory, reader io.Reader, out io.Writer, extended bool) *cobra.Command {
 	authOptions := &auth.AuthOptions{
 		Reader: reader,
 		Out:    out,
@@ -111,7 +121,9 @@ func NewCmdGet(fullName string, f *osclientcmd.Factory, reader io.Reader, out io
 		},
 	}
 	cmds.Flags().StringP("output", "o", "", "Output format. One of: json|yaml")
-	cmds.Flags().String("app", "", "Get the cluster(s) associated with the app (value may be the name of a pod or deployment)")
 	cmds.Flags().BoolVarP(&options.Verbose, "verbose", "v", options.Verbose, "See details for resolving issues.")
+	if extended {
+		cmds.Flags().String("app", "", "Get the cluster(s) associated with the app (value may be the name of a pod or deployment)")
+	}
 	return cmds
 }
