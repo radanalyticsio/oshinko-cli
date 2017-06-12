@@ -296,7 +296,7 @@ func countWorkers(client kclient.PodInterface, clustername string) (int, *kapi.P
 	return cnt, pods, err
 }
 
-func getDriverDeployment(app, namespace string, client *kclient.Client) string {
+func getDriverDeployment(app, namespace string, client kclient.Interface) string {
 
 	// When we make calls from a driver pod, the most likely value we have is a deployment
 	// so use that first
@@ -650,7 +650,7 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 	return strings.Join(info, ", "), nil
 }
 
-func findClusterBody(clustername, namespace string, osclient *oclient.Client, client *kclient.Client, result *SparkCluster) {
+func findClusterBody(clustername, namespace string, osclient *oclient.Client, client kclient.Interface, result *SparkCluster) {
 
 	sc := client.Services(namespace)
 	dc := osclient.DeploymentConfigs(namespace)
