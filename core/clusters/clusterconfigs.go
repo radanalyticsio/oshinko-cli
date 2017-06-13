@@ -32,8 +32,8 @@ var defaultConfig ClusterConfig = ClusterConfig{
 const failOnMissing = true
 const allowMissing = false
 
-const MasterCountMustBeOne = "cluster configuration must have a masterCount of 1"
-const WorkerCountMustBeAtLeastZero = "cluster configuration may not have a workerCount less than 0"
+const MasterCountMustBeZeroOrOne = "cluster configuration must have a master count of 0 or 1"
+const WorkerCountMustBeAtLeastZero = "cluster configuration may not have a worker count less than 0"
 const ErrorWhileProcessing = "'%s', %s"
 const NamedConfigDoesNotExist = "named config '%s' does not exist"
 
@@ -71,8 +71,8 @@ func assignConfig(res *ClusterConfig, src ClusterConfig) {
 
 func checkConfiguration(config ClusterConfig) error {
 	var err error
-	if config.MasterCount != 1 {
-		err = NewClusterError(MasterCountMustBeOne, ClusterConfigCode)
+	if config.MasterCount < 0 || config.MasterCount > 1 {
+		err = NewClusterError(MasterCountMustBeZeroOrOne, ClusterConfigCode)
 	} else if config.WorkerCount < 0 {
 		err = NewClusterError(WorkerCountMustBeAtLeastZero, ClusterConfigCode)
 	}

@@ -305,7 +305,7 @@ func (s *OshinkoUnitTestSuite) TestGetClusterBadConfig(c *check.C) {
 	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
 	c.Assert(brokenMaster.MasterCount, check.Not(check.Equals), 1)
 	c.Assert(err, check.NotNil)
-	c.Assert(err.Error(), check.Equals, clusters.MasterCountMustBeOne)
+	c.Assert(err.Error(), check.Equals, clusters.MasterCountMustBeZeroOrOne)
 }
 
 func (s *OshinkoUnitTestSuite) TestGetClusterNoConfig(c *check.C) {

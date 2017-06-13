@@ -69,7 +69,7 @@ type SparkCluster struct {
 	MasterWebRoute string `json:"masterWebRoute"`
 	Status       string `json:"status"`
 	WorkerCount  int    `json:"workerCount"`
-	MasterCount  int    `json:"masterCount,omitempty"`
+	MasterCount  int    `json:"masterCount"`
 	Config       ClusterConfig
 	Pods         []SparkPod
 }
@@ -87,15 +87,21 @@ func generalErr(err error, msg string, code int) ClusterError {
 
 func makeSelector(otype string, clustername string) kapi.ListOptions {
 	// Build a selector list based on type and/or cluster name
+	var ot *labels.Requirement
+	var cname *labels.Requirement
 	ls := labels.NewSelector()
-	if otype != "" {
-		ot, _ := labels.NewRequirement(typeLabel, selection.Equals, sets.NewString(otype))
-		ls = ls.Add(*ot)
+	if otype == "" {
+		ot, _ = labels.NewRequirement(typeLabel, selection.Exists, sets.String{})
+	} else {
+		ot, _ = labels.NewRequirement(typeLabel, selection.Equals, sets.NewString(otype))
 	}
-	if clustername != "" {
-		cname, _ := labels.NewRequirement(clusterLabel, selection.Equals, sets.NewString(clustername))
-		ls = ls.Add(*cname)
+	ls = ls.Add(*ot)
+	if clustername == "" {
+		cname, _ = labels.NewRequirement(clusterLabel, selection.Exists, sets.String{})
+	} else {
+		cname, _ = labels.NewRequirement(clusterLabel, selection.Equals, sets.NewString(clustername))
 	}
+	ls = ls.Add(*cname)
 	return kapi.ListOptions{LabelSelector: ls}
 }
 
@@ -170,9 +176,7 @@ func makeWorkerEnvVars(clustername, sparkconfdir string) []kapi.EnvVar {
 	return envs
 }
 
-func sparkWorker(namespace string,
-	image string,
-	replicas int, clustername, sparkconfdir, sparkworkerconfig string) *odc.ODeploymentConfig {
+func sparkWorker(namespace, image string, replicas int, clustername, sparkconfdir, sparkworkerconfig string) *odc.ODeploymentConfig {
 
 	// Create the basic deployment config
 	// We will use a label and pod selector based on the cluster name.
@@ -203,7 +207,7 @@ func sparkWorker(namespace string,
 	return dc.PodTemplateSpec(pt.Containers(cont))
 }
 
-func sparkMaster(namespace, image, clustername, sparkconfdir, sparkmasterconfig string) *odc.ODeploymentConfig {
+func sparkMaster(namespace, image string, replicas int, clustername, sparkconfdir, sparkmasterconfig string) *odc.ODeploymentConfig {
 
 	// Create the basic deployment config
 	// We will use a label and pod selector based on the cluster name
@@ -212,7 +216,7 @@ func sparkMaster(namespace, image, clustername, sparkconfdir, sparkmasterconfig 
 	dc := odc.DeploymentConfig(clustername+"-m", namespace).
 		TriggerOnConfigChange().RollingStrategy().Label(clusterLabel, clustername).
 		Label(typeLabel, masterType).
-		PodSelector(clusterLabel, clustername)
+		PodSelector(clusterLabel, clustername).Replicas(replicas)
 
 	// Create a pod template spec with the matching label
 	pt := opt.PodTemplateSpec().Label(clusterLabel, clustername).
@@ -258,19 +262,6 @@ func checkForConfigMap(name string, cm kclient.ConfigMapsInterface) error {
 	return nil
 }
 
-func countWorkers(client kclient.PodInterface, clustername string) (int, *kapi.PodList, error) {
-	// If we are  unable to retrieve a list of worker pods, return -1 for count
-	// This is an error case, differnt from a list of length 0. Let the caller
-	// decide whether to report the error or the -1 count
-	cnt := -1
-	selectorlist := makeSelector(workerType, clustername)
-	pods, err := client.List(selectorlist)
-	if pods != nil {
-		cnt = len(pods.Items)
-	}
-	return cnt, pods, err
-}
-
 // Create a cluster and return the representation
 func CreateCluster(clustername, namespace, sparkimage string, config *ClusterConfig, osclient *oclient.Client, client kclient.Interface) (SparkCluster, error) {
 
@@ -298,6 +289,7 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 		return result, generalErr(nil, sparkImageMsg, ClusterConfigCode)
 	}
 
+	mastercount := int(finalconfig.MasterCount)
 	workercount := int(finalconfig.WorkerCount)
 
 	// Check if finalconfig contains the names of ConfigMaps to use for spark
@@ -322,7 +314,7 @@ func CreateCluster(clustername, namespace, sparkimage string, config *ClusterCon
 	}
 
 	// Create the master deployment config
-	masterdc := sparkMaster(namespace, sparkimage, clustername, masterconfdir, finalconfig.SparkMasterConfig)
+	masterdc := sparkMaster(namespace, sparkimage, mastercount, clustername, masterconfdir, finalconfig.SparkMasterConfig)
 
 	// Create the services that will be associated with the master pod
 	// They will be created with selectors based on the pod labels
@@ -559,11 +551,12 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 	// TODO (tmckay) we should add the spark master and worker configuration values here.
 	// the most likely thing to do is store them in an annotation
 
+	// TODO (tmckay) we need to figure out how to do desired/actual count like the oc
 	result.Name = name
 	result.Namespace = namespace
 	result.Href = "/clusters/" + clustername
-	result.WorkerCount, _, _ = countWorkers(pc, clustername)
-	result.MasterCount = 1
+	result.WorkerCount = int(wrepl.Status.Replicas)
+	result.MasterCount = int(mrepl.Status.Replicas)
 	result.Config.WorkerCount = int(wrepl.Spec.Replicas)
 	result.Config.MasterCount = int(mrepl.Spec.Replicas)
 	result.MasterURL = retrieveServiceURL(sc, masterType, clustername)
@@ -586,12 +579,13 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 		result.Pods = append(result.Pods, addpod(pods.Items[i]))
 	}
 
-	_, workers, err := countWorkers(pc, clustername)
+	selectorlist = makeSelector(workerType, clustername)
+	pods, err = pc.List(selectorlist)
 	if err != nil {
 		return result, generalErr(err, podListMsg, ClientOperationCode)
 	}
-	for i := range workers.Items {
-		result.Pods = append(result.Pods, addpod(workers.Items[i]))
+	for i := range pods.Items {
+		result.Pods = append(result.Pods, addpod(pods.Items[i]))
 	}
 
 	return result, nil
@@ -601,16 +595,17 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 func FindClusters(namespace string, osclient *oclient.Client, client kclient.Interface) ([]SparkCluster, error) {
 
 	var result []SparkCluster = []SparkCluster{}
-
+	var mcount, wcount int
 	pc := client.Pods(namespace)
 	sc := client.Services(namespace)
+	rcc := client.ReplicationControllers(namespace)
 
 	// Create a map so that we can track clusters by name while we
 	// find out information about them
 	clist := map[string]*SparkCluster{}
 
-	// Get all of the master pods
-	pods, err := pc.List(makeSelector(masterType, ""))
+	// Get all of the pods
+	pods, err := pc.List(makeSelector("", ""))
 	if err != nil {
 		return result, generalErr(err, mastermsg, ClientOperationCode)
 	}
@@ -629,12 +624,23 @@ func FindClusters(namespace string, osclient *oclient.Client, client kclient.Int
 			citem.Name = clustername
 			citem.Href = "/clusters/" + clustername
 
-			// Note, we do not report an error here since we are
-			// reporting on multiple clusters. Instead cnt will be -1.
-			cnt, _, _ := countWorkers(pc, clustername)
+			mrepl, err := getReplController(rcc, clustername, masterType)
+			if err == nil && mrepl != nil {
+				mcount = int(mrepl.Status.Replicas)
+			} else {
+				mcount = -1
+			}
+
+			wrepl, err := getReplController(rcc, clustername, workerType)
+			if err == nil && mrepl != nil {
+				wcount = int(wrepl.Status.Replicas)
+			} else {
+				wcount = -1
+			}
 
 			// TODO we only want to count running pods (not terminating)
-			citem.WorkerCount = cnt
+			citem.MasterCount = mcount
+			citem.WorkerCount = wcount
 			citem.MasterURL = retrieveServiceURL(sc, masterType, clustername)
 			citem.MasterWebURL = retrieveServiceURL(sc, webuiType, clustername)
 			citem.MasterWebRoute = retrieveRouteForService(osclient.Routes(namespace), webuiType, clustername)
@@ -779,7 +785,7 @@ func ScaleCluster(name, namespace string, masters, workers int, osclient *oclien
 
 	// Allow sale to zero, allow sentinel values
 	if masters > 1 {
-		return NewClusterError(MasterCountMustBeOne, ClusterConfigCode)
+		return NewClusterError(MasterCountMustBeZeroOrOne, ClusterConfigCode)
 	}
 
 	dcc := osclient.DeploymentConfigs(namespace)
