@@ -596,44 +596,35 @@ func FindClusters(namespace string, osclient *oclient.Client, client kclient.Int
 
 	var result []SparkCluster = []SparkCluster{}
 	var mcount, wcount int
-	pc := client.Pods(namespace)
+	dcc := osclient.DeploymentConfigs(namespace)
 	sc := client.Services(namespace)
-	rcc := client.ReplicationControllers(namespace)
 
 	// Create a map so that we can track clusters by name while we
 	// find out information about them
 	clist := map[string]*SparkCluster{}
 
-	// Get all of the pods
-	pods, err := pc.List(makeSelector("", ""))
+	// Get all of the master dcs
+	dcs, err := dcc.List(makeSelector(masterType, ""))
 	if err != nil {
 		return result, generalErr(err, mastermsg, ClientOperationCode)
 	}
 
-	// TODO should we do something else to find the clusters, like count deployment configs?
-
 	// From the list of master pods, figure out which clusters we have
-	for i := range pods.Items {
+	for i := range dcs.Items {
 
 		// Build the cluster record if we don't already have it
 		// (theoretically with HA we might have more than 1 master)
-		clustername := pods.Items[i].Labels[clusterLabel]
+		clustername := dcs.Items[i].Labels[clusterLabel]
 		if citem, ok := clist[clustername]; !ok {
 			clist[clustername] = new(SparkCluster)
 			citem = clist[clustername]
 			citem.Name = clustername
 			citem.Href = "/clusters/" + clustername
 
-			mrepl, err := getReplController(rcc, clustername, masterType)
-			if err == nil && mrepl != nil {
-				mcount = int(mrepl.Status.Replicas)
-			} else {
-				mcount = -1
-			}
-
-			wrepl, err := getReplController(rcc, clustername, workerType)
-			if err == nil && mrepl != nil {
-				wcount = int(wrepl.Status.Replicas)
+			mcount = int(dcs.Items[i].Status.Replicas)
+			wdc, err := getDepConfig(dcc, clustername, workerType)
+			if err == nil && wdc != nil {
+				wcount = int(wdc.Status.Replicas)
 			} else {
 				wcount = -1
 			}
@@ -676,20 +667,14 @@ func getReplController(client kclient.ReplicationControllerInterface, clusternam
 }
 
 func getDepConfig(client oclient.DeploymentConfigInterface, clustername, otype string) (*deployapi.DeploymentConfig, error) {
-	selectorlist := makeSelector(otype, clustername)
-	deps, err := client.List(selectorlist)
-	if err != nil || len(deps.Items) == 0 {
-		return nil, err
+	var dep *deployapi.DeploymentConfig
+	var err error
+	if otype == masterType {
+		dep, err = client.Get(clustername+"-m")
+	} else {
+		dep, err = client.Get(clustername+"-w")
 	}
-	// Use the latest replication controller.  There could be more than one
-	// if the user did something like oc env to set a new env var on a deployment
-	newestDep := deps.Items[0]
-	for i := 0; i < len(deps.Items); i++ {
-		if deps.Items[i].CreationTimestamp.Unix() > newestDep.CreationTimestamp.Unix() {
-			newestDep = deps.Items[i]
-		}
-	}
-	return &newestDep, nil
+	return dep, err
 }
 
 func scaleDep(dcc oclient.DeploymentConfigInterface, clustername string, count int, otype string) error {
