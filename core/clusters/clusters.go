@@ -222,7 +222,7 @@ func workername(clustername string) string {
 	return clustername + "-w"
 }
 
-func sparkMaster(namespace, image string, replicas int, clustername, sparkconfdir, sparkmasterconfig, driverdc string) *odc.ODeploymentConfig {
+func sparkMaster(namespace, image string, replicas int, clustername, sparkconfdir, sparkmasterconfig, driverrc string) *odc.ODeploymentConfig {
 
 	// Create the basic deployment config
 	// We will use a label and pod selector based on the cluster name
@@ -233,8 +233,8 @@ func sparkMaster(namespace, image string, replicas int, clustername, sparkconfdi
 		Label(typeLabel, masterType).
 		PodSelector(clusterLabel, clustername).Replicas(replicas)
 
-	if driverdc != "" {
-		dc = dc.Label(ephemeralLabel, driverdc)
+	if driverrc != "" {
+		dc = dc.Label(ephemeralLabel, driverrc)
 	}
 
 	// Create a pod template spec with the matching label
