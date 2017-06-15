@@ -43,8 +43,8 @@ func CmdDelete(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 		},
 	}
 	if extended {
-		cmd.Flags().String("app", "", "The app tied to an ephemeral cluster (name of pod or deployment)")
-		cmd.Flags().String("app-status", "", "How the application has ended ('completed' or 'terminated')")
+		cmd.Flags().String("app", "", "The app tied to an ephemeral cluster (name of pod or deployment). The 'app-status' option must also be set.")
+		cmd.Flags().String("app-status", "", "How the application has ended ('completed' or 'terminated'). The 'app' option must also be set.")
 	}
 	return cmd
 }
