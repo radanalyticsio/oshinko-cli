@@ -6,5 +6,5 @@ os::test::junit::declare_suite_start "cmd/help"
 # This test validates the help commands and output text
 
 # verify some default commands
-os::cmd::expect_success "_output/oshinko-cli help"
+os::cmd::expect_success "_output/oshinko help"
 os::test::junit::declare_suite_end
