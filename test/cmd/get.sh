@@ -34,6 +34,15 @@ os::cmd::expect_failure_and_text "_output/oshinko-cli get abc --token=`oc whoami
 os::cmd::expect_failure_and_text "_output/oshinko-cli get --token=`oc whoami -t` --verbose --namespace=bob" "Using project \"bob\""
 os::cmd::expect_success_and_text "_output/oshinko-cli get --token=`oc whoami -t` --verbose" "Using project \"oshinko\""
 
+# shared or ephemeral
+os::cmd::expect_success_and_text "_output/oshinko-cli get abc" "<shared>"
+
+# incomplete
+os::cmd::execpt_success "oc delete service abc-ui"
+os::cmd::expect_success_and_text "_output/oshinko-cli get abc" "Incomplete"
+os::cmd::expect_success_and_text "_output/oshinko-cli get abc" "<missing>"
+
+
 os::cmd::expect_success "oc project default/127-0-0-1:28443/system:admin"
 os::cmd::expect_success "oc delete ns oshinko"
 os::test::junit::declare_suite_end
