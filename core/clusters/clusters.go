@@ -742,7 +742,7 @@ func FindSingleCluster(name, namespace string, osclient *oclient.Client, client 
 func FindClusters(namespace string, osclient *oclient.Client, client kclient.Interface, app string) ([]SparkCluster, error) {
 
 	dcc := osclient.DeploymentConfigs(namespace)
-	pc := client.Pods(namespace)
+	rc := client.ReplicationControllers(namespace)
 
 	// If app is not null, look for a driver label.
 	// If we find it get the name of the cluster and call FindSingleCluster.
@@ -771,49 +771,13 @@ func FindClusters(namespace string, osclient *oclient.Client, client kclient.Int
 		return []SparkCluster{}, generalErr(err, mastermsg, ClientOperationCode)
 	}
 
-	// From the list of master pods, figure out which clusters we have
+	// From the list of master dcs, figure out which clusters we have
 	for i := range dcs.Items {
 
-		// Build the cluster record if we don't already have it
-		// (theoretically with HA we might have more than 1 master)
+		// Add the cluster name if we don't already have it
 		clustername := dcs.Items[i].Labels[clusterLabel]
-		if citem, ok := clist[clustername]; !ok {
-			clist[clustername] = new(SparkCluster)
-			citem = clist[clustername]
-			citem.Name = clustername
-			citem.Href = "/clusters/" + clustername
-
-			mcount = int(dcs.Items[i].Status.Replicas)
-			wdc, err := getDepConfig(dcc, clustername, workerType)
-			if err == nil && wdc != nil {
-				wcount = int(wdc.Status.Replicas)
-			} else {
-				wcount = -1
-			}
-
-			// TODO we only want to count running pods (not terminating)
-			citem.MasterCount = mcount
-			citem.WorkerCount = wcount
-			citem.MasterURL = retrieveServiceURL(sc, masterType, clustername)
-			citem.MasterWebURL = retrieveServiceURL(sc, webuiType, clustername)
-			citem.MasterWebRoute = retrieveRouteForService(osclient.Routes(namespace), webuiType, clustername)
-
-			// TODO make something real for status
-			if citem.MasterURL == "" {
-				citem.Status = "MasterServiceMissing"
-			} else {
-				citem.Status = "Running"
-			}
-
-			master, err := dc.Get(mastername(clustername))
-			if err == nil {
-				if ephemeral, ok := master.Labels[ephemeralLabel]; ok {
-					citem.Ephemeral = ephemeral
-				} else {
-					citem.Ephemeral = "<shared>"
-				}
-			}
-			result = append(result, *citem)
+		if _, ok := clist[clustername]; !ok {
+			clist[clustername] = true
 		}
 	}
 	result := make([]SparkCluster, len(clist), len(clist))
@@ -851,9 +815,9 @@ func getDepConfig(client oclient.DeploymentConfigInterface, clustername, otype s
 	var dep *deployapi.DeploymentConfig
 	var err error
 	if otype == masterType {
-		dep, err = client.Get(clustername+"-m")
+		dep, err = client.Get(mastername(clustername))
 	} else {
-		dep, err = client.Get(clustername+"-w")
+		dep, err = client.Get(workername(clustername))
 	}
 	return dep, err
 }
