@@ -29,6 +29,11 @@ os::cmd::try_until_text "_output/oshinko-cli get abc --token=`oc whoami -t` -o j
 # shared or ephemeral
 os::cmd::expect_success_and_text "_output/oshinko-cli get abc" "<shared>"
 
+# incomplete
+os::cmd::expect_success "oc delete service abc-ui"
+os::cmd::expect_success_and_text "_output/oshinko-cli get abc" "Incomplete"
+os::cmd::expect_success_and_text "_output/oshinko-cli get abc" "<missing>"
+
 #delete
 os::cmd::expect_success "_output/oshinko-cli delete abc --token=`oc whoami -t`"
 os::cmd::expect_failure_and_text "_output/oshinko-cli get abc --token=`oc whoami -t` -o json" "no such cluster 'abc'"
@@ -36,13 +41,6 @@ os::cmd::expect_failure_and_text "_output/oshinko-cli get abc --token=`oc whoami
 #flags
 os::cmd::expect_failure_and_text "_output/oshinko-cli get --token=`oc whoami -t` --verbose --namespace=bob" "Using project \"bob\""
 os::cmd::expect_success_and_text "_output/oshinko-cli get --token=`oc whoami -t` --verbose" "Using project \"oshinko\""
-
-
-# incomplete
-os::cmd::execpt_success "oc delete service abc-ui"
-os::cmd::expect_success_and_text "_output/oshinko-cli get abc" "Incomplete"
-os::cmd::expect_success_and_text "_output/oshinko-cli get abc" "<missing>"
-
 
 os::cmd::expect_success "oc project default/127-0-0-1:28443/system:admin"
 os::cmd::expect_success "oc delete ns oshinko"
