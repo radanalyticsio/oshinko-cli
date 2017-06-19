@@ -26,6 +26,9 @@ os::cmd::expect_success "_output/oshinko-cli scale abc --workers=0 --masters=0 -
 os::cmd::expect_success "_output/oshinko-cli scale abc --workers=2 --token=`oc whoami -t`"
 os::cmd::try_until_text "_output/oshinko-cli get abc --token=`oc whoami -t` -o json" '"workerCount": 0' 2
 
+# shared or ephemeral
+os::cmd::expect_success_and_text "_output/oshinko-cli get abc" "<shared>"
+
 #delete
 os::cmd::expect_success "_output/oshinko-cli delete abc --token=`oc whoami -t`"
 os::cmd::expect_failure_and_text "_output/oshinko-cli get abc --token=`oc whoami -t` -o json" "no such cluster 'abc'"
@@ -34,8 +37,6 @@ os::cmd::expect_failure_and_text "_output/oshinko-cli get abc --token=`oc whoami
 os::cmd::expect_failure_and_text "_output/oshinko-cli get --token=`oc whoami -t` --verbose --namespace=bob" "Using project \"bob\""
 os::cmd::expect_success_and_text "_output/oshinko-cli get --token=`oc whoami -t` --verbose" "Using project \"oshinko\""
 
-# shared or ephemeral
-os::cmd::expect_success_and_text "_output/oshinko-cli get abc" "<shared>"
 
 # incomplete
 os::cmd::execpt_success "oc delete service abc-ui"
