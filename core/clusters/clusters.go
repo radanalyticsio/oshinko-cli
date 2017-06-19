@@ -558,15 +558,6 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 		}
 	}
 
-	// Put a label on the master dc as soon as possible that says "Deleting"
-	// just in case this takes some time and someone does a get on the cluster.
-	// This may never be seen.
-	dc, err := dcc.Get(mastername(clustername))
-	if err == nil && dc != nil {
-		tmp := odc.ODeploymentConfig{*dc}
-		tmp.Label("delete_pending", "true")
-	}
-
 	// Build a selector list for the "oshinko-cluster" label
 	selectorlist := makeSelector("", clustername)
 
