@@ -50,8 +50,7 @@ func CmdDelete(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 }
 
 func (o *CmdOptions) RunDelete(out io.Writer, cmd *cobra.Command, args []string) error {
-
-	if (o.App == "" || o.AppStatus == "") && o.App + o.AppStatus != "" {
+	if o.App != "" && o.AppStatus == "" {
 		return fmt.Errorf("Both --app and --appstatus must be set")
 	}
 	info, err := clusters.DeleteCluster(o.Name, o.Project, o.Client, o.KClient, o.App, o.AppStatus)

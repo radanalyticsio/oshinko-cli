@@ -89,9 +89,6 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 
 	if cmd.Flags().Lookup("ephemeral") != nil {
 		o.Ephemeral = kcmdutil.GetFlagBool(cmd, "ephemeral")
-		if o.Ephemeral && o.App == "" {
-			return cmdutil.UsageError(cmd, "An app value must be supplied if ephemeral is used")
-		}
 	}
 	return nil
 }
