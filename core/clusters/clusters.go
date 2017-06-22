@@ -536,6 +536,8 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 		} else if ephemeral, ok := master.Labels[ephemeralLabel]; ok {
 			deployment := getDriverDeployment(app, namespace, client)
 			if deployment == "" || deployment != ephemeral {
+				info = append(info, "deployment is (" + deployment + ")" )
+				info = append(info, "ephemeral is (" + ephemeral + ")" )
 				info = append(info, "cluster is not linked to app")
 			} else {
 				// If the driver has been scaled to zero, or if the application
