@@ -534,8 +534,16 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 			// fall through and cleanup
 			delete = true
 		} else if ephemeral, ok := master.Labels[ephemeralLabel]; ok {
-			deployment := getDriverDeployment(app, namespace, client)
-			if deployment == "" || deployment != ephemeral {
+			var deployment string
+			// If app equals ephemeral then we were passed the name of
+			// the deployment that created the cluster, skip the lookup.
+			// It might even be gone if this delete is triggered by a dc delete!
+			if app == ephemeral {
+				deployment = app
+			} else {
+				deployment = getDriverDeployment(app, namespace, client)
+			}
+			if deployment != ephemeral {
 				info = append(info, "deployment is (" + deployment + ")" )
 				info = append(info, "ephemeral is (" + ephemeral + ")" )
 				info = append(info, "cluster is not linked to app")
