@@ -534,8 +534,18 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 			// fall through and cleanup
 			delete = true
 		} else if ephemeral, ok := master.Labels[ephemeralLabel]; ok {
-			deployment := getDriverDeployment(app, namespace, client)
+			var deployment string
+			// If app equals ephemeral then we were passed the name of
+			// the deployment that created the cluster, skip the lookup.
+			// It might even be gone if this delete is triggered by a dc delete!
+			if app == ephemeral {
+				deployment = app
+			} else {
+				deployment = getDriverDeployment(app, namespace, client)
+			}
 			if deployment != ephemeral {
+				info = append(info, "deployment is (" + deployment + ")" )
+				info = append(info, "ephemeral is (" + ephemeral + ")" )
 				info = append(info, "cluster is not linked to app")
 			} else {
 				// If the driver has been scaled to zero, or if the application
@@ -556,6 +566,12 @@ func DeleteCluster(clustername, namespace string, osclient *oclient.Client, clie
 		if !delete {
 			return strings.Join(info, ", "), generalErr(nil, fmt.Sprintf(ephemeralDelMsg, clustername), EphemeralCode)
 		}
+	} else if appstatus != "" {
+		info = append(info, "invalid value for 'appstatus'")
+		return strings.Join(info, ", "), generalErr(nil, fmt.Sprintf(ephemeralDelMsg, clustername), EphemeralCode)
+	} else if app != "" {
+		info = append(info, "specified a value for 'app' but missing 'appstatus'")
+		return strings.Join(info, ", "), generalErr(nil, fmt.Sprintf(ephemeralDelMsg, clustername), EphemeralCode)
 	}
 
 	// Build a selector list for the "oshinko-cluster" label
