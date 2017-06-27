@@ -14,7 +14,7 @@ fi
 GIT_COMMIT=`git log -n1 --pretty=format:%h`
 TAG="${TAG}-${GIT_COMMIT}"
 
-APP=oshinko-cli
+APP=oshinko
 
 CMD=$1
 if [ $CMD = build ]; then
@@ -24,30 +24,22 @@ elif [ $CMD = extended ]; then
    CMD="build"
 fi
 
-if [ $CMD = build ]; then
-    OUTPUT_FLAG="-o _output/oshinko-cli"
-fi
-
-if [ $CMD = test ]; then
-    TARGET=./tests
-    GO_OPTIONS=-v
-else
-    TARGET=./cmd/oshinko
-fi
-
-#-instrument "$PROJECT/pkg/cmd/cli/cmd,$PROJECT/pkg/cmd/cli/cluster,$PROJECT/pkg/cmd/cli"
-if [ $CMD = debug ]; then
-    godebug build  -o _output/oshinko-cli ./cmd/oshinko
-fi
+OUTPUT_DIR="_output"
+OUTPUT_PATH="$OUTPUT_DIR/$APP"
+OUTPUT_FLAG="-o $OUTPUT_PATH"
+TARGET=./cmd/oshinko
 
 # this export is needed for the vendor experiment for as long as go version
 # 1.5 is still in use.
 export GO15VENDOREXPERIMENT=1
-
 if [ $CMD = build ]; then
-    go $CMD $GO_OPTIONS $TAGS -ldflags \
+    go build $GO_OPTIONS $TAGS -ldflags \
     "-X $PROJECT/version.gitTag=$TAG -X $PROJECT/version.appName=$APP" \
-    $OUTPUT_FLAG $TARGET
+    -o $OUTPUT_PATH $TARGET
+    if [ "$?" -eq 0 ]; then
+       rm $OUTPUT_DIR/oshinko-cli || true
+       ln -s ./oshinko $OUTPUT_DIR/oshinko-cli
+    fi
 fi
 
 

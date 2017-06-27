@@ -15,16 +15,6 @@ clean:
 	rm -rf _output
 	sudo docker rmi $(LOCAL_IMAGE)
 
-install:
-	scripts/build.sh install
-
-test:
-	scripts/build.sh test
-
-debug:
-	scripts/build.sh debug
-
-
 # Run command tests. Uses whatever binaries are currently built.
 #
 # Example:
