@@ -320,10 +320,12 @@ func ExpandSpec(spec *Swagger) error {
 	}
 
 	for key, defintition := range spec.Definitions {
-		if err := expandSchema(&defintition, "#/definitions/"+key, resolver); err != nil {
+		var def *Schema
+		var err error
+		if def, err = expandSchema(defintition, []string{"#/definitions/" + key}, resolver); err != nil {
 			return err
 		}
-		spec.Definitions[key] = defintition
+		spec.Definitions[key] = *def
 	}
 
 	for key, parameter := range spec.Parameters {
@@ -381,128 +383,133 @@ func ExpandSchema(schema *Schema, root interface{}, cache ResolutionCache) error
 		return err
 	}
 
-	if err := expandSchema(schema, "", resolver); err != nil {
+	refs := []string{""}
+	if rrr != nil {
+		refs[0] = rrr.String()
+	}
+	var s *Schema
+	if s, err = expandSchema(*schema, refs, resolver); err != nil {
 		return nil
 	}
+	*schema = *s
 	return nil
 }
 
-func expandItems(schema *Schema, parentRef string, resolver *schemaLoader) error {
-	if schema.Items != nil {
-		if schema.Items.Schema != nil {
-			sch := schema.Items.Schema
-			if err := expandSchema(sch, parentRef, resolver); err != nil {
-				return err
+func expandItems(target Schema, parentRefs []string, resolver *schemaLoader) (*Schema, error) {
+	if target.Items != nil {
+		if target.Items.Schema != nil {
+			t, err := expandSchema(*target.Items.Schema, parentRefs, resolver)
+			if err != nil {
+				return nil, err
 			}
+			*target.Items.Schema = *t
 		}
-		for i := range schema.Items.Schemas {
-			sch := &(schema.Items.Schemas[i])
-			if err := expandSchema(sch, parentRef, resolver); err != nil {
-				return err
+		for i := range target.Items.Schemas {
+			t, err := expandSchema(target.Items.Schemas[i], parentRefs, resolver)
+			if err != nil {
+				return nil, err
 			}
+			target.Items.Schemas[i] = *t
 		}
 	}
-
-	return nil
+	return &target, nil
 }
 
-func expandSchema(schema *Schema, parentRef string, resolver *schemaLoader) error {
-	if schema == nil {
-		return nil
+func expandSchema(target Schema, parentRefs []string, resolver *schemaLoader) (schema *Schema, err error) {
+	defer func() {
+		schema = &target
+	}()
+	if target.Ref.String() == "" && target.Ref.IsRoot() {
+		target = *resolver.root.(*Schema)
+		return
 	}
 
-	if schema.Ref.String() == "" && schema.Ref.IsRoot() {
-		*schema = *resolver.root.(*Schema)
-		return nil
+	// t is the new expanded schema
+	var t *Schema
+	for target.Ref.String() != "" {
+		// var newTarget Schema
+		pRefs := strings.Join(parentRefs, ",")
+		pRefs += ","
+		if strings.Contains(pRefs, target.Ref.String()+",") {
+			err = nil
+			return
+		}
+
+		if err = resolver.Resolve(&target.Ref, &t); err != nil {
+			return
+		}
+		parentRefs = append(parentRefs, target.Ref.String())
+		target = *t
 	}
 
-	if schema.Ref.String() != "" {
-		currentSchema := *schema
-		for currentSchema.Ref.String() != "" {
-			var newSchema Schema
-			if currentSchema.Ref.String() == parentRef {
-				break
+	if t, err = expandItems(target, parentRefs, resolver); err != nil {
+		return
+	}
+	target = *t
+
+	for i := range target.AllOf {
+		if t, err = expandSchema(target.AllOf[i], parentRefs, resolver); err != nil {
+			return
+		}
+		target.AllOf[i] = *t
+	}
+	for i := range target.AnyOf {
+		if t, err = expandSchema(target.AnyOf[i], parentRefs, resolver); err != nil {
+			return
+		}
+		target.AnyOf[i] = *t
+	}
+	for i := range target.OneOf {
+		if t, err = expandSchema(target.OneOf[i], parentRefs, resolver); err != nil {
+			return
+		}
+		target.OneOf[i] = *t
+	}
+	if target.Not != nil {
+		if t, err = expandSchema(*target.Not, parentRefs, resolver); err != nil {
+			return
+		}
+		*target.Not = *t
+	}
+	for k, _ := range target.Properties {
+		if t, err = expandSchema(target.Properties[k], parentRefs, resolver); err != nil {
+			return
+		}
+		target.Properties[k] = *t
+	}
+	if target.AdditionalProperties != nil && target.AdditionalProperties.Schema != nil {
+		if t, err = expandSchema(*target.AdditionalProperties.Schema, parentRefs, resolver); err != nil {
+			return
+		}
+		*target.AdditionalProperties.Schema = *t
+	}
+	for k, _ := range target.PatternProperties {
+		if t, err = expandSchema(target.PatternProperties[k], parentRefs, resolver); err != nil {
+			return
+		}
+		target.PatternProperties[k] = *t
+	}
+	for k, _ := range target.Dependencies {
+		if target.Dependencies[k].Schema != nil {
+			if t, err = expandSchema(*target.Dependencies[k].Schema, parentRefs, resolver); err != nil {
+				return
 			}
-
-			if err := resolver.Resolve(&currentSchema.Ref, &newSchema); err != nil {
-				return err
-			}
-			parentRef = currentSchema.Ref.String()
-
-			currentSchema = newSchema
-		}
-		*schema = currentSchema
-	}
-
-	if err := expandItems(schema, parentRef, resolver); err != nil {
-		return err
-	}
-
-	for i := range schema.AllOf {
-		sch := &(schema.AllOf[i])
-		if err := expandSchema(sch, parentRef, resolver); err != nil {
-			return err
+			*target.Dependencies[k].Schema = *t
 		}
 	}
-	for i := range schema.AnyOf {
-		sch := &(schema.AnyOf[i])
-		if err := expandSchema(sch, parentRef, resolver); err != nil {
-			return err
+	if target.AdditionalItems != nil && target.AdditionalItems.Schema != nil {
+		if t, err = expandSchema(*target.AdditionalItems.Schema, parentRefs, resolver); err != nil {
+			return
 		}
+		*target.AdditionalItems.Schema = *t
 	}
-	for i := range schema.OneOf {
-		sch := &(schema.OneOf[i])
-		if err := expandSchema(sch, parentRef, resolver); err != nil {
-			return err
+	for k, _ := range target.Definitions {
+		if t, err = expandSchema(target.Definitions[k], parentRefs, resolver); err != nil {
+			return
 		}
+		target.Definitions[k] = *t
 	}
-	if schema.Not != nil {
-		sch := schema.Not
-		if err := expandSchema(sch, parentRef, resolver); err != nil {
-			return err
-		}
-	}
-	for k, v := range schema.Properties {
-		if err := expandSchema(&v, parentRef, resolver); err != nil {
-			return err
-		}
-		schema.Properties[k] = v
-	}
-	if schema.AdditionalProperties != nil && schema.AdditionalProperties.Schema != nil {
-		sch := schema.AdditionalProperties.Schema
-		if err := expandSchema(sch, parentRef, resolver); err != nil {
-			return err
-		}
-	}
-	for k, v := range schema.PatternProperties {
-		vp := &v
-		if err := expandSchema(vp, parentRef, resolver); err != nil {
-			return err
-		}
-		schema.PatternProperties[k] = *vp
-	}
-	for k, v := range schema.Dependencies {
-		if v.Schema != nil {
-			sch := v.Schema
-			if err := expandSchema(sch, parentRef, resolver); err != nil {
-				return err
-			}
-			schema.Dependencies[k] = v
-		}
-	}
-	if schema.AdditionalItems != nil && schema.AdditionalItems.Schema != nil {
-		sch := schema.AdditionalItems.Schema
-		if err := expandSchema(sch, parentRef, resolver); err != nil {
-			return err
-		}
-	}
-	for k, v := range schema.Definitions {
-		if err := expandSchema(&v, parentRef, resolver); err != nil {
-			return err
-		}
-		schema.Definitions[k] = v
-	}
-	return nil
+	return
 }
 
 func expandPathItem(pathItem *PathItem, resolver *schemaLoader) error {
@@ -582,12 +589,14 @@ func expandResponse(response *Response, resolver *schemaLoader) error {
 	}
 
 	if response.Schema != nil {
-		parentRef := response.Schema.Ref.String()
+		parentRefs := []string{response.Schema.Ref.String()}
 		if err := resolver.Resolve(&response.Schema.Ref, &response.Schema); err != nil {
 			return err
 		}
-		if err := expandSchema(response.Schema, parentRef, resolver); err != nil {
+		if s, err := expandSchema(*response.Schema, parentRefs, resolver); err != nil {
 			return err
+		} else {
+			*response.Schema = *s
 		}
 	}
 	return nil
@@ -603,12 +612,14 @@ func expandParameter(parameter *Parameter, resolver *schemaLoader) error {
 		}
 	}
 	if parameter.Schema != nil {
-		parentRef := parameter.Schema.Ref.String()
+		parentRefs := []string{parameter.Schema.Ref.String()}
 		if err := resolver.Resolve(&parameter.Schema.Ref, &parameter.Schema); err != nil {
 			return err
 		}
-		if err := expandSchema(parameter.Schema, parentRef, resolver); err != nil {
+		if s, err := expandSchema(*parameter.Schema, parentRefs, resolver); err != nil {
 			return err
+		} else {
+			*parameter.Schema = *s
 		}
 	}
 	return nil
