@@ -23,10 +23,10 @@ import (
 	"github.com/go-openapi/errors"
 	"github.com/go-openapi/loads"
 	"github.com/go-openapi/runtime"
+	"github.com/go-openapi/runtime/middleware/denco"
 	"github.com/go-openapi/spec"
 	"github.com/go-openapi/strfmt"
 	"github.com/gorilla/context"
-	"github.com/naoina/denco"
 )
 
 // RouteParam is a object to capture route params in a framework agnostic way.
@@ -81,7 +81,8 @@ func newRouter(ctx *Context, next http.Handler) http.Handler {
 				return
 			}
 		} else {
-			if p := strings.TrimPrefix(r.URL.Path, basePath); len(p) < len(r.URL.Path) {
+			ep := r.URL.EscapedPath()
+			if p := strings.TrimPrefix(ep, basePath); len(p) < len(ep) {
 				r.URL.Path = p
 				if _, ok := ctx.RouteInfo(r); ok {
 					next.ServeHTTP(rw, r)
@@ -166,6 +167,7 @@ type routeEntry struct {
 	Formats        strfmt.Registry
 	Binder         *untypedRequestBinder
 	Authenticators map[string]runtime.Authenticator
+	Scopes         map[string][]string
 }
 
 // MatchedRoute represents the route that was matched in this request
@@ -215,6 +217,11 @@ func (d *defaultRouteBuilder) AddRoute(method, path string, operation *spec.Oper
 		produces := d.analyzer.ProducesFor(operation)
 		parameters := d.analyzer.ParamsFor(method, path)
 		definitions := d.analyzer.SecurityDefinitionsFor(operation)
+		requirements := d.analyzer.SecurityRequirementsFor(operation)
+		scopes := make(map[string][]string, len(requirements))
+		for _, v := range requirements {
+			scopes[v.Name] = v.Scopes
+		}
 
 		record := denco.NewRecord(pathConverter.ReplaceAllString(path, ":$1"), &routeEntry{
 			Operation:      operation,
@@ -227,6 +234,7 @@ func (d *defaultRouteBuilder) AddRoute(method, path string, operation *spec.Oper
 			Formats:        d.api.Formats(),
 			Binder:         newUntypedRequestBinder(parameters, d.spec.Spec(), d.api.Formats()),
 			Authenticators: d.api.AuthenticatorsFor(definitions),
+			Scopes:         scopes,
 		})
 		d.records[mn] = append(d.records[mn], record)
 	}
