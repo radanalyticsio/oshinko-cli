@@ -72,6 +72,14 @@ vendor directory and their entries added to the `Godeps.json` file.
    `./vendor/github.com/openshift/origin/` directory
 1. add rest dependencies to `vendor` directory and `Godeps.json` file
 
+*Note on REST server dependencies*
+As of the v0.2.2 release of the oshinko-cli package, the REST server has the
+following dependencies above and beyond the dependencies for core and cli:
+1. github.com/jessevdk/go-flags
+1. github.com/rs/cors
+1. github.com/rs/xhandler
+1. github.com/tylerb/graceful
+
 ## Unit tests
 
 All code that is contributed to this project should include unit tests that
