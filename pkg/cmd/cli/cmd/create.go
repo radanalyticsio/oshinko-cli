@@ -33,6 +33,7 @@ func NewCmdCreateExtended(fullName string, f *clientcmd.Factory, in io.Reader, o
 }
 
 func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended bool) *cobra.Command {
+	var cmdString string
 	authOptions := &auth.AuthOptions{
 		Reader: reader,
 		Out:    out,
@@ -41,11 +42,20 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 		AuthOptions: *authOptions,
 	}
 
+
+	if extended {
+		cmdString = "create_eph"
+
+	} else {
+		cmdString = "create"
+	}
+
 	cmd := &cobra.Command{
-		Use: "create <NAME> ",
+		Use: cmdString + " <NAME> ",
 		//--masters <MASTER> --workers <WORKERS> --image <IMAGE> --sparkmasterconfig <DIR>
 		Short: "Create new spark clusters",
 		Long:  "Create spark cluster.",
+		Hidden: extended,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Complete(f, cmd, args); err != nil {
 				kcmdutil.CheckErr(kcmdutil.UsageError(cmd, err.Error()))

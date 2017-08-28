@@ -22,6 +22,7 @@ func NewCmdDeleteExtended(fullName string, f *clientcmd.Factory, in io.Reader, o
 }
 
 func CmdDelete(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended bool) *cobra.Command {
+	var cmdString string
 	authOptions := &auth.AuthOptions{
 		Reader: reader,
 		Out:    out,
@@ -30,9 +31,16 @@ func CmdDelete(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 		AuthOptions: *authOptions,
 	}
 
+	if extended {
+		cmdString = "delete_eph"
+	} else {
+		cmdString = "delete"
+	}
+
 	cmd := &cobra.Command{
-		Use:   "delete <NAME>",
+		Use:   cmdString + " <NAME>",
 		Short: "Delete spark cluster by name.",
+		Hidden: extended,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Complete(f, cmd, args); err != nil {
 				kcmdutil.CheckErr(kcmdutil.UsageError(cmd, err.Error()))

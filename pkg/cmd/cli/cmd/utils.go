@@ -9,19 +9,19 @@ import (
 )
 
 // NameFromCommandArgs is a utility function for commands that assume the first argument is a resource name
-func NameFromCommandArgs(cmd *cobra.Command, args []string) (string, error) {
+func NameFromCommandArgs(cmd *cobra.Command, args []string, noNameRequired bool) (string, error) {
 	if len(args) == 0 {
-		return "", getErrorForNoName(cmd)
+
+		return "", getErrorForNoName(noNameRequired)
 	}
 	return args[0], nil
 }
 
-func getErrorForNoName(cmd *cobra.Command) error {
-	if cmd.Name() == "get" {
+func getErrorForNoName(noNameRequired bool) error {
+	if noNameRequired {
 		return nil
-	} else {
-		return fmt.Errorf("NAME is required")
 	}
+	return fmt.Errorf("NAME is required")
 }
 
 func prettyprint(b []byte) ([]byte, error) {
