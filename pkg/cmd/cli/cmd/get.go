@@ -83,6 +83,7 @@ func NewCmdGetExtended(fullName string, f *osclientcmd.Factory, in io.Reader, ou
 }
 
 func CmdGet(f *osclientcmd.Factory, reader io.Reader, out io.Writer, extended bool) *cobra.Command {
+	var cmdString string
 	authOptions := &auth.AuthOptions{
 		Reader: reader,
 		Out:    out,
@@ -90,11 +91,19 @@ func CmdGet(f *osclientcmd.Factory, reader io.Reader, out io.Writer, extended bo
 	options := &CmdOptions{
 		AuthOptions: *authOptions,
 		Verbose:     false,
+		NoNameRequired: true,
+	}
+
+	if extended {
+		cmdString = "get_eph"
+	} else {
+		cmdString = "get"
 	}
 
 	cmds := &cobra.Command{
-		Use:   "get",
+		Use:   cmdString,
 		Short: "Get running spark clusters",
+		Hidden: extended,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Complete(f, cmd, args); err != nil {
 				kcmdutil.CheckErr(err)

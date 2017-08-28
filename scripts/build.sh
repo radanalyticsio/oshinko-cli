@@ -17,12 +17,6 @@ TAG="${TAG}-${GIT_COMMIT}"
 APP=oshinko
 
 CMD=$1
-if [ $CMD = build ]; then
-   TAGS="-tags standard"
-elif [ $CMD = extended ]; then
-   TAGS="-tags extended"
-   CMD="build"
-fi
 
 OUTPUT_DIR="_output"
 OUTPUT_PATH="$OUTPUT_DIR/$APP"
@@ -33,7 +27,7 @@ TARGET=./cmd/oshinko
 # 1.5 is still in use.
 export GO15VENDOREXPERIMENT=1
 if [ $CMD = build ]; then
-    go build $GO_OPTIONS $TAGS -ldflags \
+    go build $GO_OPTIONS -ldflags \
     "-X $PROJECT/version.gitTag=$TAG -X $PROJECT/version.appName=$APP" \
     -o $OUTPUT_PATH $TARGET
     if [ "$?" -eq 0 ]; then
@@ -41,7 +35,3 @@ if [ $CMD = build ]; then
        ln -s ./oshinko $OUTPUT_DIR/oshinko-cli
     fi
 fi
-
-
-
-

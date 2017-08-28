@@ -1,5 +1,3 @@
-// +build extended
-
 package cmd
 
 import (
@@ -29,6 +27,7 @@ func CmdConfigMap(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.
 		Use:   "configmap <NAME> ",
 		Short: "Return a configmap in json",
 		Long:  "Lookup a configmap by name and print as json if it exists",
+		Hidden: true,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Complete(f, cmd, args); err != nil {
 				kcmdutil.CheckErr(kcmdutil.UsageError(cmd, err.Error()))

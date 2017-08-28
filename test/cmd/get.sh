@@ -16,8 +16,8 @@ os::cmd::expect_success "oc whoami -t"
 os::cmd::expect_success "oc whoami"
 
 #create
-os::cmd::expect_success "_output/oshinko create abc --workers=1 --token=`oc whoami -t`"
-VERBOSE=true os::cmd::expect_success "_output/oshinko get abc --token=`oc whoami -t` -o json"
+os::cmd::expect_success "_output/oshinko create abc --workers=1"
+VERBOSE=true os::cmd::expect_success "_output/oshinko get abc -o json"
 
 #scale
 os::cmd::expect_success_and_text "_output/oshinko scale abc --token=`oc whoami -t`" "neither masters nor workers specified, cluster \"abc\" not scaled"

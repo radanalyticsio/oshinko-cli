@@ -11,20 +11,20 @@ import (
 )
 
 type CmdOptions struct {
-	Name         string `json:"name,omitempty"`
-	Image        string `json:"image"`
-	WorkerCount  int    `json:"workerCount"`
-	MasterCount  int    `json:"masterCount,omitempty"`
-	MasterConfig string `json:"sparkMasterConfig,omitempty"`
-	WorkerConfig string `json:"workerConfig,omitempty"`
-	StoredConfig string `json:"storedConfig,omitempty"`
-	ExposeWebUI  bool   `json:"exposeui,omitempty"`
-	AppStatus    string `json:"appStatus,omitempty"`
-	App          string `json:"app,omitempty"`
-	Verbose      bool
-	Output       string
-	Ephemeral    bool
-
+	Name           string `json:"name,omitempty"`
+	Image          string `json:"image"`
+	WorkerCount    int    `json:"workerCount"`
+	MasterCount    int    `json:"masterCount,omitempty"`
+	MasterConfig   string `json:"sparkMasterConfig,omitempty"`
+	WorkerConfig   string `json:"workerConfig,omitempty"`
+	StoredConfig   string `json:"storedConfig,omitempty"`
+	ExposeWebUI    bool   `json:"exposeui,omitempty"`
+	AppStatus      string `json:"appStatus,omitempty"`
+	App            string `json:"app,omitempty"`
+	Verbose        bool
+	Output         string
+	Ephemeral      bool
+	NoNameRequired bool
 	auth.AuthOptions
 }
 
@@ -36,7 +36,7 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	o.WorkerCount = clusters.SentinelCountValue
 	o.MasterCount = clusters.SentinelCountValue
 
-	currentCluster, err := NameFromCommandArgs(cmd, args)
+	currentCluster, err := NameFromCommandArgs(cmd, args, o.NoNameRequired)
 	if err != nil {
 		return err
 	}

@@ -12,6 +12,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	oshinkocmd "github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/cmd"
 )
 
 const (
@@ -24,6 +25,23 @@ This client helps you deploy, scale and run your spark applications on Openshift
 To see the full list of commands supported, run '%[1]s help'.
 `
 )
+
+func GetCommandGroups(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) (
+	templates.CommandGroups,
+	*cobra.Command) {
+	first := oshinkocmd.NewCmdGet(fullName, f, in, out)
+	return templates.CommandGroups{
+		{
+			Message: "Basic Commands:",
+			Commands: []*cobra.Command{
+				first,
+				oshinkocmd.NewCmdDelete(fullName, f, in, out),
+				oshinkocmd.NewCmdCreate(fullName, f, in, out),
+				oshinkocmd.NewCmdScale(fullName, f, in, out),
+			},
+		},
+	}, first
+}
 
 func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *cobra.Command {
 	// Main command
@@ -56,6 +74,12 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 
 	cmds.AddCommand(cmd.NewCmdVersion(fullName, f, in, out))
 	cmds.AddCommand(NewCmdOptions(out))
+
+	// Add hidden commands
+	cmds.AddCommand(oshinkocmd.NewCmdConfigMap(fullName, f, in, out))
+	cmds.AddCommand(oshinkocmd.NewCmdCreateExtended(fullName, f, in, out))
+	cmds.AddCommand(oshinkocmd.NewCmdDeleteExtended(fullName, f, in, out))
+	cmds.AddCommand(oshinkocmd.NewCmdGetExtended(fullName, f, in, out))
 	return cmds
 }
 
