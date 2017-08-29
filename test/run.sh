@@ -47,6 +47,7 @@ function find_tests() {
 
 orig_project=$(oc project -q)
 failed_list=""
+export USING_OPENSHIFT_INSTANCE=true
 
 dirs=($(find "${OS_ROOT}/test/cmd/" -type d))
 for dir in "${dirs[@]}"; do

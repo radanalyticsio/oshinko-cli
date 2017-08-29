@@ -26,9 +26,13 @@ os::cmd::expect_failure_and_text "_output/oshinko delete_eph bob --app=sam-1 --a
 os::cmd::expect_success "_output/oshinko create fodder"
 os::cmd::expect_success_and_text "_output/oshinko create_eph -e cluster --app=fodder-m-1" 'ephemeral cluster "cluster" created'
 os::cmd::expect_failure_and_text "_output/oshinko delete_eph cluster --app=someother --app-status=terminated" "cluster is not linked to app"
-os::cmd::try_until_text "oc get rc fodder-m-1 --template='{{index .status \"replicas\"}}'" "1"
 
-os::cmd::expect_failure_and_text "_output/oshinko delete_eph cluster --app=fodder-m-1 --app-status=terminated" "driver replica count > 0 \(or > 1 for completed app\)"
+# replica count won't work for hack/test-cmd, so only do this test when we're started from run.sh
+if [ "${USING_OPENSHIFT_INSTANCE:-false}" == true ]; then
+    os::cmd::try_until_text "oc get rc fodder-m-1 --template='{{index .status \"replicas\"}}'" "1"
+    os::cmd::expect_failure_and_text "_output/oshinko delete_eph cluster --app=fodder-m-1 --app-status=terminated" "driver replica count > 0 \(or > 1 for completed app\)"
+fi
+
 os::cmd::expect_success "_output/oshinko delete_eph cluster --app=fodder-m-1 --app-status=completed"
 
 os::test::junit::declare_suite_end
