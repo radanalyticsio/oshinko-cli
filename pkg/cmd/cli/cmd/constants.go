@@ -2,7 +2,7 @@ package cmd
 
 const (
 	ScaleCmdUsage   = "scale <NAME>"
-	ScaleCmdShort   = "Scale spark cluster by name."
+	ScaleCmdShort   = "Scale spark cluster by name"
 	clustersExample = `  # Display the spark cluster %[1]s`
 
 	defaultImage = "radanalyticsio/openshift-spark"

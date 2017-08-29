@@ -60,7 +60,7 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 	}
 
 	f := clientcmd.New(cmds.PersistentFlags())
-	groups, firstcmd := GetCommandGroups(fullName, f, in, out)
+	groups, _ := GetCommandGroups(fullName, f, in, out)
 	groups.Add(cmds)
 	changeSharedFlagDefaults(cmds)
 
@@ -68,15 +68,20 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 		"options",
 	}
 
-	templates.ActsAsRootCommand(cmds, filters, groups...).
-		ExposeFlags(firstcmd, "server", "client-certificate",
-			"client-key", "certificate-authority", "insecure-skip-tls-verify", "token")
-
 	cmds.AddCommand(cmd.NewCmdVersion(fullName, f, in, out))
 	cmds.AddCommand(NewCmdOptions(out))
 
 	// Add hidden commands
-	cmds.AddCommand(oshinkocmd.NewCmdConfigMap(fullName, f, in, out))
+	tmp := oshinkocmd.NewCmdConfigMap(fullName, f, in, out)
+	cmds.AddCommand(tmp)
+
+	// If we move the expose to one of the hidden commands,
+	// then the printing of the help is still messed up for the
+	// exposed flags but at least it's not on one of the main commands
+	templates.ActsAsRootCommand(cmds, filters, groups...).
+		ExposeFlags(tmp, "server", "client-certificate",
+		"client-key", "certificate-authority", "insecure-skip-tls-verify", "token")
+
 	cmds.AddCommand(oshinkocmd.NewCmdCreateExtended(fullName, f, in, out))
 	cmds.AddCommand(oshinkocmd.NewCmdDeleteExtended(fullName, f, in, out))
 	cmds.AddCommand(oshinkocmd.NewCmdGetExtended(fullName, f, in, out))
