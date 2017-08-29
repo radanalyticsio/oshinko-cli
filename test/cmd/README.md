@@ -24,9 +24,15 @@ To run a set of suites matching some regex, use:
 $ hack/test-cmd.sh <regex>
 ```
 
-Any test suite can also be run if an OpenShift instance is running and you are the cluster admin by running the scripts inside of
-`test/cmd`. The scripts will use the current project. All scripts assume cluster-admin privilege.
+## Running Tests on an OpenShift instance
 
+Use the script `test/run.sh` to run tests against an OpenShift instance. The script
+assumes a current login. A new project will be created (and deleted) for each test run.
+
+Single suites and suites matching some regex work as described above.
+
+For debugging, you can set the env var CLI_SAVE_FAIL=true. This will cause run.sh
+to leave a project that contains failed tests.
 
 ## Adding Tests
 

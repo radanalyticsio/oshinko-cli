@@ -53,8 +53,7 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 	cmd := &cobra.Command{
 		Use: cmdString + " <NAME> ",
 		//--masters <MASTER> --workers <WORKERS> --image <IMAGE> --sparkmasterconfig <DIR>
-		Short: "Create new spark clusters",
-		Long:  "Create spark cluster.",
+		Short: "Create new spark cluster",
 		Hidden: extended,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Complete(f, cmd, args); err != nil {
