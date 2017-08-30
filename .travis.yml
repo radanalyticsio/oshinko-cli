@@ -59,7 +59,7 @@ install:
 before_script:
 script:
 - if [ "$TO_TEST" = "cmd-test" ]; then make test-cmd ; fi
-- if [ "$TO_TEST" = "e2e" ]; then TEST_ONLY=1; test/extended/s2i.sh ; fi
+- if [ "$TO_TEST" = "e2e" ]; then make build; test/run.sh ; fi
 notifications:
  email:
    on_success: never
