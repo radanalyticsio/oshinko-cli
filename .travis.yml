@@ -6,7 +6,6 @@ services:
 - docker
 matrix:
   include:
-    - env: TO_TEST=cmd-test
     - env: TO_TEST=e2e
   fast_finish: true
 
