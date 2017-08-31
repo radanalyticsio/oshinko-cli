@@ -132,7 +132,7 @@ func CmdGet(f *osclientcmd.Factory, reader io.Reader, out io.Writer, extended bo
 	cmds.Flags().StringP("output", "o", "", "Output format. One of: json|yaml")
 	cmds.Flags().BoolVarP(&options.Verbose, "verbose", "v", options.Verbose, "Turn on verbose output\n\n")
 	if extended {
-		cmds.Flags().String("app", "", "Get the clusters associated with the app (value may be the name of a pod or deployment). Ignored if a name is specified.")
+		cmds.Flags().String("app", "", "Get the clusters associated with the app. The value may be the name of a pod or deployment (but not a deploymentconfig). Ignored if a name is specified.")
 	}
 	return cmds
 }
