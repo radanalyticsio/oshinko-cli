@@ -53,6 +53,10 @@ func (o *CmdOptions) RunCmdConfigMap(out io.Writer, cmd *cobra.Command, args []s
 		return err
 	}
 	if cmap != nil && o.Directory != "" {
+		_, err := os.Stat(o.Directory)
+		if err != nil {
+			return err
+		}
 		for k, v := range cmap.Data {
 			file, err := os.Create(filepath.Join(o.Directory, k))
 			if err == nil {
