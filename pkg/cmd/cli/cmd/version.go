@@ -34,6 +34,6 @@ func CmdVersion(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Co
 
 func (o *CmdOptions) RunVersion(out io.Writer, cmd *cobra.Command, args []string) error {
 
-	fmt.Fprintf(out, "%s %s\n", version.GetAppName(), version.GetVersion())
+	fmt.Fprintf(out, "%s %s\nDefault spark image: %s\n", version.GetAppName(), version.GetVersion(), version.GetSparkImage())
 	return nil
 }
