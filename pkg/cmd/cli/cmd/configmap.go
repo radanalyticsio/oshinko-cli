@@ -65,7 +65,10 @@ func (o *CmdOptions) RunCmdConfigMap(out io.Writer, cmd *cobra.Command, args []s
 			}
 		}
 	}
-	if o.Output != "" {
+	if o.Output != "" || (o.Output == "" && o.Directory == "") {
+		if o.Output == "" {
+			o.Output = "json"
+		}
 		PrintOutput(o.Output, cmap)
 	}
 	return nil
