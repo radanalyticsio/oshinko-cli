@@ -1,5 +1,6 @@
 #!/bin/sh
 set -ex
+SPARK_IMAGE="radanalyticsio/openshift-spark:2.1-latest"
 
 go get github.com/renstrom/dedent
 go get github.com/docker/go-connections/nat
@@ -28,7 +29,7 @@ TARGET=./cmd/oshinko
 export GO15VENDOREXPERIMENT=1
 if [ $CMD = build ]; then
     go build $GO_OPTIONS -ldflags \
-    "-X $PROJECT/version.gitTag=$TAG -X $PROJECT/version.appName=$APP" \
+    "-X $PROJECT/version.gitTag=$TAG -X $PROJECT/version.appName=$APP -X $PROJECT/version.sparkImage=$SPARK_IMAGE"\
     -o $OUTPUT_PATH $TARGET
     if [ "$?" -eq 0 ]; then
        rm $OUTPUT_DIR/oshinko-cli || true
