@@ -20,4 +20,7 @@ os::cmd::expect_success_and_text '_output/oshinko help delete_eph' 'Delete spark
 os::cmd::expect_success_and_text '_output/oshinko help get_eph' 'Get running spark clusters'
 os::cmd::expect_success_and_text '_output/oshinko help configmap' 'Lookup a configmap by name and print as json if it exists'
 
+SPARK_IMAGE=$(grep -m 1 SPARK_IMAGE= $(dirname "${BASH_SOURCE}")/../../scripts/build.sh | cut -d '=' -f 2 | sed 's/"//g')
+os::cmd::expect_success '_output/oshinko help create | grep Default\ image\ is\ "$SPARK_IMAGE"'
+
 os::test::junit::declare_suite_end

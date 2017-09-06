@@ -11,6 +11,7 @@ import (
 	"github.com/radanalyticsio/oshinko-cli/core/clusters"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+	"github.com/radanalyticsio/oshinko-cli/version"
 )
 
 var (
@@ -72,7 +73,7 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 	cmd.Flags().String("masterconfig", "", "ConfigMap name for spark master")
 	cmd.Flags().String("workerconfig", "", "ConfigMap name for spark worker")
 	cmd.Flags().String("storedconfig", "", "ConfigMap name for spark cluster")
-	cmd.Flags().String("image", "", "spark image to be used. Default image is radanalyticsio/openshift-spark.")
+	cmd.Flags().String("image", "", "spark image to be used. Default image is " + version.GetSparkImage() + ".")
 	cmd.Flags().Bool("exposeui", true, "True will expose the Spark WebUI via a route")
 	if extended {
 		cmd.Flags().BoolP("ephemeral", "e", false, "Treat the cluster as ephemeral. The 'app' flag must also be set.")
@@ -90,7 +91,7 @@ func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string)
 	config.SparkImage = o.Image
 	config.Name = o.StoredConfig
 	config.ExposeWebUI = o.ExposeWebUI
-	result, err := clusters.CreateCluster(o.Name, o.Project, defaultImage, &config, o.Client, o.KClient, o.App, o.Ephemeral)
+	result, err := clusters.CreateCluster(o.Name, o.Project, version.GetSparkImage(), &config, o.Client, o.KClient, o.App, o.Ephemeral)
 	if err != nil {
 		return err
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+	"github.com/radanalyticsio/oshinko-cli/version"
 )
 
 type CmdOptions struct {
@@ -29,7 +30,7 @@ type CmdOptions struct {
 }
 
 func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args []string) error {
-	o.Image = defaultImage
+	o.Image = version.GetSparkImage()
 
 	// Pod counts will be assigned by the default config in oshinko-core,
 	// here values should be defaulted to the sentinel value
