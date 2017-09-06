@@ -23,6 +23,7 @@ type CmdOptions struct {
 	App            string `json:"app,omitempty"`
 	Verbose        bool
 	Output         string
+	Directory      string
 	Ephemeral      bool
 	NoNameRequired bool
 	auth.AuthOptions
@@ -92,6 +93,9 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 		if o.Ephemeral && o.App == "" {
 			return cmdutil.UsageError(cmd, "An app value must be supplied if ephemeral is used")
 		}
+	}
+	if cmd.Flags().Lookup("directory") != nil {
+		o.Directory = kcmdutil.GetFlagString(cmd, "directory")
 	}
 	return nil
 }

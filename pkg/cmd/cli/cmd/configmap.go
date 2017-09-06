@@ -7,6 +7,9 @@ import (
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+	"os"
+	"path/filepath"
+	"fmt"
 )
 
 func NewCmdConfigMap(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) *cobra.Command {
@@ -37,7 +40,9 @@ func CmdConfigMap(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.
 			}
 		},
 	}
-	cmd.Flags().StringP("output", "o", "json", "Output format. One of: json|yaml")
+	cmd.Flags().StringP("output", "o", "", "Output format if set. One of: json|yaml")
+	cmd.Flags().String("directory", "", "Directory in which to write files representing key / value pairs.")
+	cmd.Flags().BoolVarP(&options.Verbose, "verbose", "v", options.Verbose, "Turn on verbose output\n\n")
 	return cmd
 }
 
@@ -47,6 +52,21 @@ func (o *CmdOptions) RunCmdConfigMap(out io.Writer, cmd *cobra.Command, args []s
 	if err != nil {
 		return err
 	}
-	PrintOutput(o.Output, cmap)
+	if cmap != nil && o.Directory != "" {
+		for k, v := range cmap.Data {
+			file, err := os.Create(filepath.Join(o.Directory, k))
+			if err == nil {
+				if o.Verbose {
+					fmt.Printf("Writing %s\n", filepath.Join(o.Directory, k))
+				}
+				file.WriteString(v)
+			} else {
+				return err
+			}
+		}
+	}
+	if o.Output != "" {
+		PrintOutput(o.Output, cmap)
+	}
 	return nil
 }
