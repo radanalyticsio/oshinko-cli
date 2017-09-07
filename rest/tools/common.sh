@@ -1,3 +1,7 @@
+
+TOP_DIR=$(readlink -f `dirname "${BASH_SOURCE[0]}"` | grep -o '.*/oshinko-cli')
+source $TOP_DIR/sparkimage.sh
+
 if [ -n "$OSHINKO_SERVER_TAG" ]
 then
     TAG="$OSHINKO_SERVER_TAG"
@@ -12,4 +16,4 @@ fi
 
 APP=oshinko-rest-server
 
-TAG_APPNAME_FLAGS="-X github.com/radanalyticsio/oshinko-cli/rest/version.gitTag=$TAG -X github.com/radanalyticsio/oshinko-cli/rest/version.appName=$APP"
+TAG_APPNAME_FLAGS="-X github.com/radanalyticsio/oshinko-cli/rest/version.gitTag=$TAG -X github.com/radanalyticsio/oshinko-cli/rest/version.appName=$APP -X github.com/radanalyticsio/oshinko-cli/rest/version.sparkImage=$SPARK_IMAGE"
