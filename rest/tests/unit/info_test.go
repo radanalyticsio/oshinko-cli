@@ -6,6 +6,7 @@ import (
 	"gopkg.in/check.v1"
 
 	"github.com/radanalyticsio/oshinko-cli/rest/helpers/info"
+	"github.com/radanalyticsio/oshinko-cli/rest/version"
 )
 
 func (s *OshinkoUnitTestSuite) TestInAPod(c *check.C) {
@@ -35,7 +36,7 @@ func (s *OshinkoUnitTestSuite) TestGetNamespace(c *check.C) {
 }
 
 func (s *OshinkoUnitTestSuite) TestGetSparkImage(c *check.C) {
-	expectedImage := ""
+	expectedImage := version.GetSparkImage()
 	expectedErr := error(nil)
 	os.Setenv("OSHINKO_CLUSTER_IMAGE", "")
 	observedImage, observedErr := info.GetSparkImage()

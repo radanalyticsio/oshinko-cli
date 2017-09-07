@@ -182,11 +182,16 @@ paths:
                     description: |-
                       Oshinko Web Service Name
                     type: string
+                  default-cluster-image:
+                    description: |-
+                      Default Cluster Image
+                    type: string
                 required:
                   - name
                   - version
                   - web-url
                   - web-service-name
+                  - default-cluster-image
               # INFO(elmiko) should we also add a versions object?
               # will we want to use a hard version in our URLs, for example
               # /v1/clusters
