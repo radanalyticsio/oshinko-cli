@@ -107,6 +107,58 @@ func (o *FindClustersDefault) readResponse(response runtime.ClientResponse, cons
 	return nil
 }
 
+/*FindClustersOKBodyBody find clusters o k body body
+
+swagger:model FindClustersOKBodyBody
+*/
+type FindClustersOKBodyBody struct {
+
+	/* clusters
+
+	Required: true
+	*/
+	Clusters []*ClustersItems0 `json:"clusters"`
+}
+
+// Validate validates this find clusters o k body body
+func (o *FindClustersOKBodyBody) Validate(formats strfmt.Registry) error {
+	var res []error
+
+	if err := o.validateClusters(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
+	if len(res) > 0 {
+		return errors.CompositeValidationError(res...)
+	}
+	return nil
+}
+
+func (o *FindClustersOKBodyBody) validateClusters(formats strfmt.Registry) error {
+
+	if err := validate.Required("findClustersOK"+"."+"clusters", "body", o.Clusters); err != nil {
+		return err
+	}
+
+	for i := 0; i < len(o.Clusters); i++ {
+
+		if swag.IsZero(o.Clusters[i]) { // not required
+			continue
+		}
+
+		if o.Clusters[i] != nil {
+
+			if err := o.Clusters[i].Validate(formats); err != nil {
+				return err
+			}
+		}
+
+	}
+
+	return nil
+}
+
 /*ClustersItems0 clusters items0
 
 swagger:model ClustersItems0
@@ -239,58 +291,6 @@ func (o *ClustersItems0) validateWorkerCount(formats strfmt.Registry) error {
 
 	if err := validate.Required("workerCount", "body", o.WorkerCount); err != nil {
 		return err
-	}
-
-	return nil
-}
-
-/*FindClustersOKBodyBody find clusters o k body body
-
-swagger:model FindClustersOKBodyBody
-*/
-type FindClustersOKBodyBody struct {
-
-	/* clusters
-
-	Required: true
-	*/
-	Clusters []*ClustersItems0 `json:"clusters"`
-}
-
-// Validate validates this find clusters o k body body
-func (o *FindClustersOKBodyBody) Validate(formats strfmt.Registry) error {
-	var res []error
-
-	if err := o.validateClusters(formats); err != nil {
-		// prop
-		res = append(res, err)
-	}
-
-	if len(res) > 0 {
-		return errors.CompositeValidationError(res...)
-	}
-	return nil
-}
-
-func (o *FindClustersOKBodyBody) validateClusters(formats strfmt.Registry) error {
-
-	if err := validate.Required("findClustersOK"+"."+"clusters", "body", o.Clusters); err != nil {
-		return err
-	}
-
-	for i := 0; i < len(o.Clusters); i++ {
-
-		if swag.IsZero(o.Clusters[i]) { // not required
-			continue
-		}
-
-		if o.Clusters[i] != nil {
-
-			if err := o.Clusters[i].Validate(formats); err != nil {
-				return err
-			}
-		}
-
 	}
 
 	return nil

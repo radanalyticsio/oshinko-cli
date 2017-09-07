@@ -1,6 +1,7 @@
 #!/bin/sh
 set -ex
-SPARK_IMAGE="radanalyticsio/openshift-spark:2.1-latest"
+TOP_DIR=$(readlink -f `dirname "$0"` | grep -o '.*/oshinko-cli')
+. $TOP_DIR/sparkimage.sh
 
 go get github.com/renstrom/dedent
 go get github.com/docker/go-connections/nat
