@@ -1,5 +1,6 @@
 #!/bin/sh
 set -ex
+dirname "${BASH_SOURCE[0]}"
 TOP_DIR=$(readlink -f `dirname "${BASH_SOURCE[0]}"` | grep -o '.*/oshinko-cli')
 source $TOP_DIR/sparkimage.sh
 
