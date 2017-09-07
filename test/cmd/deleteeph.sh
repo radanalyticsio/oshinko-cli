@@ -23,16 +23,18 @@ os::cmd::expect_failure_and_text "_output/oshinko delete_eph bob --app=sam-1" "B
 os::cmd::expect_failure_and_text "_output/oshinko delete_eph bob --app-status=completed" "Both --app and --app-status must be set"
 os::cmd::expect_failure_and_text "_output/oshinko delete_eph bob --app=sam-1 --app-status=wrong" "INVALID app-status value, only completed|terminated allowed"
 
-os::cmd::expect_success "_output/oshinko create fodder"
-os::cmd::expect_success_and_text "_output/oshinko create_eph -e cluster --app=fodder-m-1" 'ephemeral cluster "cluster" created'
-os::cmd::expect_failure_and_text "_output/oshinko delete_eph cluster --app=someother --app-status=terminated" "cluster is not linked to app"
+oc new-app hello-world
+os::cmd::try_until_success "oc get rc hello-world-1"
+os::cmd::expect_success_and_text "_output/oshinko create_eph -e cluster --app=hello-world-1" 'ephemeral cluster "cluster" created'
 
 # replica count won't work for hack/test-cmd, so only do this test when we're started from run.sh
 if [ "${USING_OPENSHIFT_INSTANCE:-false}" == true ]; then
-    os::cmd::try_until_text "oc get rc fodder-m-1 --template='{{index .status \"replicas\"}}'" "1"
-    os::cmd::expect_failure_and_text "_output/oshinko delete_eph cluster --app=fodder-m-1 --app-status=terminated" "driver replica count > 0 \(or > 1 for completed app\)"
+    os::cmd::try_until_text "oc get rc cluster-m-1 --template='{{index .status \"replicas\"}}'" "1"
+    os::cmd::try_until_text "oc get rc cluster-m-1 --template='{{index .status \"replicas\"}}'" "1"
+    os::cmd::expect_failure_and_text "_output/oshinko delete_eph cluster --app=hello-world-1 --app-status=terminated" "driver replica count > 0 \(or > 1 for completed app\)"
 fi
+os::cmd::expect_failure_and_text "_output/oshinko delete_eph cluster --app=someother --app-status=terminated" "cluster is not linked to app"
 
-os::cmd::expect_success "_output/oshinko delete_eph cluster --app=fodder-m-1 --app-status=completed"
+os::cmd::expect_success "_output/oshinko delete_eph cluster --app=hello-world-1 --app-status=completed"
 
 os::test::junit::declare_suite_end
