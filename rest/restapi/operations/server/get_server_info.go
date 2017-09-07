@@ -61,6 +61,12 @@ swagger:model GetServerInfoOKBodyApplication
 */
 type GetServerInfoOKBodyApplication struct {
 
+	/* Default Cluster Image
+
+	Required: true
+	*/
+	DefaultClusterImage *string `json:"default-cluster-image"`
+
 	/* Application name
 
 	Required: true
@@ -90,6 +96,11 @@ type GetServerInfoOKBodyApplication struct {
 func (o *GetServerInfoOKBodyApplication) Validate(formats strfmt.Registry) error {
 	var res []error
 
+	if err := o.validateDefaultClusterImage(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
 	if err := o.validateName(formats); err != nil {
 		// prop
 		res = append(res, err)
@@ -113,6 +124,15 @@ func (o *GetServerInfoOKBodyApplication) Validate(formats strfmt.Registry) error
 	if len(res) > 0 {
 		return errors.CompositeValidationError(res...)
 	}
+	return nil
+}
+
+func (o *GetServerInfoOKBodyApplication) validateDefaultClusterImage(formats strfmt.Registry) error {
+
+	if err := validate.Required("getServerInfoOK"+"."+"application"+"."+"default-cluster-image", "body", o.DefaultClusterImage); err != nil {
+		return err
+	}
+
 	return nil
 }
 

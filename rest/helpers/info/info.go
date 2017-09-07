@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"github.com/radanalyticsio/oshinko-cli/rest/version"
 )
 
 const CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
@@ -27,7 +28,11 @@ func GetNamespace() (string, error) {
 }
 
 func GetSparkImage() (string, error) {
-	return os.Getenv("OSHINKO_CLUSTER_IMAGE"), nil
+	image := os.Getenv("OSHINKO_CLUSTER_IMAGE")
+	if image == "" {
+		image = version.GetSparkImage()
+	}
+	return image, nil
 }
 
 func GetKubeConfigPath() string {
