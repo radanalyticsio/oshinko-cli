@@ -37,16 +37,13 @@ func (s *OshinkoUnitTestSuite) TestGetNamespace(c *check.C) {
 
 func (s *OshinkoUnitTestSuite) TestGetSparkImage(c *check.C) {
 	expectedImage := version.GetSparkImage()
-	expectedErr := error(nil)
 	os.Setenv("OSHINKO_CLUSTER_IMAGE", "")
-	observedImage, observedErr := info.GetSparkImage()
+	observedImage := info.GetSparkImage()
 	c.Assert(observedImage, check.Equals, expectedImage)
-	c.Assert(observedErr, check.Equals, expectedErr)
 	expectedImage = "some/test/image"
 	os.Setenv("OSHINKO_CLUSTER_IMAGE", expectedImage)
-	observedImage, observedErr = info.GetSparkImage()
+	observedImage = info.GetSparkImage()
 	c.Assert(observedImage, check.Equals, expectedImage)
-	c.Assert(observedErr, check.Equals, expectedErr)
 }
 
 func (s *OshinkoUnitTestSuite) TestGetKubeConfigPath(c *check.C) {

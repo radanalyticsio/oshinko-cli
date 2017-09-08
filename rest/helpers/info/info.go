@@ -27,12 +27,12 @@ func GetNamespace() (string, error) {
 	return os.Getenv("OSHINKO_CLUSTER_NAMESPACE"), nil
 }
 
-func GetSparkImage() (string, error) {
+func GetSparkImage() string {
 	image := os.Getenv("OSHINKO_CLUSTER_IMAGE")
 	if image == "" {
 		image = version.GetSparkImage()
 	}
-	return image, nil
+	return image
 }
 
 func GetKubeConfigPath() string {
