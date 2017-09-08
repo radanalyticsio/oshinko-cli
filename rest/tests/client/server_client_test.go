@@ -9,10 +9,10 @@ import (
 )
 
 func (s *OshinkoRestTestSuite) TestServerInfo(c *check.C) {
-	resp, _ := s.cli.Server.GetServerInfo(nil)
-
 	val := os.Getenv("OSHINKO_CLUSTER_IMAGE")
 	os.Setenv("OSHINKO_CLUSTER_IMAGE", "")
+
+	resp, _ := s.cli.Server.GetServerInfo(nil)
 
 	expectedName := version.GetAppName()
 	expectedVersion := version.GetVersion()
