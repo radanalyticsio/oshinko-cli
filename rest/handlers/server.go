@@ -15,7 +15,7 @@ func ServerResponse(params server.GetServerInfoParams) middleware.Responder {
 	name := version.GetAppName()
 	webname := info.GetWebServiceName()
 	weburl := GetWebServiceURL()
-	clusterimage := version.GetSparkImage()
+	clusterimage := info.GetSparkImage()
 	payload := server.GetServerInfoOKBodyBody{
 		Application: &server.GetServerInfoOKBodyApplication{
 			Name: &name, Version: &vers,

@@ -149,10 +149,7 @@ func CreateClusterResponse(params apiclusters.CreateClusterParams) middleware.Re
 	// Even if the image comes back "" at this point, let oshinko-core
 	// generate an error. It is possible that the cluster config specifies
 	// an image even if no default is set in the environment
-	image, err := info.GetSparkImage()
-	if err != nil {
-		return reterr(fail(err, imageMsg, 500))
-	}
+	image := info.GetSparkImage()
 
 	client, err := osa.GetKubeClient()
 	if err != nil {
