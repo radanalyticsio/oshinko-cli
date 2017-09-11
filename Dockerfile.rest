@@ -9,4 +9,4 @@ RUN make install
 
 RUN chmod a+rwX -R .
 
-ENTRYPOINT /go/src/github.com/radanalyticsio/oshinko-cli/rest/tools/start_server.sh
+CMD /go/src/github.com/radanalyticsio/oshinko-cli/rest/tools/start_server.sh

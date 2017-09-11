@@ -15,6 +15,7 @@ var optionsGroups *[]swag.CommandLineOptionsGroup
 // New flags should be added to this structure, with helper functions added
 // in this package.
 type oshinkoOptions struct {
+	Info       bool   `long:"info" description:"log version information and exit"`
 	LogFile    string `short:"l" long:"log-file" description:"the file to write logs into, defaults to stdout"`
 	DebugState bool   `short:"d" long:"debug" description:"enable debug mode in the server"`
 	LogLevel   string `long:"loglevel" description:"set the log level (0-10)" default:"0"`
@@ -61,6 +62,21 @@ func DebugEnabled() bool {
 			opts, ok := optsGroup.Options.(*oshinkoOptions)
 			if ok == true {
 				retval = opts.DebugState
+			}
+		}
+	}
+	return retval
+}
+
+// InfoEnabled returns true if the info flag has been invoked on the
+// command line, otherwise false.
+func InfoEnabled() bool {
+	retval := false
+	if optionsGroups != nil {
+		for _, optsGroup := range *optionsGroups {
+			opts, ok := optsGroup.Options.(*oshinkoOptions)
+			if ok == true {
+				retval = opts.Info
 			}
 		}
 	}
