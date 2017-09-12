@@ -29,8 +29,8 @@ os::cmd::expect_success_and_text "_output/oshinko create_eph -e cluster --app=he
 
 # replica count won't work for hack/test-cmd, so only do this test when we're started from run.sh
 if [ "${USING_OPENSHIFT_INSTANCE:-false}" == true ]; then
-    os::cmd::try_until_text 'oc get pod -l deploymentconfig=cluster-m --template="{{index .status \"phase\"}}"' "Running" $((2*minute))
-    os::cmd::try_until_text 'oc get pod -l deploymentconfig="cluster-w" --template="{{index .status \"phase\"}}"' "Running" $((2*minute))
+    os::cmd::try_until_text 'oc get pod -l deploymentconfig=cluster-m --template="{{index .items 0 \"status\" \"phase\"}}"' "Running" $((5*minute))
+    os::cmd::try_until_text 'oc get pod -l deploymentconfig=cluster-w --template="{{index .items 0 \"status\" \"phase\"}}"' "Running" $((5*minute))
     os::cmd::expect_failure_and_text "_output/oshinko delete_eph cluster --app=hello-world-1 --app-status=terminated" "driver replica count > 0 \(or > 1 for completed app\)"
 fi
 os::cmd::expect_failure_and_text "_output/oshinko delete_eph cluster --app=someother --app-status=terminated" "cluster is not linked to app"
