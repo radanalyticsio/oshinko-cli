@@ -10,9 +10,18 @@ oshinko application with default public images. There are several
 parameters in `server-ui-template.yaml` that may be set to launch oshinko
 using alternate images:
 
-* OSHINKO_SERVER_IMAGE  -- the oshinko-rest image
-* OSHINKO_CLUSTER_IMAGE -- the spark image used to create clusters
-* OSHINKO_WEB_IMAGE     -- the oshinko-webui image
+* OSHINKO_SERVER_IMAGE  -- the oshinko-rest image (required, defaulted)
+* OSHINKO_CLUSTER_IMAGE -- the spark image used to create clusters (not required)
+* OSHINKO_WEB_IMAGE     -- the oshinko-webui image (required, defaulted)
+
+Note that the oshinko-rest image already contains a default setting
+for which spark image to use, so the OSHINKO_CLUSTER_IMAGE parameter
+in the template is initially blank.
+
+If you want to see what spark image will be used, running the
+oshinko-rest image like this will print the image default:
+
+    $ docker run --rm radanalyticsio/oshinko-rest oshinko-rest-server --info
 
 Example using images which have been pushed to the integrated registry at
 172.30.159.57:5000 for project "myproject":
@@ -24,9 +33,9 @@ Example using images which have been pushed to the integrated registry at
 
 The `tools/oshinko-deploy.sh` script can deploy the oshinko suite into an existing
 OpenShift deployment or it can start an all-in-one docker OpenShift on the
-host. It will pull the latest upstream images from the radanalyticsio
-organization. It can also be configured to use alternate images, for more
-information see the script help text.
+host. It will pull the latest oshinko-web and oshinko-rest upstream images
+from the radanalyticsio organization. It can also be configured to use alternate
+images, for more information see the script help text.
 
 **Example all-in-one deployment**
 
@@ -54,46 +63,6 @@ The all-in-one deployment requires that the user running the script has
 permission to issue docker commands. If docker is not configured to
 allow non-root access, you will need to invoke this script using `sudo`
 or as the `root` user for an all-in-one deployment.
-
-## Sample script to deploy oshinko from sources in a local OpenShift instance
-
-Use `tools/oshinko-dev-setup.sh` to quickly set up a development environment
-for oshinko. The script will download the necessary source repositories,
-build local images, create a new OpenShift installation using
-`oc cluster up`, push images to the integrated registry, and deploy
-oshinko in a default project.
-
-Example usage:
-
-    $ oshinko-dev-setup.sh -w mywebui.10.16.40.70.xip.io
-
-This will setup a cluster and install oshinko with the oshinko web ui
-accessible at mywebui.10.16.40.70.xip.io (using xip.io is a way to
-get DNS to resolve to the IP, 10.16.40.70 in the example).  You would
-need to use a routeable IP address of your machine.
-
-    $ oshinko-dev-setup.sh -w myweb.10.16.40.70.xip.io -s myregistry.com:5000/sparkimage
-
-This will setup a cluster and install the oshinko bits as in the previous
-example, but will use a custom Spark image that you specified with the
--s flag.  The custom image must use a built-in CMD (specified in the
-Dockerfile) to start Spark and it must also expect an enviornment variable,
-SPARK_MASTER_ADDRESS to be set in the worker nodes.  The oshinko rest server
-will fill-in that value at spawn-time to be set to the address of the Spark
-master node.  For the master node, that value will not be set.  The absence
-of that value is what tells Spark to run as the master node.
-
-It should be noted, that if you do not use a custom Spark image with
-the -s flag, a Spark image will be built for you from the openshift-spark
-repository.
-
-### A note on permissions
-
-The script requires that the user running the script has
-permission to issue docker commands and log into OpenShift as the
-`system:admin` user. If your system is not configured to allow
-non-root users to do these things, you will need to invoke this script using `sudo`
-or as the `root` user.
 
 ## Sample scripts for interacting with oshinko-rest using curl
 
@@ -146,12 +115,12 @@ To do this make a file to setup the env, for instance:
     export GOPATH=/home/oshinko-fork/
     export OSHINKO_CLUSTER_NAMESPACE="spark"
     export OSHINKO_KUBE_CONFIG="/home/user/.kube/config"
-    export OSHINKO_CLUSTER_IMAGE="myrepo/openshift-spark"
+    export OSHINKO_CLUSTER_IMAGE=
 
 This is a convenience that sets the GOPATH, tells oshinko-rest what openshift
 project it will be running in, gives it a path to a valid kube config file
-that it will use for communication with the openshift server, and tells it
-what docker image from an accessible repo to use for creating spark clusters.
+that it will use for communication with the openshift server, and optionally
+tells it what docker image from an accessible repo to use for creating spark clusters.
 (These env values are usually handled via the template that launches
 oshinko-rest in openshift).
 
