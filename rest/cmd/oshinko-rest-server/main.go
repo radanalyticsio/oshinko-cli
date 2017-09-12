@@ -51,11 +51,7 @@ func main() {
 	}
 
 	if oshinkoFlags.InfoEnabled() {
-		img, err := info.GetSparkImage()
-		if err != nil {
-			log.Fatalln(err)
-			os.Exit(1)
-		}
+		img := info.GetSparkImage()
 		log.Println(version.GetAppName() + " " + version.GetVersion())
 		log.Println("Default cluster image: " + img)
 		os.Exit(0)
