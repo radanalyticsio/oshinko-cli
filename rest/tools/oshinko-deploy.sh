@@ -25,9 +25,9 @@ fi
 
 DEFAULT_OSHINKO_REST_IMAGE=radanalyticsio/oshinko-rest
 DEFAULT_OSHINKO_WEB_IMAGE=radanalyticsio/oshinko-webui
-DEFAULT_SPARK_IMAGE=radanalyticsio/openshift-spark
 DEFAULT_OPENSHIFT_USER=developer
 DEFAULT_OPENSHIFT_PROJECT=myproject
+SPARK_IMAGE=
 
 while getopts :dc:u:p:s:w:r:o:t:ih opt; do
     case $opt in
@@ -74,7 +74,7 @@ while getopts :dc:u:p:s:w:r:o:t:ih opt; do
             echo "  -c CLUSTER    OpenShift cluster url to login against (default: https://localhost:8443)"
             echo "  -u USER       OpenShift user to run commands as (default: $DEFAULT_OPENSHIFT_USER)"
             echo "  -p PROJECT    OpenShift project name to install oshinko into (default: $DEFAULT_OPENSHIFT_PROJECT)"
-            echo "  -s IMAGE      spark docker image to use for clusters (default: $DEFAULT_SPARK_IMAGE)"
+            echo "  -s IMAGE      spark docker image to use for clusters (default is set by the rest image)"
             echo "  -w IMAGE      oshinko-webui docker image to use for deployment (default: $DEFAULT_OSHINKO_WEB_IMAGE)"
             echo "  -r IMAGE      oshinko-rest docker image to use for deployment (default: $DEFAULT_OSHINKO_REST_IMAGE)"
             echo "  -o HOSTNAME   hostname to use in exposed route to oshinko-web"
@@ -100,11 +100,6 @@ if [ -z "$PROJECT" ]
 then
     echo "project name not set, using default value"
     PROJECT=$DEFAULT_OPENSHIFT_PROJECT
-fi
-
-if [ -z "$SPARK_IMAGE" ]
-then
-    SPARK_IMAGE=$DEFAULT_SPARK_IMAGE
 fi
 
 if [ -z "$WEB_IMAGE" ]

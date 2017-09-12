@@ -60,8 +60,6 @@ objects:
             valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-          - name: OSHINKO_CLUSTER_IMAGE
-            value: radanalyticsio/openshift-spark
           - name: OSHINKO_SERVER_TAG
             value: ${SOURCE_REF}
         ports:
