@@ -16,7 +16,11 @@ node {
 
 		stage('Build') {
 
-			githubNotify(context: 'jenkins-ci/oshinko-cli', description: 'This change is being built', status: 'PENDING', targetUrl: buildUrl)
+			try {
+				githubNotify(context: 'jenkins-ci/oshinko-cli', description: 'This change is being built', status: 'PENDING', targetUrl: buildUrl)
+			} catch (err) {
+				echo("Wasn't able to notify Github: ${err}")
+			}
 
 			try {
 				// wipeout workspace
@@ -44,18 +48,25 @@ node {
 					sh('make build | tee -a build.log')
 				}
 			} catch (err) {
-				githubNotify (context: 'jenkins-ci/oshinko-cli', description: 'This change cannot be built', status: 'ERROR', targetUrl: buildUrl)
+				try {
+					githubNotify(context: 'jenkins-ci/oshinko-cli', description: 'This change cannot be built', status: 'ERROR', targetUrl: buildUrl)
+				} catch (errNotify) {
+					echo("Wasn't able to notify Github: ${errNotify}")
+				}
 				throw err
 			} finally {
 				dir('src/github.com/radanalyticsio/oshinko-cli') {
 					archiveArtifacts(allowEmptyArchive: true, artifacts: 'build.log')
 				}
 			}
-
 		}
 		stage('Test') {
 			try {
-				githubNotify(context: 'jenkins-ci/oshinko-cli', description: 'This change is being tested', status: 'PENDING', targetUrl: buildUrl)
+				try {
+					githubNotify(context: 'jenkins-ci/oshinko-cli', description: 'This change is being tested', status: 'PENDING', targetUrl: buildUrl)
+				} catch (err) {
+					echo("Wasn't able to notify Github: ${err}")
+				}
 
 				// login to openshift instance
 				sh('oc login https://$OCP_HOSTNAME:8443 -u $OCP_USER -p $OCP_PASSWORD --insecure-skip-tls-verify=true')
@@ -67,7 +78,11 @@ node {
 					sh('./test/run.sh | tee -a test.log')
 				}
 			} catch (err) {
-				githubNotify(context: 'jenkins-ci/oshinko-cli', description: 'There are test failures', status: 'FAILURE', targetUrl: buildUrl)
+				try {
+					githubNotify(context: 'jenkins-ci/oshinko-cli', description: 'There are test failures', status: 'FAILURE', targetUrl: buildUrl)
+				} catch (errNotify) {
+					echo("Wasn't able to notify Github: ${errNotify}")
+				}
 				throw err
 			} finally {
 				dir('src/github.com/radanalyticsio/oshinko-cli') {
@@ -75,7 +90,11 @@ node {
 				}
 			}
 
-			githubNotify(context: 'jenkins-ci/oshinko-cli', description: 'This change looks good', status: 'SUCCESS', targetUrl: buildUrl)
+			try {
+				githubNotify(context: 'jenkins-ci/oshinko-cli', description: 'This change looks good', status: 'SUCCESS', targetUrl: buildUrl)
+			} catch (err) {
+				echo("Wasn't able to notify Github: ${err}")
+			}
 		}
 	}
 }
