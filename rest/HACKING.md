@@ -3,31 +3,70 @@
 This document covers some common tips and tricks for developing, debugging,
 and extending the oshinko-rest application.
 
-## Overriding default images in the server-ui-template.yaml
+### Using server-ui-template.yaml directly
 
 The `tools` directory contains a template for launching the
-oshinko application with default public images. There are several
-parameters in `server-ui-template.yaml` that may be set to launch oshinko
+oshinko application with default public images. The simplest way to use
+this template is via the `oshinko-deploy.sh` script described below.
+
+If you use the template directly, you will have to first manually create the oshinko
+service account. For example, in the project *myproject* do this:
+
+    $ oc create sa oshinko
+    $ oc policy add-role-to-user admin system:serviceaccount:myproject:oshinko
+
+Then launch the template
+
+    $ oc process -f tools/server-ui-template.yaml | oc create -f -
+
+## Overriding default images in the server-ui-template.yaml
+
+There are several parameters in `server-ui-template.yaml` that may be set to launch oshinko
 using alternate images:
 
 * OSHINKO_SERVER_IMAGE  -- the oshinko-rest image (required, defaulted)
-* OSHINKO_CLUSTER_IMAGE -- the spark image used to create clusters (not required)
+* OSHINKO_CLUSTER_IMAGE -- the spark image used by oshinko-rest to create clusters (not required)
 * OSHINKO_WEB_IMAGE     -- the oshinko-webui image (required, defaulted)
 
 Note that the oshinko-rest image already contains a default setting
 for which spark image to use, so the OSHINKO_CLUSTER_IMAGE parameter
 in the template is initially blank.
 
-If you want to see what spark image will be used, running the
-oshinko-rest image like this will print the image default:
-
-    $ docker run --rm radanalyticsio/oshinko-rest oshinko-rest-server --info
-
 Example using images which have been pushed to the integrated registry at
 172.30.159.57:5000 for project "myproject":
 
     $ oc process -f tools/server-ui-template.yaml -v OSHINKO_SERVER_IMAGE=172.30.159.57:5000/myproject/oshinko-rest,OSHINKO_CLUSTER_IMAGE=172.30.159.57:5000/myproject/openshift-spark,OSHINKO_WEB_IMAGE=172.30.159.57:5000/myproject/oshinko-webui > server-template.json
     $ oc create -f server-template.json
+
+### Producing a version of server-ui-template.yaml for a particular release
+
+Tagged images are produced for oshinko-rest and oshinko-webui with each
+oshinko release. If you want to create a server-ui-template.yaml that uses
+images from a particular release, you can run the `release-templates.sh` script
+to create it. For example:
+
+    $ ./release-templates.sh v0.2.6
+    Successfully wrote templates to release_templates/ with version tag v0.2.6
+
+    grep radanalyticsio/oshinko-.*:v0.2.6 *
+
+    value: radanalyticsio/oshinko-rest:v0.2.6
+    value: radanalyticsio/oshinko-webui:v0.2.6
+
+If you are using `oshinko-deploy.sh`, you can specify the new
+`release_templates/server-ui-template.yaml` as the value for
+the `-t` option as described below.
+
+### Checking the default spark image for oshinko-rest and oshinko-web
+
+If you want to see what spark image will be used by oshinko, running an
+oshinko-rest image like this will print the image default:
+
+    $ docker run --rm radanalyticsio/oshinko-rest oshinko-rest-server --info
+
+For oshinko-webui do this:
+
+    $ docker run --rm radanalyticsio/oshinko-webui /usr/src/app/info.sh
 
 ## Sample script to deploy the oshinko application with existing images
 

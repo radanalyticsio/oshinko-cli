@@ -23,11 +23,11 @@ else
     exit 1
 fi
 
-DEFAULT_OSHINKO_REST_IMAGE=radanalyticsio/oshinko-rest
-DEFAULT_OSHINKO_WEB_IMAGE=radanalyticsio/oshinko-webui
 DEFAULT_OPENSHIFT_USER=developer
 DEFAULT_OPENSHIFT_PROJECT=myproject
 SPARK_IMAGE=
+WEB_IMAGE=
+REST_IMAGE=
 
 while getopts :dc:u:p:s:w:r:o:t:ih opt; do
     case $opt in
@@ -75,8 +75,8 @@ while getopts :dc:u:p:s:w:r:o:t:ih opt; do
             echo "  -u USER       OpenShift user to run commands as (default: $DEFAULT_OPENSHIFT_USER)"
             echo "  -p PROJECT    OpenShift project name to install oshinko into (default: $DEFAULT_OPENSHIFT_PROJECT)"
             echo "  -s IMAGE      spark docker image to use for clusters (default is set by the rest image)"
-            echo "  -w IMAGE      oshinko-webui docker image to use for deployment (default: $DEFAULT_OSHINKO_WEB_IMAGE)"
-            echo "  -r IMAGE      oshinko-rest docker image to use for deployment (default: $DEFAULT_OSHINKO_REST_IMAGE)"
+            echo "  -w IMAGE      oshinko-webui docker image to use for deployment (default is set in the template)"
+            echo "  -r IMAGE      oshinko-rest docker image to use for deployment (default is set in the template)"
             echo "  -o HOSTNAME   hostname to use in exposed route to oshinko-web"
             echo "  -t TEMPLATE   an OpenShift template file to deploy oshinko (default: tools/server-ui-template.yaml curl'd from upstream)"
             echo "  -i            do not load the oshinko s2i templates into the project (default: curl from the oshinko-s2i upstream repo)"
@@ -102,14 +102,14 @@ then
     PROJECT=$DEFAULT_OPENSHIFT_PROJECT
 fi
 
-if [ -z "$WEB_IMAGE" ]
+if [ -n "$WEB_IMAGE" ]
 then
-    WEB_IMAGE=$DEFAULT_OSHINKO_WEB_IMAGE
+    WEB_IMAGE="-p OSHINKO_WEB_IMAGE=$WEB_IMAGE"
 fi
 
-if [ -z "$REST_IMAGE" ]
+if [ -n "$WEB_IMAGE" ]
 then
-    REST_IMAGE=$DEFAULT_OSHINKO_REST_IMAGE
+    REST_IMAGE="-p OSHINKO_SERVER_IMAGE=$REST_IMAGE"
 fi
 
 if [ -n "$OS_ALLINONE" ]
@@ -158,14 +158,10 @@ if [ -n "$WEBROUTE" ]
 then
 oc new-app --template oshinko \
            -n $PROJECT \
-           -p OSHINKO_SERVER_IMAGE=$REST_IMAGE \
            -p OSHINKO_CLUSTER_IMAGE=$SPARK_IMAGE \
-           -p OSHINKO_WEB_IMAGE=$WEB_IMAGE \
-           -p OSHINKO_WEB_ROUTE_HOSTNAME=$WEBROUTE
+           -p OSHINKO_WEB_ROUTE_HOSTNAME=$WEBROUTE $WEB_IMAGE $REST_IMAGE
 else
 oc new-app --template oshinko \
            -n $PROJECT \
-           -p OSHINKO_SERVER_IMAGE=$REST_IMAGE \
-           -p OSHINKO_CLUSTER_IMAGE=$SPARK_IMAGE \
-           -p OSHINKO_WEB_IMAGE=$WEB_IMAGE
+           -p OSHINKO_CLUSTER_IMAGE=$SPARK_IMAGE $WEB_IMAGE $REST_IMAGE
 fi
