@@ -41,12 +41,17 @@ node {
 
 				// build
 				dir('src/github.com/radanalyticsio/oshinko-cli') {
-					sh('make build')
+					sh('make build | tee -a build.log')
 				}
 			} catch (err) {
-				githubNotify context: 'jenkins-ci/oshinko-cli', description: 'This change cannot be built', status: 'ERROR', targetUrl: buildUrl
+				githubNotify (context: 'jenkins-ci/oshinko-cli', description: 'This change cannot be built', status: 'ERROR', targetUrl: buildUrl)
 				throw err
+			} finally {
+				dir('src/github.com/radanalyticsio/oshinko-cli') {
+					archiveArtifacts(allowEmptyArchive: true, artifacts: 'build.log')
+				}
 			}
+
 		}
 		stage('Test') {
 			try {
@@ -59,11 +64,15 @@ node {
 
 				// run tests
 				dir('src/github.com/radanalyticsio/oshinko-cli') {
-					sh('./test/run.sh')
+					sh('./test/run.sh | tee -a test.log')
 				}
 			} catch (err) {
 				githubNotify(context: 'jenkins-ci/oshinko-cli', description: 'There are test failures', status: 'FAILURE', targetUrl: buildUrl)
 				throw err
+			} finally {
+				dir('src/github.com/radanalyticsio/oshinko-cli') {
+					archiveArtifacts(allowEmptyArchive: true, artifacts: 'test.log')
+				}
 			}
 
 			githubNotify(context: 'jenkins-ci/oshinko-cli', description: 'This change looks good', status: 'SUCCESS', targetUrl: buildUrl)
