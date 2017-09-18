@@ -45,7 +45,7 @@ oshinko release. If you want to create a server-ui-template.yaml that uses
 images from a particular release, you can run the `release-templates.sh` script
 to create it. For example:
 
-    $ ./release-templates.sh v0.2.6
+    $ ./tools/release-templates.sh v0.2.6
     Successfully wrote templates to release_templates/ with version tag v0.2.6
 
     grep radanalyticsio/oshinko-.*:v0.2.6 *
@@ -53,9 +53,9 @@ to create it. For example:
     value: radanalyticsio/oshinko-rest:v0.2.6
     value: radanalyticsio/oshinko-webui:v0.2.6
 
+The new template will be written to `tools/release_templates/`
 If you are using `oshinko-deploy.sh`, you can specify the new
-`release_templates/server-ui-template.yaml` as the value for
-the `-t` option as described below.
+template as the value for the `-t` option as described below.
 
 ### Checking the default spark image for oshinko-rest and oshinko-web
 
