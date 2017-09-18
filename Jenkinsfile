@@ -45,7 +45,7 @@ node {
 
 				// build
 				dir('src/github.com/radanalyticsio/oshinko-cli') {
-					sh('make build | tee -a build.log')
+					sh('make build | tee -a build.log && exit ${PIPESTATUS[0]}')
 				}
 			} catch (err) {
 				try {
@@ -75,7 +75,7 @@ node {
 
 				// run tests
 				dir('src/github.com/radanalyticsio/oshinko-cli') {
-					sh('./test/run.sh | tee -a test.log')
+					sh('./test/run.sh | tee -a test.log && exit ${PIPESTATUS[0]}')
 				}
 			} catch (err) {
 				try {
