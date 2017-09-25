@@ -73,8 +73,9 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 	cmd.Flags().String("masterconfig", "", "ConfigMap name for spark master")
 	cmd.Flags().String("workerconfig", "", "ConfigMap name for spark worker")
 	cmd.Flags().String("storedconfig", "", "ConfigMap name for spark cluster")
-	cmd.Flags().String("image", "", "spark image to be used. Default image is " + version.GetSparkImage() + ".")
+	cmd.Flags().String("image", "", "Spark image to be used. Default image is " + version.GetSparkImage() + ".")
 	cmd.Flags().Bool("exposeui", true, "True will expose the Spark WebUI via a route")
+	cmd.Flags().String("metrics", "", "True or False will enable or disable spark metrics (default disabled)")
 	if extended {
 		cmd.Flags().BoolP("ephemeral", "e", false, "Treat the cluster as ephemeral. The 'app' flag must also be set.")
 		cmd.Flags().String("app", "", "Associate the cluster with an app.  Value may be the name of a pod or deployment (but not a deploymentconfig)")
@@ -91,6 +92,7 @@ func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string)
 	config.SparkImage = o.Image
 	config.Name = o.StoredConfig
 	config.ExposeWebUI = o.ExposeWebUI
+	config.Metrics = o.Metrics
 	result, err := clusters.CreateCluster(o.Name, o.Project, version.GetSparkImage(), &config, o.Client, o.KClient, o.App, o.Ephemeral)
 	if err != nil {
 		return err

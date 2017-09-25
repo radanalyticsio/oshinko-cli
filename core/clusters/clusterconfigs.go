@@ -15,6 +15,7 @@ type ClusterConfig struct {
 	SparkWorkerConfig string
 	SparkImage        string
 	ExposeWebUI       bool
+	Metrics           string
 }
 
 const Defaultname = "default-oshinko-cluster-config"
@@ -27,6 +28,7 @@ var defaultConfig ClusterConfig = ClusterConfig{
 	SparkWorkerConfig: "",
 	SparkImage:        "",
         ExposeWebUI:       true,
+	Metrics: 	   "",
 }
 
 const failOnMissing = true
@@ -67,6 +69,9 @@ func assignConfig(res *ClusterConfig, src ClusterConfig) {
 		res.SparkImage = src.SparkImage
 	}
 	res.ExposeWebUI = src.ExposeWebUI
+	if src.Metrics != "" {
+		res.Metrics = src.Metrics
+	}
 }
 
 func checkConfiguration(config ClusterConfig) error {
@@ -117,6 +122,12 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 		config.SparkWorkerConfig = strings.Trim(value, "\n")
 	case "sparkimage":
 		config.SparkImage = strings.Trim(value, "\n")
+	case "metrics":
+		config.Metrics = strings.Trim(value, "\n")
+		_, err := strconv.ParseBool(config.Metrics)
+		if err != nil {
+			return err
+		}
 	}
 	return err
 }
