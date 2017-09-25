@@ -63,6 +63,20 @@ os::cmd::expect_failure_and_text "_output/oshinko create sally" "cluster 'sally'
 os::cmd::expect_success "_output/oshinko create charlie --exposeui=false" 
 os::cmd::expect_success_and_text "_output/oshinko get charlie" "charlie.*<no route>"
 
+# metrics
+os::cmd::expect_success "_output/oshinko create klondike --metrics=true"
+os::cmd::try_until_success "oc get service klondike-metrics"
+
+os::cmd::expect_success "_output/oshinko create klondike2"
+os::cmd::try_until_success "oc get service klondike2-ui"
+os::cmd::expect_failure "oc get service klondike2-metrics"
+
+os::cmd::expect_success "_output/oshinko create klondike3 --metrics=false"
+os::cmd::try_until_success "oc get service klondike3-ui"
+os::cmd::expect_failure "oc get service klondike3-metrics"
+
+os::cmd::expect_failure_and_text "_output/oshinko create klondike4 --metrics=notgonnadoit" "must be a boolean"
+
 # storedconfig
 oc create configmap clusterconfig --from-literal=workercount=3 --from-literal=mastercount=0 
 os::cmd::expect_failure_and_text "_output/oshinko create chicken --storedconfig=jack" "named config 'jack' does not exist"
