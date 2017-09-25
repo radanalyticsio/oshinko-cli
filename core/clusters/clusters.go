@@ -475,9 +475,12 @@ func CreateCluster(
 	}
 
 	// We will expose the Spark master webui unless we are told not to do it
-	if config.ExposeWebUI {
-		rc := osclient.Routes(namespace)
-		_, err = rc.Create(webuiroute)
+	if finalconfig.ExposeWebUI != "" {
+		webui, _ := strconv.ParseBool(finalconfig.ExposeWebUI)
+		if webui {
+			rc := osclient.Routes(namespace)
+			_, err = rc.Create(webuiroute)
+		}
 	}
 
 	// Wait for the replication controllers to exist before building the response.

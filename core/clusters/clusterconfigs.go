@@ -14,7 +14,7 @@ type ClusterConfig struct {
 	SparkMasterConfig string
 	SparkWorkerConfig string
 	SparkImage        string
-	ExposeWebUI       bool
+	ExposeWebUI       string
 	Metrics           string
 }
 
@@ -27,7 +27,7 @@ var defaultConfig ClusterConfig = ClusterConfig{
 	SparkMasterConfig: "",
 	SparkWorkerConfig: "",
 	SparkImage:        "",
-        ExposeWebUI:       true,
+        ExposeWebUI:       "true",
 	Metrics: 	   "",
 }
 
@@ -68,7 +68,9 @@ func assignConfig(res *ClusterConfig, src ClusterConfig) {
 	if src.SparkImage != "" {
 		res.SparkImage = src.SparkImage
 	}
-	res.ExposeWebUI = src.ExposeWebUI
+	if src.ExposeWebUI != "" {
+		res.ExposeWebUI = src.ExposeWebUI
+	}
 	if src.Metrics != "" {
 		res.Metrics = src.Metrics
 	}
@@ -101,7 +103,7 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 	// the first element in the name
 	switch name {
 	case "mastercount":
-		val, err := getInt(value, configmapname+".mastercount")
+		val, err := getInt(value, configmapname + ".mastercount")
 		if err != nil {
 			return err
 		}
@@ -109,7 +111,7 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 			config.MasterCount = val
 		}
 	case "workercount":
-		val, err := getInt(value, configmapname+".workercount")
+		val, err := getInt(value, configmapname + ".workercount")
 		if err != nil {
 			return err
 		}
@@ -122,6 +124,9 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 		config.SparkWorkerConfig = strings.Trim(value, "\n")
 	case "sparkimage":
 		config.SparkImage = strings.Trim(value, "\n")
+	case "exposeui":
+		config.ExposeWebUI = strings.Trim(value, "\n")
+		_, err = strconv.ParseBool(config.ExposeWebUI)
 	case "metrics":
 		config.Metrics = strings.Trim(value, "\n")
 		_, err := strconv.ParseBool(config.Metrics)
