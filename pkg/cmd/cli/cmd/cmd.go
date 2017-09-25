@@ -9,6 +9,7 @@ import (
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"github.com/radanalyticsio/oshinko-cli/version"
+	"strconv"
 )
 
 type CmdOptions struct {
@@ -27,6 +28,7 @@ type CmdOptions struct {
 	Directory      string
 	Ephemeral      bool
 	NoNameRequired bool
+	Metrics        string
 	auth.AuthOptions
 }
 
@@ -78,6 +80,15 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	}
 	if cmd.Flags().Lookup("exposeui") != nil {
 		o.ExposeWebUI = kcmdutil.GetFlagBool(cmd, "exposeui")
+	}
+	if cmd.Flags().Lookup("metrics") != nil {
+		o.Metrics = kcmdutil.GetFlagString(cmd, "metrics")
+		if o.Metrics != "" {
+			_, err := strconv.ParseBool(o.Metrics)
+			if err != nil {
+				return cmdutil.UsageError(cmd, "Value for 'metrics' must be a boolean")
+			}
+		}
 	}
 	if cmd.Flags().Lookup("app-status") != nil {
 		o.AppStatus = kcmdutil.GetFlagString(cmd, "app-status")
