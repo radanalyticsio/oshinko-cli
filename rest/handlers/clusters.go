@@ -90,6 +90,7 @@ func singleClusterResponse(sc coreclusters.SparkCluster) *models.SingleCluster {
 		WorkerCount: int64ptr(sc.Config.WorkerCount),
 		Name: sc.Config.Name,
 		ExposeWebUI: boolptr(sc.Config.ExposeWebUI),
+		Metrics: sc.Config.Metrics,
 	}
 	return cluster
 }
@@ -120,6 +121,7 @@ func assignConfig(config *models.NewClusterConfig) *coreclusters.ClusterConfig {
 		SparkWorkerConfig: config.SparkWorkerConfig,
 		SparkImage: config.SparkImage,
 		ExposeWebUI: getBoolVal(config.ExposeWebUI),
+		Metrics: config.Metrics,
 	}
 	return result
 }

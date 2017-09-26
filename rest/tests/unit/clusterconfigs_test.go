@@ -34,7 +34,7 @@ var nonIntMaster clusters.ClusterConfig = clusters.ClusterConfig{Name: "cow"}
 var nonIntWorker clusters.ClusterConfig = clusters.ClusterConfig{Name: "pig"}
 var userDefault = clusters.ClusterConfig{MasterCount: 3, WorkerCount: 3,
 	SparkMasterConfig: "master-default", SparkWorkerConfig: "worker-default", Name: "default-oshinko-cluster-config",
-        ExposeWebUI: true}
+        ExposeWebUI: true, Metrics: "true" }
 
 func makeConfigMap(cfg clusters.ClusterConfig) *api.ConfigMap {
 	var res api.ConfigMap = api.ConfigMap{Data: map[string]string{}}
@@ -49,6 +49,11 @@ func makeConfigMap(cfg clusters.ClusterConfig) *api.ConfigMap {
 	}
 	if cfg.WorkerCount != 0 {
 		res.Data["workercount"] = strconv.Itoa(cfg.WorkerCount)
+	}
+	// Needs clusterconfigs to respect exposeui from configmap before this works
+	// res.Data["exposeui"] = strconv.FormatBool(cfg.ExposeWebUI)
+	if cfg.Metrics != "" {
+		res.Data["metrics"] = cfg.Metrics
 	}
 	res.Name = cfg.Name
 	return &res
