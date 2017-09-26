@@ -87,6 +87,10 @@ type NewClusterConfig struct {
 	 */
 	MasterCount *int64 `json:"masterCount,omitempty"`
 
+	/* Enable spark metrics, true or false (default is false)
+	 */
+	Metrics string `json:"metrics,omitempty"`
+
 	/* The name of a stored cluster configuration
 	 */
 	Name string `json:"name,omitempty"`

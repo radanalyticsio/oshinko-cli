@@ -142,6 +142,10 @@ definitions:
               If true (which is the default), cluster create will also expose the Spark Web UI
             type: boolean
             default: true
+          metrics:
+            description: |-
+              Enable spark metrics, true or false (default is false)
+            type: string
     required:
       - name
     additionalProperties: false
