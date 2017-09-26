@@ -140,8 +140,7 @@ definitions:
           exposeWebUI:
             description: |-
               If true (which is the default), cluster create will also expose the Spark Web UI
-            type: boolean
-            default: true
+            type: string
           metrics:
             description: |-
               Enable spark metrics, true or false (default is false)
