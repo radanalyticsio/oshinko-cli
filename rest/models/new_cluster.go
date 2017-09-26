@@ -81,7 +81,7 @@ type NewClusterConfig struct {
 
 	/* If true (which is the default), cluster create will also expose the Spark Web UI
 	 */
-	ExposeWebUI *bool `json:"exposeWebUI,omitempty"`
+	ExposeWebUI string `json:"exposeWebUI,omitempty"`
 
 	/* The count of master nodes requested in the cluster (must be > 0)
 	 */
