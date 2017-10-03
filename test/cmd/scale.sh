@@ -15,6 +15,6 @@ os::cmd::expect_success_and_text "_output/oshinko scale abc" "neither masters no
 os::cmd::expect_failure_and_text "_output/oshinko scale abc --masters=2" "cluster configuration must have a master count of 0 or 1"
 os::cmd::expect_success "_output/oshinko scale abc --workers=0 --masters=0"
 os::cmd::expect_success "_output/oshinko scale abc --workers=2"
-os::cmd::try_until_text "_output/oshinko get abc -o json" '"WorkerCount": 2' 
+os::cmd::try_until_text "_output/oshinko get abc -o json" '"workerCount": 2'
 
 os::test::junit::declare_suite_end
