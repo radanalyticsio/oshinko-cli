@@ -23,12 +23,12 @@ const Defaultname = "default-oshinko-cluster-config"
 var defaultConfig ClusterConfig = ClusterConfig{
 	MasterCount:       1,
 	WorkerCount:       1,
-	Name:              "default",
+	Name:              "",
 	SparkMasterConfig: "",
 	SparkWorkerConfig: "",
 	SparkImage:        "",
-        ExposeWebUI:       "true",
-	Metrics: 	   "",
+	ExposeWebUI:       "true",
+	Metrics: 	   "false",
 }
 
 const failOnMissing = true

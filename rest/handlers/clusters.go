@@ -75,7 +75,6 @@ func singleClusterResponse(sc coreclusters.SparkCluster) *models.SingleCluster {
 	cluster.Cluster.MasterURL = tostrptr(sc.MasterURL)
 	cluster.Cluster.MasterWebURL = tostrptr(sc.MasterWebURL)
 	cluster.Cluster.MasterWebRoute = sc.MasterWebRoute
-
 	cluster.Cluster.Status = tostrptr(sc.Status)
 
 	cluster.Cluster.Pods = []*models.ClusterModelPodsItems0{}
@@ -91,6 +90,7 @@ func singleClusterResponse(sc coreclusters.SparkCluster) *models.SingleCluster {
 		Name: sc.Config.Name,
 		ExposeWebUI: sc.Config.ExposeWebUI,
 		Metrics: sc.Config.Metrics,
+		SparkImage: sc.Config.SparkImage,
 	}
 	return cluster
 }

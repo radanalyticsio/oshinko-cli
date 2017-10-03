@@ -1,6 +1,7 @@
 package clusters
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -372,6 +373,8 @@ func CreateCluster(
 		sparkimage = finalconfig.SparkImage
 	} else if sparkimage == "" {
 		return result, generalErr(nil, sparkImageMsg, ClusterConfigCode)
+	} else {
+		finalconfig.SparkImage = sparkimage
 	}
 
 	if finalconfig.Metrics != "" {
@@ -414,6 +417,10 @@ func CreateCluster(
 
 	// Create the master deployment config
 	masterdc := sparkMaster(namespace, sparkimage, mastercount, clustername, masterconfdir, finalconfig.SparkMasterConfig, ephem_val, metrics)
+	configbytes, err := json.Marshal(finalconfig)
+	if err == nil {
+		masterdc.Annotate("oshinko-config", string(configbytes))
+	}
 
 	// Create the services that will be associated with the master pod
 	// They will be created with selectors based on the pod labels
@@ -692,10 +699,8 @@ func findClusterBody(clustername, namespace string, osclient *oclient.Client, cl
 	worker, err := dc.Get(workername(clustername))
 	if err == nil {
 		result.WorkerCount = int(worker.Status.Replicas)
-		result.Config.WorkerCount = int(worker.Spec.Replicas)
 	} else {
 		result.WorkerCount = -1
-		result.Config.WorkerCount = -1
 		result.Status = "Incomplete"
 	}
 
@@ -714,13 +719,17 @@ func findClusterBody(clustername, namespace string, osclient *oclient.Client, cl
 	master, err := dc.Get(mastername(clustername))
 	if err == nil {
 		result.MasterCount = int(master.Status.Replicas)
-		result.Config.MasterCount = int(master.Spec.Replicas)
 		if ephemeral, ok := master.Labels[ephemeralLabel]; ok {
 			result.Ephemeral = ephemeral
 		}
+		ann := master.GetAnnotations()
+		if ann != nil {
+			json.Unmarshal([]byte(ann["oshinko-config"]), &result.Config)
+			result.Image = result.Config.SparkImage
+		}
+
 	} else {
 		result.MasterCount = -1
-		result.Config.MasterCount = -1
 		result.Status = "Incomplete"
 	}
 }
@@ -847,24 +856,26 @@ func getDepConfig(client oclient.DeploymentConfigInterface, clustername, otype s
 	return dep, err
 }
 
-func scaleDep(dcc oclient.DeploymentConfigInterface, clustername string, count int, otype string) error {
+func scaleDep(dcc oclient.DeploymentConfigInterface, clustername string, count int, otype string) (bool, error) {
 	var err error
+	var updated bool = false
 	if count <= SentinelCountValue {
-		return nil
+		return updated, nil
 	}
 
 	for i := 0; i < 20; i++ {
 		dep, err := getDepConfig(dcc, clustername, otype)
 		if err != nil {
-			return generalErr(err, fmt.Sprintf(depMsg, otype), ClientOperationCode)
+			return updated, generalErr(err, fmt.Sprintf(depMsg, otype), ClientOperationCode)
 		} else if dep == nil {
-			return generalErr(err, fmt.Sprintf(depMsg, otype), ClusterIncompleteCode)
+			return updated, generalErr(err, fmt.Sprintf(depMsg, otype), ClusterIncompleteCode)
 		}
 		// If the current replica count does not match the request, update the replication controller
 		if int(dep.Spec.Replicas) != count {
 			dep.Spec.Replicas = int32(count)
 			_, err = dcc.Update(dep)
 			if err == nil {
+				updated = true
 				break
 			}
 		} else {
@@ -875,9 +886,51 @@ func scaleDep(dcc oclient.DeploymentConfigInterface, clustername string, count i
 
 	// if err has a value here then we failed all retries and err is the last message from a failed update
 	if err != nil {
-		return generalErr(err, fmt.Sprintf(updateDepMsg, otype), ClientOperationCode)
+		return updated, generalErr(err, fmt.Sprintf(updateDepMsg, otype), ClientOperationCode)
 	}
-	return nil
+	return updated, nil
+}
+
+func updateAnnotation(dcc oclient.DeploymentConfigInterface, clustername string, wup bool, mup bool, workers int, masters int) error {
+	var updateerr error
+	for i := 0; i < 20; i++ {
+		master, err := dcc.Get(mastername(clustername))
+		if err == nil {
+			// Annotations have to be filled in because we did it on create
+			// but check anyway
+			ann := master.GetAnnotations()
+			if ann != nil {
+				cc := ClusterConfig{}
+				err := json.Unmarshal([]byte(ann["oshinko-config"]), &cc)
+				if err == nil {
+					if wup {
+						cc.WorkerCount = workers
+					}
+					if mup {
+						cc.MasterCount = masters
+					}
+					configbytes, err := json.Marshal(cc)
+					if err == nil {
+						ann["oshinko-config"] = string(configbytes)
+						master.SetAnnotations(ann)
+						_, updateerr = dcc.Update(master)
+						if updateerr == nil {
+							// If it worked, get out of here
+							break
+						}
+					}
+				}
+			} else {
+				// No annotation, so nothing to updated
+				break
+			}
+		}
+		if err != nil {
+			return err
+		}
+		time.Sleep(250*time.Millisecond)
+	}
+	return updateerr
 }
 
 // Update a cluster and return the new representation
@@ -908,27 +961,26 @@ func UpdateCluster(name, namespace string, config *ClusterConfig, osclient *ocli
 	workercount := int(finalconfig.WorkerCount)
 	mastercount := int(finalconfig.MasterCount)
 
-	// TODO(tmckay) we need some way to track the current spark config for a cluster,
-	// maybe in annotations. If someone tries to change the spark config for a cluster,
+	// TODO(tmckay) If someone tries to change the spark config for a cluster,
 	// that should be an error at this point (unless we spin all the pods down and
 	// redeploy)
 
 	dcc := osclient.DeploymentConfigs(namespace)
-	err = scaleDep(dcc, clustername, workercount, workerType)
+	wup, err := scaleDep(dcc, clustername, workercount, workerType)
 	if err != nil {
 		return result, err
 	}
-	err = scaleDep(dcc, clustername, mastercount, masterType)
+	mup, merr := scaleDep(dcc, clustername, mastercount, masterType)
+	err = updateAnnotation(dcc, clustername, wup, mup, workercount, mastercount)
+	if merr != nil {
+		return result, merr
+	}
 	if err != nil {
 		return result, err
 	}
-
-	result.Name = name
-	result.Namespace = namespace
-	result.Config = finalconfig
+	findClusterBody(name, namespace, osclient, client, &result)
 	return result, nil
 }
-
 
 // Scale a cluster
 // This routine supports a specific scale operation based on immediate values for
@@ -949,15 +1001,23 @@ func ScaleCluster(name, namespace string, masters, workers int, osclient *oclien
 		return generalErr(nil, fmt.Sprintf(noSuchClusterMsg, clustername), NoSuchClusterCode)
 	}
 
-	// Allow sale to zero, allow sentinel values
+	// Allow scale to zero, allow sentinel values
 	if masters > 1 {
 		return NewClusterError(MasterCountMustBeZeroOrOne, ClusterConfigCode)
 	}
 
 	dcc := osclient.DeploymentConfigs(namespace)
-	err = scaleDep(dcc, clustername, workers, workerType)
-	if err != nil {
-		return err
+	wup, werr := scaleDep(dcc, clustername, workers, workerType)
+	if werr != nil {
+		return werr
 	}
-	return scaleDep(dcc, clustername, masters, masterType)
+
+	// We've already updated workers, so if there is an error
+	// updating master we have to modify the config anyway
+	mup, merr := scaleDep(dcc, clustername, masters, masterType)
+	err = updateAnnotation(dcc, clustername, wup, mup, workers, masters)
+	if merr != nil {
+		return merr
+	}
+	return err
 }

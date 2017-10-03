@@ -29,10 +29,22 @@ func (dc *ODeploymentConfig) Replicas(r int) *ODeploymentConfig {
 }
 
 func (dc *ODeploymentConfig) Label(name, value string) *ODeploymentConfig {
-	if dc.Labels == nil {
-		dc.Labels = map[string]string{}
+	l := dc.GetLabels()
+	if l == nil {
+		l = map[string]string{}
+		dc.SetLabels(l)
 	}
-	dc.Labels[name] = value
+	l[name] = value
+	return dc
+}
+
+func (dc *ODeploymentConfig) Annotate(name, value string) *ODeploymentConfig {
+	a := dc.GetAnnotations()
+	if a == nil {
+		a = map[string]string{}
+		dc.SetAnnotations(a)
+	}
+	a[name] = value
 	return dc
 }
 
