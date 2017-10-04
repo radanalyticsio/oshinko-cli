@@ -3,6 +3,7 @@ package clienttest
 import (
 	"fmt"
 	"time"
+	"strings"
 
 	check "gopkg.in/check.v1"
 
@@ -32,12 +33,32 @@ func (checker *lessThanChecker) Check(params []interface{}, names []string) (res
 	return params[0].(int) < params[1].(int), ""
 }
 
-func checkClusterHelper(s *OshinkoRestTestSuite, c *check.C, params *clusters.FindSingleClusterParams, count int) (obsmcount int64, obswcount int64) {
+func checkClusterStatusFull(c *check.C, cldresult *clusters.FindSingleClusterOK,
+		masters, workers int64,
+		sparkimage, exposewebui, metrics, masterconfig, workerconfig, clusterconfig string) {
+	var ncc *models.NewClusterConfig
+	ncc = cldresult.Payload.Cluster.NewCluster.Config
+	c.Assert(strings.HasPrefix(ncc.SparkImage, sparkimage), check.Equals, true)
+	c.Assert(*ncc.MasterCount, check.Equals, masters)
+	c.Assert(*ncc.WorkerCount, check.Equals, workers)
+	c.Assert(ncc.ExposeWebUI, check.Equals, exposewebui)
+	c.Assert(ncc.Metrics, check.Equals, metrics)
+	c.Assert(ncc.Name, check.Equals, clusterconfig)
+	c.Assert(ncc.SparkMasterConfig, check.Equals, masterconfig)
+	c.Assert(ncc.SparkWorkerConfig, check.Equals, workerconfig)
+}
+
+func checkClusterStatus(c *check.C, cldresult *clusters.FindSingleClusterOK, masters, workers int64) {
+	checkClusterStatusFull(c, cldresult, masters, workers, "radanalyticsio/openshift-spark", "true", "false", "", "", "")
+}
+
+func checkClusterHelper(s *OshinkoRestTestSuite, c *check.C, params *clusters.FindSingleClusterParams, count int) (obsmcount int64, obswcount int64, cldresult *clusters.FindSingleClusterOK) {
 	const retries = 60
 	var tries int
+	var err error
 
 	for tries = 0; tries < retries; tries++ {
-		cldresult, err := s.cli.Clusters.FindSingleCluster(params)
+		cldresult, err = s.cli.Clusters.FindSingleCluster(params)
 		if err != nil {
 			msg := fmt.Sprintf("%s \n %+v",
 				err.(*clusters.FindSingleClusterDefault).Error(),
@@ -99,10 +120,11 @@ func (s *OshinkoRestTestSuite) TestCreateAndDeleteCluster(c *check.C) {
 	// them after a set number of retries, we consider the test to have
 	// failed.
 	cldparams := clusters.NewFindSingleClusterParams().WithName(cname)
-	obsmcount, obswcount := checkClusterHelper(s, c, cldparams, int(mcount+wcount))
+	obsmcount, obswcount, cldresult := checkClusterHelper(s, c, cldparams, int(mcount+wcount))
 
 	c.Assert(obsmcount, check.Equals, mcount)
 	c.Assert(obswcount, check.Equals, wcount)
+	checkClusterStatus(c, cldresult, mcount, wcount)
 
 	// scale up the cluster
 	// this will attempt to scale up the number of workers by 1. as with
@@ -124,10 +146,11 @@ func (s *OshinkoRestTestSuite) TestCreateAndDeleteCluster(c *check.C) {
 	}
 
 	// check for update completion
-	obsmcount, obswcount = checkClusterHelper(s, c, cldparams, int(mcount+uwcount))
+	obsmcount, obswcount, cldresult = checkClusterHelper(s, c, cldparams, int(mcount+uwcount))
 
 	c.Assert(obsmcount, check.Equals, mcount)
 	c.Assert(obswcount, check.Equals, uwcount)
+	checkClusterStatus(c, cldresult, mcount, uwcount)
 
 	// scale down the cluster
 	uwcount = int64(wcount - 1)
@@ -146,10 +169,11 @@ func (s *OshinkoRestTestSuite) TestCreateAndDeleteCluster(c *check.C) {
 	}
 
 	// check for update completion
-	obsmcount, obswcount = checkClusterHelper(s, c, cldparams, int(mcount+uwcount))
+	obsmcount, obswcount, cldresult = checkClusterHelper(s, c, cldparams, int(mcount+uwcount))
 
 	c.Assert(obsmcount, check.Equals, mcount)
 	c.Assert(obswcount, check.Equals, uwcount)
+	checkClusterStatus(c, cldresult, mcount, uwcount)
 
 	// delete the cluster
 	delparams := clusters.NewDeleteSingleClusterParams().WithName(cname)
@@ -181,4 +205,42 @@ func (s *OshinkoRestTestSuite) TestCreateAndDeleteCluster(c *check.C) {
 	c.Assert(tries, LessThan, retries)
 	expclcount := 0
 	c.Assert(obsclcount, check.Equals, expclcount)
+}
+
+
+func (s *OshinkoRestTestSuite) TestCreateWithConfig(c *check.C) {
+	cname := "e2ecluster2"
+	mcount := int64(1)
+	wcount := int64(3)
+
+	cconfig := models.NewClusterConfig{
+		MasterCount: &mcount,
+		WorkerCount: &wcount,
+		ExposeWebUI: "false",
+		Metrics: "true",
+		SparkImage: "myimage",
+		SparkMasterConfig: "masterconfig",
+		SparkWorkerConfig: "workerconfig",
+		Name: "clusterconfig"}
+	cdetails := models.NewCluster{Name: &cname, Config: &cconfig}
+	clparams := clusters.NewCreateClusterParams().WithCluster(&cdetails)
+
+	// create a cluster
+	_, err := s.cli.Clusters.CreateCluster(clparams)
+	if err != nil {
+		msg := err.(*clusters.CreateClusterDefault).Error() + "\n"
+		for _, e := range err.(*clusters.CreateClusterDefault).Payload.Errors {
+			msg += errors.SingleErrorToString(e)
+		}
+		c.Fatal(msg)
+	}
+
+	// read the cluster details
+	// We know this will fail to fully spin up because of the bogus image
+	// That's alright, we just care about the config reported
+	cldparams := clusters.NewFindSingleClusterParams().WithName(cname)
+	cldresult, err := s.cli.Clusters.FindSingleCluster(cldparams)
+	checkClusterStatusFull(c, cldresult, mcount, wcount, "myimage", "false", "true", "masterconfig", "workerconfig", "clusterconfig")
+	delparams := clusters.NewDeleteSingleClusterParams().WithName(cname)
+	_, err = s.cli.Clusters.DeleteSingleCluster(delparams)
 }
