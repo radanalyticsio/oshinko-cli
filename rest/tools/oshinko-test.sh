@@ -171,6 +171,12 @@ case "$REQUESTED_TEST" in
         oc create sa oshinko -n $PROJECT
         oc policy add-role-to-user admin system:serviceaccount:$PROJECT:oshinko -n $PROJECT
 
+        # These empty configmaps are needed for tests that look at reported config
+        # Since they're empty they're not actually used, just reported back in status, this is fine
+        oc create configmap clusterconfig
+        oc create configmap masterconfig
+        oc create configmap workerconfig
+
         oc process -f tools/oshinko-client-tests.yaml \
                    -v SOURCE_REPO=$SOURCE_REPO \
                    -v SOURCE_REF=$SOURCE_REF \
