@@ -7,6 +7,7 @@ services:
 matrix:
   include:
     - env: TO_TEST=e2e
+    - env: TO_TEST=rest
   fast_finish: true
 
 before_install:
@@ -44,22 +45,37 @@ before_install:
 - export PATH=$PATH:/home/travis/gopath/src/github.com/radanalyticsio/oshinko-cli/origin/
 - echo $PATH
 # below cmd is important to get oc working in ubuntu
-- if [ "$TO_TEST" = "e2e" ]; then sudo docker run -v /:/rootfs -ti --rm --entrypoint=/bin/bash --privileged openshift/origin:v1.5.1 -c "mv /rootfs/bin/findmnt /rootfs/bin/findmnt.backup" ; fi
-- if [ "$TO_TEST" = "e2e" ]; then sudo oc cluster up --host-config-dir=/home/travis/gopath/src/github.com/radanalyticsio/oshinko-cli/origin ; fi
-- if [ "$TO_TEST" = "e2e" ]; then sudo chmod -R a+rwX /home/travis/.kube ; fi
-- if [ "$TO_TEST" = "e2e" ]; then sudo ls -l /home/travis/gopath/src/github.com/radanalyticsio/oshinko-cli/origin ; fi
-# find IP:PORT of openshift
-- if [ "$TO_TEST" = "e2e" ]; then IPSTR=`sudo oc status |grep server` ; fi
-- if [ "$TO_TEST" = "e2e" ]; then echo $IPSTR ; fi
-- if [ "$TO_TEST" = "e2e" ]; then IP=${IPSTR##*/} ; fi
-- if [ "$TO_TEST" = "e2e" ]; then echo ${IP} ; fi
-- if [ "$TO_TEST" = "e2e" ]; then IPSTR=`sudo oc login -u system:admin` ; fi
-- if [ "$TO_TEST" = "e2e" ]; then echo $IPSTR ; fi
+- sudo docker run -v /:/rootfs -ti --rm --entrypoint=/bin/bash --privileged openshift/origin:v1.5.1 -c "mv /rootfs/bin/findmnt /rootfs/bin/findmnt.backup"
+-|
+  # Sometimes oc cluster up fails with a permission error and works when the test is relaunched.
+  # See if a retry within the same test works
+  set +e
+  built=false
+  while true; do
+      oc cluster up --host-config-dir=/home/travis/gopath/src/github.com/radanalyticsio/oshiko-cli/origin
+      if [ "$?" -eq 0 ]; then
+          ./travis-check-pods.sh
+          if [ "$?" -eq 0 ]; then
+              built=true
+              break
+          fi
+      fi
+      echo "Retrying oc cluster up after failure"
+      oc cluster down
+      sleep 5
+  done
+  set -e
+  if [ "$built" == false ]; then
+      exit 1
+  fi
+  # travis-check-pods.sh left us in the default project
+  oc project myproject
+
 install:
 before_script:
 script:
-- if [ "$TO_TEST" = "cmd-test" ]; then make test-cmd ; fi
 - if [ "$TO_TEST" = "e2e" ]; then make build; test/run.sh ; fi
+- if [ "$TO_TEST" = "rest" ]; then rest/tools/oshinko-test.sh -t unit; rest/tools/oshinko-test.sh -t client-local ; fi
 notifications:
  email:
    on_success: never

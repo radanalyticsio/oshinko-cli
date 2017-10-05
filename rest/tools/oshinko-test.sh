@@ -86,6 +86,29 @@ case "$REQUESTED_TEST" in
         go test -v -ldflags "$TAG_APPNAME_FLAGS" "github.com/radanalyticsio/oshinko-cli/rest/tests/unit"
         ;;
 
+    client-local)
+        PROJECT=$(oc project -q)
+        export OSHINKO_CLUSTER_NAMESPACE=$PROJECT
+        export OSHINKO_KUBE_CONFIG=~/.kube/config
+        set +e
+        oc create sa oshinko -n $PROJECT
+        oc policy add-role-to-user admin system:serviceaccount:$PROJECT:oshinko -n $PROJECT
+
+        # These empty configmaps are needed for tests that look at reported config
+        # Since they're empty they're not actually used, just reported back in status, this is fine
+        oc create configmap clusterconfig
+        oc create configmap masterconfig
+        oc create configmap workerconfig
+        set -e
+
+        # bring in the tag variable
+        . tools/common.sh
+        # this export is needed for the vendor experiment for as long as go
+        # version 1.5 is still in use.
+        export GO15VENDOREXPERIMENT=1
+        go test -v -ldflags "$TAG_APPNAME_FLAGS" "github.com/radanalyticsio/oshinko-cli/rest/tests/client"
+        ;;
+
     client-deployed)
         # bring in the tag variable
         . tools/common.sh
