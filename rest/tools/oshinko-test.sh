@@ -75,10 +75,13 @@ while getopts :t:p:r:b:n:i:h opt; do
     esac
 done
 
+# Where this script lives ...
+SCRIPT_DIR=$(readlink -f `dirname "${BASH_SOURCE[0]}"`)
+
 case "$REQUESTED_TEST" in
     unit)
         # bring in the tag variable
-        . tools/common.sh
+        source $SCRIPT_DIR/common.sh
         # this export is needed for the vendor experiment for as long as go
         # version 1.5 is still in use.
         go get gopkg.in/check.v1
@@ -102,7 +105,8 @@ case "$REQUESTED_TEST" in
         set -e
 
         # bring in the tag variable
-        . tools/common.sh
+        source $SCRIPT_DIR/common.sh
+
         # this export is needed for the vendor experiment for as long as go
         # version 1.5 is still in use.
         export GO15VENDOREXPERIMENT=1
@@ -111,7 +115,7 @@ case "$REQUESTED_TEST" in
 
     client-deployed)
         # bring in the tag variable
-        . tools/common.sh
+        source $SCRIPT_DIR/common.sh
         # this export is needed for the vendor experiment for as long as go
         # version 1.5 is still in use.
         export GO15VENDOREXPERIMENT=1
