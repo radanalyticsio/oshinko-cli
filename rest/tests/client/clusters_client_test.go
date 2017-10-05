@@ -181,7 +181,11 @@ func (s *OshinkoRestTestSuite) TestCreateAndDeleteCluster(c *check.C) {
 	if err != nil {
 		switch err.(type) {
 		case *clusters.DeleteSingleClusterDefault:
-			c.Fatal(err.(*clusters.DeleteSingleClusterDefault).Error())
+			msg := err.(*clusters.DeleteSingleClusterDefault).Error() + "\n"
+			for _, e := range err.(*clusters.DeleteSingleClusterDefault).Payload.Errors {
+				msg += errors.SingleErrorToString(e)
+			}
+			c.Fatal(msg)
 		default:
 			c.Fatal(err)
 		}
