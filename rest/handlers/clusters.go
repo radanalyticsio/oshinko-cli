@@ -199,12 +199,9 @@ func DeleteClusterResponse(params apiclusters.DeleteSingleClusterParams) middlew
 		return reterr(fail(err, clientMsg, 500))
 	}
 
-	info, err := coreclusters.DeleteCluster(params.Name, namespace, osclient, client, "", "")
+	_, err = coreclusters.DeleteCluster(params.Name, namespace, osclient, client, "", "")
 	if err != nil {
 		return reterr(fail(err, "", getErrorCode(err)))
-	}
-	if info != "" {
-		return reterr(fail(nil, "deletion may be incomplete: " + info, 500))
 	}
 	return apiclusters.NewDeleteSingleClusterNoContent()
 }
