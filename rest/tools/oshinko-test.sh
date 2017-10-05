@@ -90,13 +90,20 @@ case "$REQUESTED_TEST" in
         ;;
 
     client-local)
+        # This test mode is for development and CI testing. It uses code from the
+        # local git repository to run the oshinko rest client in the current project
+        # on the local host. This is different from how the "client" test below
+        # works, which runs the rest client in a pod in OpenShift after building
+        # an image from the specified git repository.
+
+        # As such, this mode needs a few environment variables set so that oshinko
+        # knows what project it's in and how to authenticate to openshift.
+        # Requires a current oc login. Does not require a serviceaccount.
+
         PROJECT=$(oc project -q)
         export OSHINKO_CLUSTER_NAMESPACE=$PROJECT
         export OSHINKO_KUBE_CONFIG=~/.kube/config
         set +e
-        oc create sa oshinko -n $PROJECT
-        oc policy add-role-to-user admin system:serviceaccount:$PROJECT:oshinko -n $PROJECT
-
         # These empty configmaps are needed for tests that look at reported config
         # Since they're empty they're not actually used, just reported back in status, this is fine
         oc create configmap clusterconfig
