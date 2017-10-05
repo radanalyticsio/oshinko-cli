@@ -78,10 +78,10 @@ os::cmd::expect_success "_output/oshinko create charlie --exposeui=false"
 os::cmd::expect_success_and_text "_output/oshinko get charlie" "charlie.*<no route>"
 
 os::cmd::expect_success "_output/oshinko create charlie2 --exposeui=true"
-os::cmd::expect_success_and_text "_output/oshinko get charlie2" "charlie2.*xip.io"
+os::cmd::expect_success_and_text "_output/oshinko get charlie2" "charlie2-ui-route"
 
 os::cmd::expect_success "_output/oshinko create charlie3"
-os::cmd::expect_success_and_text "_output/oshinko get charlie3" "charlie3.*xip.io"
+os::cmd::expect_success_and_text "_output/oshinko get charlie3" "charlie3-ui-route"
 
 os::cmd::expect_failure_and_text "_output/oshinko create charlie4 --exposeui=notgonnadoit" "must be a boolean"
 
