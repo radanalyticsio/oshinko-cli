@@ -23,8 +23,6 @@ __pycache__/
 .vimrc
 .vagrant-openshift.json*
 .DS_Store
-.idea
-origin.iml
 *.pyc
 .tag*
 .project
@@ -32,7 +30,9 @@ origin.iml
 tags
 .envrc
 
-
+# Intellij IDEA
+.idea/*
+*.iml
 
 # C extensions
 *.so
