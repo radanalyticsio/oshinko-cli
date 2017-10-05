@@ -46,7 +46,7 @@ before_install:
 - echo $PATH
 # below cmd is important to get oc working in ubuntu
 - sudo docker run -v /:/rootfs -ti --rm --entrypoint=/bin/bash --privileged openshift/origin:v1.5.1 -c "mv /rootfs/bin/findmnt /rootfs/bin/findmnt.backup"
--|
+- |
   # Sometimes oc cluster up fails with a permission error and works when the test is relaunched.
   # See if a retry within the same test works
   set +e
