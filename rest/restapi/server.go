@@ -14,7 +14,10 @@ import (
 	flags "github.com/jessevdk/go-flags"
 	graceful "github.com/tylerb/graceful"
 
+	oshinkoFlags "github.com/radanalyticsio/oshinko-cli/rest/helpers/flags"
+	"github.com/radanalyticsio/oshinko-cli/rest/helpers/info"
 	"github.com/radanalyticsio/oshinko-cli/rest/restapi/operations"
+	"github.com/radanalyticsio/oshinko-cli/rest/version"
 )
 
 const (
@@ -124,6 +127,14 @@ func (s *Server) hasScheme(scheme string) bool {
 
 // Serve the api
 func (s *Server) Serve() (err error) {
+
+	if oshinkoFlags.InfoEnabled() {
+		img := info.GetSparkImage()
+		log.Println(version.GetAppName() + " " + version.GetVersion())
+		log.Println("Default cluster image: " + img)
+		os.Exit(0)
+	}
+
 	if !s.hasListeners {
 		if err := s.Listen(); err != nil {
 			return err
