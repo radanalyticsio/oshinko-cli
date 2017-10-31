@@ -24,8 +24,10 @@ objects:
         uri: ${SOURCE_REPO}
         ref: ${SOURCE_REF}
       dockerfile: |-
-        FROM golang
+        FROM centos:latest
+        RUN yum -y install golang git && yum clean all
         ADD . /go/src/github.com/radanalyticsio/oshinko-cli/
+        ENV GOPATH /go
         WORKDIR /go/src/github.com/radanalyticsio/oshinko-cli/rest
         RUN chmod a+rwX -R .
         RUN go get gopkg.in/check.v1
