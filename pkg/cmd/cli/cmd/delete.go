@@ -50,6 +50,8 @@ func CmdDelete(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 			}
 		},
 	}
+	cmd.Flags().BoolVarP(&options.Verbose, "verbose", "v", options.Verbose, "Turn on verbose output\n\n")
+
 	if extended {
 		cmd.Flags().String("app", "", "The app tied to an ephemeral cluster. The value may be the name of a pod or deployment (but not a deploymentconfig). The 'app-status' option must also be set.")
 		cmd.Flags().String("app-status", "", "How the application has ended ('completed' or 'terminated'). The 'app' option must also be set.")
@@ -63,7 +65,7 @@ func (o *CmdOptions) RunDelete(out io.Writer, cmd *cobra.Command, args []string)
 		return fmt.Errorf("Both --app and --app-status must be set")
 	}
 	info, err := clusters.DeleteCluster(o.Name, o.Project, o.Client, o.KClient, o.App, o.AppStatus)
-	if info != "" {
+	if info != "" && (err != nil || o.Verbose){
 		fmt.Println(info)
 	}
 	if err != nil {
