@@ -75,7 +75,18 @@ os::cmd::expect_success "_output/oshinko delete sally"
 # metrics
 os::cmd::expect_success "_output/oshinko create klondike --metrics=true"
 os::cmd::try_until_success "oc get service klondike-metrics"
+os::cmd::try_until_text "oc log dc/klondike-m" "with.*metrics"
 os::cmd::expect_success "_output/oshinko delete klondike"
+
+os::cmd::expect_success "_output/oshinko create klondike0 --metrics=jolokia"
+os::cmd::try_until_success "oc get service klondike0-metrics"
+os::cmd::try_until_text "oc log dc/klondike0-m" "with.*metrics"
+os::cmd::expect_success "_output/oshinko delete klondike0"
+
+os::cmd::expect_success "_output/oshinko create klondike1 --metrics=prometheus"
+os::cmd::try_until_success "oc get service klondike1-metrics"
+os::cmd::try_until_text "oc log dc/klondike1-m" "with.*metrics"
+os::cmd::expect_success "_output/oshinko delete klondike1"
 
 os::cmd::expect_success "_output/oshinko create klondike2"
 os::cmd::try_until_success "oc get service klondike2-ui"
@@ -87,7 +98,7 @@ os::cmd::try_until_success "oc get service klondike3-ui"
 os::cmd::expect_failure "oc get service klondike3-metrics"
 os::cmd::expect_success "_output/oshinko delete klondike3"
 
-os::cmd::expect_failure_and_text "_output/oshinko create klondike4 --metrics=notgonnadoit" "must be a boolean"
+os::cmd::expect_failure_and_text "_output/oshinko create klondike4 --metrics=notgonnadoit" "must be 'true', 'false', 'jolokia', or 'prometheus'"
 
 # exposeui
 os::cmd::expect_success "_output/oshinko create charlie --exposeui=false"
@@ -129,6 +140,16 @@ os::cmd::expect_success_and_text "_output/oshinko get chicken -o yaml" "SparkWor
 os::cmd::try_until_text "_output/oshinko get chicken -o yaml" "workerCount: 3"
 os::cmd::try_until_text "_output/oshinko get chicken -o yaml" "masterCount: 0"
 os::cmd::expect_success "_output/oshinko delete chicken"
+
+oc create configmap clusterconfig2 --from-literal=metrics=jolokia
+os::cmd::expect_success "_output/oshinko create chicken2 --storedconfig=clusterconfig2"
+os::cmd::expect_success_and_text "_output/oshinko get chicken2 -o yaml" "Metrics: jolokia"
+os::cmd::expect_success "_output/oshinko delete chicken2"
+
+oc create configmap clusterconfig3 --from-literal=metrics=prometheus
+os::cmd::expect_success "_output/oshinko create chicken3 --storedconfig=clusterconfig3"
+os::cmd::expect_success_and_text "_output/oshinko get chicken3 -o yaml" "Metrics: prometheus"
+os::cmd::expect_success "_output/oshinko delete chicken3"
 
 os::cmd::expect_success "_output/oshinko create egg"
 os::cmd::expect_success_and_text "_output/oshinko get egg -o yaml" "WorkerCount: 1"

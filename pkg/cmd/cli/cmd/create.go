@@ -75,7 +75,7 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 	cmd.Flags().String("storedconfig", "", "ConfigMap name for spark cluster")
 	cmd.Flags().String("image", "", "Spark image to be used. Default image is " + version.GetSparkImage() + ".")
 	cmd.Flags().String("exposeui", "", "True or False, expose the Spark WebUI via a route (default True)")
-	cmd.Flags().String("metrics", "", "True or False, enable spark metrics (default False)")
+	cmd.Flags().String("metrics", "", "Enable spark metrics (default false). Set the value to 'prometheus' for prometheus metrics and 'true' or 'jolokia' for jolokia metrics (deprecated).")
 	if extended {
 		cmd.Flags().BoolP("ephemeral", "e", false, "Treat the cluster as ephemeral. The 'app' flag must also be set.")
 		cmd.Flags().String("app", "", "Associate the cluster with an app.  Value may be the name of a pod or deployment (but not a deploymentconfig)")
