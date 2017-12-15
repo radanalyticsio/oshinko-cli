@@ -344,7 +344,7 @@ func (s *OshinkoUnitTestSuite) TestGetClusterNonInts(c *check.C) {
 	c.Assert(err, check.NotNil)
 	c.Assert(err.Error(), check.Equals,
 		fmt.Sprintf(clusters.ErrorWhileProcessing,
-			configarg.Name + ".mastercount", "expected integer"))
+			configarg.Name + ".mastercount", "expected integer, got 'fish'"))
 
 	w := makeConfigMap(nonIntWorker)
 	w.Data["workercount"] = "dog"
@@ -354,7 +354,7 @@ func (s *OshinkoUnitTestSuite) TestGetClusterNonInts(c *check.C) {
 	c.Assert(err, check.NotNil)
 	c.Assert(err.Error(), check.Equals,
 		fmt.Sprintf(clusters.ErrorWhileProcessing,
-			configarg.Name + ".workercount", "expected integer"))
+			configarg.Name + ".workercount", "expected integer, got 'dog'"))
 }
 
 func (s *OshinkoUnitTestSuite) TestGetClusterUserDefault(c *check.C) {
