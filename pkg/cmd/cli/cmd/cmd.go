@@ -91,8 +91,8 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 		o.Metrics = kcmdutil.GetFlagString(cmd, "metrics")
 		if o.Metrics != "" {
 			_, err := strconv.ParseBool(o.Metrics)
-			if err != nil {
-				return cmdutil.UsageError(cmd, "Value for 'metrics' must be a boolean")
+			if err != nil && o.Metrics != "jolokia" && o.Metrics != "prometheus" {
+				return cmdutil.UsageError(cmd, "Value for 'metrics' must be 'true', 'false', 'jolokia', or 'prometheus'")
 			}
 		}
 	}

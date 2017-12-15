@@ -159,21 +159,21 @@ func checkForDeploymentConfigs(client oclient.DeploymentConfigInterface, cluster
 
 }
 
-func makeEnvVars(clustername, sparkconfdir string, metrics bool) []kapi.EnvVar {
+func makeEnvVars(clustername, sparkconfdir string, metrics string) []kapi.EnvVar {
 	envs := []kapi.EnvVar{}
 
 	envs = append(envs, kapi.EnvVar{Name: "OSHINKO_SPARK_CLUSTER", Value: clustername})
 	if sparkconfdir != "" {
 		envs = append(envs, kapi.EnvVar{Name: "UPDATE_SPARK_CONF_DIR", Value: sparkconfdir})
 	}
-	if metrics {
-		envs = append(envs, kapi.EnvVar{Name: "SPARK_METRICS_ON", Value: "true"})
+	if metrics != "false" {
+		envs = append(envs, kapi.EnvVar{Name: "SPARK_METRICS_ON", Value: metrics})
 	}
 
 	return envs
 }
 
-func makeWorkerEnvVars(clustername, sparkconfdir string, metrics bool) []kapi.EnvVar {
+func makeWorkerEnvVars(clustername, sparkconfdir string, metrics string) []kapi.EnvVar {
 	envs := []kapi.EnvVar{}
 
 	envs = makeEnvVars(clustername, sparkconfdir, metrics)
@@ -186,7 +186,7 @@ func makeWorkerEnvVars(clustername, sparkconfdir string, metrics bool) []kapi.En
 	return envs
 }
 
-func sparkWorker(namespace, image string, replicas int, clustername, sparkconfdir, sparkworkerconfig string, metrics bool) *odc.ODeploymentConfig {
+func sparkWorker(namespace, image string, replicas int, clustername, sparkconfdir, sparkworkerconfig string, metrics string) *odc.ODeploymentConfig {
 
 	// Create the basic deployment config
 	// We will use a label and pod selector based on the cluster name.
@@ -228,7 +228,7 @@ func workername(clustername string) string {
 	return clustername + "-w"
 }
 
-func sparkMaster(namespace, image string, replicas int, clustername, sparkconfdir, sparkmasterconfig, driverrc string, metrics bool) *odc.ODeploymentConfig {
+func sparkMaster(namespace, image string, replicas int, clustername, sparkconfdir, sparkmasterconfig, driverrc string, metrics string) *odc.ODeploymentConfig {
 
 	// Create the basic deployment config
 	// We will use a label and pod selector based on the cluster name
@@ -256,7 +256,7 @@ func sparkMaster(namespace, image string, replicas int, clustername, sparkconfdi
 	masterp := ocon.ContainerPort(masterPortName, masterPort)
 	webp := ocon.ContainerPort(webPortName, webPort)
 	ports := []*ocon.OContainerPort{masterp, webp}
-	if metrics {
+	if metrics != "false" {
 		mp := ocon.ContainerPort(metricsPortName, metricsPort)
 		ports = append(ports, mp)
 	}
@@ -339,7 +339,6 @@ func CreateCluster(
 	var masterconfdir string
 	var workerconfdir string
 	var result SparkCluster = SparkCluster{}
-        var metrics bool = false
 
 	createCode := func(err error) int {
 		if err != nil && strings.Index(err.Error(), "already exists") != -1 {
@@ -377,10 +376,6 @@ func CreateCluster(
 		finalconfig.SparkImage = sparkimage
 	}
 
-	if finalconfig.Metrics != "" {
-		metrics, _ = strconv.ParseBool(finalconfig.Metrics)
-	}
-
 	mastercount := int(finalconfig.MasterCount)
 	workercount := int(finalconfig.WorkerCount)
 
@@ -416,7 +411,7 @@ func CreateCluster(
 	}
 
 	// Create the master deployment config
-	masterdc := sparkMaster(namespace, sparkimage, mastercount, clustername, masterconfdir, finalconfig.SparkMasterConfig, ephem_val, metrics)
+	masterdc := sparkMaster(namespace, sparkimage, mastercount, clustername, masterconfdir, finalconfig.SparkMasterConfig, ephem_val, finalconfig.Metrics)
 	configbytes, err := json.Marshal(finalconfig)
 	if err == nil {
 		masterdc.Annotate("oshinko-config", string(configbytes))
@@ -437,7 +432,7 @@ func CreateCluster(
 	webuiroute := ort.NewRoute(websv.GetName() + "-route", websv.GetName(), clustername, "webui")
 
 	// Create the worker deployment config
-	workerdc := sparkWorker(namespace, sparkimage, workercount, clustername, workerconfdir, finalconfig.SparkWorkerConfig, metrics)
+	workerdc := sparkWorker(namespace, sparkimage, workercount, clustername, workerconfdir, finalconfig.SparkWorkerConfig, finalconfig.Metrics)
 
 	// Launch all of the objects
 	dcc := osclient.DeploymentConfigs(namespace)
@@ -468,7 +463,7 @@ func CreateCluster(
 		return result, generalErr(err, masterWebSrvMsg, createCode(err))
 	}
 
-	if metrics {
+	if finalconfig.Metrics != "false" {
 		mastermtcs, _ := service(masterhost+"-metrics",
 			masterdc.FindPort(metricsPortName),
 			clustername, masterType,

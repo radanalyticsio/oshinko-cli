@@ -87,9 +87,9 @@ func checkConfiguration(config ClusterConfig) error {
 }
 
 func getInt(value, configmapname string) (int, error) {
-	i, err := strconv.Atoi(strings.Trim(value, "\n"))
+	i, err := strconv.Atoi(value)
 	if err != nil {
-		err = NewClusterError(fmt.Sprintf(ErrorWhileProcessing, configmapname, "expected integer"), ClusterConfigCode)
+		err = NewClusterError(fmt.Sprintf(ErrorWhileProcessing, configmapname, fmt.Sprintf("expected integer, got '%s'", value)), ClusterConfigCode)
 	}
 	return i, err
 }
@@ -119,19 +119,33 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 			config.WorkerCount = val
 		}
 	case "sparkmasterconfig":
-		config.SparkMasterConfig = strings.Trim(value, "\n")
+		config.SparkMasterConfig = value
 	case "sparkworkerconfig":
-		config.SparkWorkerConfig = strings.Trim(value, "\n")
+		config.SparkWorkerConfig = value
 	case "sparkimage":
-		config.SparkImage = strings.Trim(value, "\n")
+		config.SparkImage = value
 	case "exposeui":
-		config.ExposeWebUI = strings.Trim(value, "\n")
+		config.ExposeWebUI = value
 		_, err = strconv.ParseBool(config.ExposeWebUI)
 	case "metrics":
-		config.Metrics = strings.Trim(value, "\n")
-		_, err := strconv.ParseBool(config.Metrics)
-		if err != nil {
-			return err
+		// default will be "false" if the string is empty
+		if value != "" {
+			val, err := strconv.ParseBool(value)
+			if err == nil {
+				//  Support 'true' and default to jolokia
+				// Normalize truth values
+				if val {
+					config.Metrics = "true"
+				} else {
+					config.Metrics = "false"
+				}
+			} else {
+				if value != "jolokia" && value != "prometheus" {
+					msg := fmt.Sprintf("expected 'jolokia' or 'prometheus', got '%s'", value)
+					return NewClusterError(fmt.Sprintf(ErrorWhileProcessing, configmapname, msg), ClusterConfigCode)
+				}
+				config.Metrics = value
+			}
 		}
 	}
 	return err
@@ -157,7 +171,7 @@ func readConfig(name string, res *ClusterConfig, failOnMissing bool, cm kclient.
 		// so we test for a Name to see if we foud it
 		found = cmap.Name != ""
 		for n, v := range cmap.Data {
-			err = process(res, n, v, name)
+			err = process(res, strings.Trim(n, "\n"), strings.Trim(v, "\n"), name)
 			if err != nil {
 				break
 			}
