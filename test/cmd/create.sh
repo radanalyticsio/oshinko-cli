@@ -75,17 +75,17 @@ os::cmd::expect_success "_output/oshinko delete sally"
 # metrics
 os::cmd::expect_success "_output/oshinko create klondike --metrics=true"
 os::cmd::try_until_success "oc get service klondike-metrics"
-os::cmd::try_until_text "oc log dc/klondike-m" "with.*metrics"
+os::cmd::try_until_text "oc log dc/klondike-m" "with jolokia metrics"
 os::cmd::expect_success "_output/oshinko delete klondike"
 
 os::cmd::expect_success "_output/oshinko create klondike0 --metrics=jolokia"
 os::cmd::try_until_success "oc get service klondike0-metrics"
-os::cmd::try_until_text "oc log dc/klondike0-m" "with.*metrics"
+os::cmd::try_until_text "oc log dc/klondike0-m" "with jolokia metrics"
 os::cmd::expect_success "_output/oshinko delete klondike0"
 
 os::cmd::expect_success "_output/oshinko create klondike1 --metrics=prometheus"
 os::cmd::try_until_success "oc get service klondike1-metrics"
-os::cmd::try_until_text "oc log dc/klondike1-m" "with.*metrics"
+os::cmd::try_until_text "oc log dc/klondike1-m" "with prometheus metrics"
 os::cmd::expect_success "_output/oshinko delete klondike1"
 
 os::cmd::expect_success "_output/oshinko create klondike2"
