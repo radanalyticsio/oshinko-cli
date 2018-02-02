@@ -2,7 +2,10 @@ package clusters
 
 import (
 	"fmt"
-	kclient "k8s.io/kubernetes/pkg/client/unversioned"
+	//kapi "k8s.io/client-go/kubernetes/typed/core/v1"
+	internal  "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/typed/core/internalversion"
+	//kapi "k8s.io/kubernetes/pkg/apis/core"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"strconv"
 	"strings"
 )
@@ -151,10 +154,10 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 	return err
 }
 
-func readConfig(name string, res *ClusterConfig, failOnMissing bool, cm kclient.ConfigMapsInterface) (found bool, err error) {
+func readConfig(name string, res *ClusterConfig, failOnMissing bool, cm internal.ConfigMapInterface) (found bool, err error) {
 
 	found = false
-	cmap, err := cm.Get(name)
+	cmap, err := cm.Get(name, metav1.GetOptions{})
 	if err != nil {
 		if strings.Index(err.Error(), "not found") != -1 {
 			if !failOnMissing {
@@ -180,7 +183,7 @@ func readConfig(name string, res *ClusterConfig, failOnMissing bool, cm kclient.
 	return found, err
 }
 
-func loadConfig(name string, cm kclient.ConfigMapsInterface) (res ClusterConfig, err error) {
+func loadConfig(name string, cm internal.ConfigMapInterface) (res ClusterConfig, err error) {
 	// If the default config has been modified use those mods.
 	res = defaultConfig
 	found, err := readConfig(Defaultname, &res, allowMissing, cm)
@@ -194,7 +197,7 @@ func loadConfig(name string, cm kclient.ConfigMapsInterface) (res ClusterConfig,
 	return res, err
 }
 
-func GetClusterConfig(config *ClusterConfig, cm kclient.ConfigMapsInterface) (res ClusterConfig, err error) {
+func GetClusterConfig(config *ClusterConfig, cm internal.ConfigMapInterface) (res ClusterConfig, err error) {
 	var name string = ""
 	if config != nil {
 		name = config.Name

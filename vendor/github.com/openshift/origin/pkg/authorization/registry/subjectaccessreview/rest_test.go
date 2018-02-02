@@ -5,13 +5,16 @@ import (
 	"reflect"
 	"testing"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/auth/user"
-	"k8s.io/kubernetes/pkg/util/diff"
-	"k8s.io/kubernetes/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/diff"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apiserver/pkg/authentication/user"
+	kauthorizer "k8s.io/apiserver/pkg/authorization/authorizer"
+	apirequest "k8s.io/apiserver/pkg/endpoints/request"
+	apiserverrest "k8s.io/apiserver/pkg/registry/rest"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 
-	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
-	"github.com/openshift/origin/pkg/authorization/authorizer"
+	authorizationapi "github.com/openshift/origin/pkg/authorization/apis/authorization"
+	"github.com/openshift/origin/pkg/authorization/registry/util"
 )
 
 type subjectAccessTest struct {
@@ -24,47 +27,39 @@ type subjectAccessTest struct {
 }
 
 type testAuthorizer struct {
-	allowed          bool
+	allowed          kauthorizer.Decision
 	reason           string
 	err              string
 	deniedNamespaces sets.String
 
-	actualAttributes authorizer.DefaultAuthorizationAttributes
-	actualUserInfo   user.Info
+	actualAttributes kauthorizer.Attributes
 }
 
-func (a *testAuthorizer) Authorize(ctx kapi.Context, passedAttributes authorizer.Action) (allowed bool, reason string, err error) {
-	a.actualUserInfo, _ = kapi.UserFrom(ctx)
-
+func (a *testAuthorizer) Authorize(passedAttributes kauthorizer.Attributes) (allowed kauthorizer.Decision, reason string, err error) {
 	// allow the initial check for "can I run this SAR at all"
 	if passedAttributes.GetResource() == "localsubjectaccessreviews" {
-		if len(a.deniedNamespaces) != 0 && a.deniedNamespaces.Has(kapi.NamespaceValue(ctx)) {
-			return false, "denied initial check", nil
+		if len(a.deniedNamespaces) != 0 && a.deniedNamespaces.Has(passedAttributes.GetNamespace()) {
+			return kauthorizer.DecisionNoOpinion, "no decision on initial check", nil
 		}
 
-		return true, "", nil
+		return kauthorizer.DecisionAllow, "", nil
 	}
 
-	attributes, ok := passedAttributes.(authorizer.DefaultAuthorizationAttributes)
-	if !ok {
-		return false, "ERROR", errors.New("unexpected type for test")
-	}
-
-	a.actualAttributes = attributes
+	a.actualAttributes = passedAttributes
 
 	if len(a.err) == 0 {
 		return a.allowed, a.reason, nil
 	}
 	return a.allowed, a.reason, errors.New(a.err)
 }
-func (a *testAuthorizer) GetAllowedSubjects(ctx kapi.Context, passedAttributes authorizer.Action) (sets.String, sets.String, error) {
+func (a *testAuthorizer) GetAllowedSubjects(passedAttributes kauthorizer.Attributes) (sets.String, sets.String, error) {
 	return sets.String{}, sets.String{}, nil
 }
 
 func TestDeniedNamespace(t *testing.T) {
 	test := &subjectAccessTest{
 		authorizer: &testAuthorizer{
-			allowed:          false,
+			allowed:          kauthorizer.DecisionNoOpinion,
 			err:              "denied initial check",
 			deniedNamespaces: sets.NewString("foo"),
 		},
@@ -86,7 +81,7 @@ func TestDeniedNamespace(t *testing.T) {
 func TestEmptyReturn(t *testing.T) {
 	test := &subjectAccessTest{
 		authorizer: &testAuthorizer{
-			allowed: false,
+			allowed: kauthorizer.DecisionNoOpinion,
 			reason:  "because reasons",
 		},
 		reviewRequest: &authorizationapi.SubjectAccessReview{
@@ -110,7 +105,7 @@ func TestEmptyReturn(t *testing.T) {
 func TestNoErrors(t *testing.T) {
 	test := &subjectAccessTest{
 		authorizer: &testAuthorizer{
-			allowed: true,
+			allowed: kauthorizer.DecisionAllow,
 			reason:  "because good things",
 		},
 		reviewRequest: &authorizationapi.SubjectAccessReview{
@@ -156,7 +151,7 @@ func TestErrors(t *testing.T) {
 func TestRegularWithScopes(t *testing.T) {
 	test := &subjectAccessTest{
 		authorizer: &testAuthorizer{
-			allowed: true,
+			allowed: kauthorizer.DecisionAllow,
 			reason:  "because good things",
 		},
 		reviewRequest: &authorizationapi.SubjectAccessReview{
@@ -184,7 +179,7 @@ func TestRegularWithScopes(t *testing.T) {
 func TestSelfWithDefaultScopes(t *testing.T) {
 	test := &subjectAccessTest{
 		authorizer: &testAuthorizer{
-			allowed: true,
+			allowed: kauthorizer.DecisionAllow,
 			reason:  "because good things",
 		},
 		reviewRequest: &authorizationapi.SubjectAccessReview{
@@ -211,7 +206,7 @@ func TestSelfWithDefaultScopes(t *testing.T) {
 func TestSelfWithClearedScopes(t *testing.T) {
 	test := &subjectAccessTest{
 		authorizer: &testAuthorizer{
-			allowed: true,
+			allowed: kauthorizer.DecisionAllow,
 			reason:  "because good things",
 		},
 		reviewRequest: &authorizationapi.SubjectAccessReview{
@@ -241,19 +236,19 @@ func (r *subjectAccessTest) runTest(t *testing.T) {
 
 	expectedResponse := &authorizationapi.SubjectAccessReviewResponse{
 		Namespace:       r.reviewRequest.Action.Namespace,
-		Allowed:         r.authorizer.allowed,
+		Allowed:         r.authorizer.allowed == kauthorizer.DecisionAllow,
 		Reason:          r.authorizer.reason,
 		EvaluationError: r.authorizer.err,
 	}
 
-	expectedAttributes := authorizer.ToDefaultAuthorizationAttributes(r.reviewRequest.Action)
-
-	ctx := kapi.WithNamespace(kapi.NewContext(), kapi.NamespaceAll)
+	ctx := apirequest.WithNamespace(apirequest.NewContext(), kapi.NamespaceAll)
 	if r.requestingUser != nil {
-		ctx = kapi.WithUser(ctx, r.requestingUser)
+		ctx = apirequest.WithUser(ctx, r.requestingUser)
+	} else {
+		ctx = apirequest.WithUser(ctx, &user.DefaultInfo{Name: "dummy"})
 	}
 
-	obj, err := storage.Create(ctx, r.reviewRequest)
+	obj, err := storage.Create(ctx, r.reviewRequest, apiserverrest.ValidateAllObjectFunc, false)
 	switch {
 	case err == nil && len(r.expectedError) == 0:
 	case err == nil && len(r.expectedError) != 0:
@@ -277,11 +272,8 @@ func (r *subjectAccessTest) runTest(t *testing.T) {
 		t.Errorf("Unexpected obj type: %v", obj)
 	}
 
+	expectedAttributes := util.ToDefaultAuthorizationAttributes(r.expectedUserInfo, kapi.NamespaceAll, r.reviewRequest.Action)
 	if !reflect.DeepEqual(expectedAttributes, r.authorizer.actualAttributes) {
 		t.Errorf("diff %v", diff.ObjectGoPrintDiff(expectedAttributes, r.authorizer.actualAttributes))
-	}
-
-	if !reflect.DeepEqual(r.expectedUserInfo, r.authorizer.actualUserInfo) {
-		t.Errorf("diff %v", diff.ObjectGoPrintDiff(r.expectedUserInfo, r.authorizer.actualUserInfo))
 	}
 }

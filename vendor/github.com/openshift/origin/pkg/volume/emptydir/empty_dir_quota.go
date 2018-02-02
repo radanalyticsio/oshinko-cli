@@ -1,8 +1,8 @@
 package emptydir
 
 import (
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/resource"
+	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/kubernetes/pkg/volume"
 )
 
@@ -23,7 +23,7 @@ type EmptyDirQuotaPlugin struct {
 	QuotaApplicator QuotaApplicator
 }
 
-func (plugin *EmptyDirQuotaPlugin) NewMounter(spec *volume.Spec, pod *api.Pod, opts volume.VolumeOptions) (volume.Mounter, error) {
+func (plugin *EmptyDirQuotaPlugin) NewMounter(spec *volume.Spec, pod *v1.Pod, opts volume.VolumeOptions) (volume.Mounter, error) {
 	volMounter, err := plugin.VolumePlugin.NewMounter(spec, pod, opts)
 	if err != nil {
 		return volMounter, err
@@ -33,7 +33,7 @@ func (plugin *EmptyDirQuotaPlugin) NewMounter(spec *volume.Spec, pod *api.Pod, o
 	// we do not wish to modify k8s code for this, we have to grab a reference
 	// to them ourselves.
 	// This logic is the same as k8s.io/kubernetes/pkg/volume/empty_dir:
-	medium := api.StorageMediumDefault
+	medium := v1.StorageMediumDefault
 	if spec.Volume.EmptyDir != nil { // Support a non-specified source as EmptyDir.
 		medium = spec.Volume.EmptyDir.Medium
 	}
@@ -54,10 +54,14 @@ func (plugin *EmptyDirQuotaPlugin) NewMounter(spec *volume.Spec, pod *api.Pod, o
 // quota for the pods FSGroup on an XFS filesystem.
 type emptyDirQuotaMounter struct {
 	wrapped         volume.Mounter
-	pod             *api.Pod
-	medium          api.StorageMedium
+	pod             *v1.Pod
+	medium          v1.StorageMedium
 	quota           resource.Quantity
 	quotaApplicator QuotaApplicator
+}
+
+func (edq *emptyDirQuotaMounter) CanMount() error {
+	return edq.wrapped.CanMount()
 }
 
 // Must implement SetUp as well, otherwise the internal Mounter.SetUp calls its

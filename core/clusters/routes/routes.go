@@ -1,27 +1,29 @@
 package routes
 
 import (
-	"github.com/openshift/origin/pkg/route/api"
-	kapi "k8s.io/kubernetes/pkg/api"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	routeapi "github.com/openshift/origin/pkg/route/apis/route"
+
 )
 
 // NewRoute returns a route object,
 // It takes the service to route as a parameter
-func NewRoute(routeName string, serviceName string, clusterName string, routeType string) *api.Route {
-	r := api.Route{
-		ObjectMeta: kapi.ObjectMeta{
-				Name: routeName,
-				Labels: map[string]string{
-					"oshinko-cluster": clusterName,
-					"oshinko-type": routeType,
-				},
+func NewRoute(routeName string, serviceName string, clusterName string, routeType string) *routeapi.Route {
+	r := routeapi.Route{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: routeName,
+			Labels: map[string]string{
+				"oshinko-cluster": clusterName,
+				"oshinko-type": routeType,
 			},
-		Spec: api.RouteSpec{
-				To: api.RouteTargetReference{
-					Name: serviceName,
-				},
+		},
+		Spec: routeapi.RouteSpec{
+			To: routeapi.RouteTargetReference{
+				Name: serviceName,
 			},
+		},
 	}
+
 	//r.Kind = "Route"
 	//r.APIVersion = "v1"
 	//r.SetName(name)

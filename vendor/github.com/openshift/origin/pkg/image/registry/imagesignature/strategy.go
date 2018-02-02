@@ -1,12 +1,13 @@
 package imagesignature
 
 import (
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util/validation/field"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	apirequest "k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
 
-	imageapi "github.com/openshift/origin/pkg/image/api"
-	"github.com/openshift/origin/pkg/image/api/validation"
+	imageapi "github.com/openshift/origin/pkg/image/apis/image"
+	"github.com/openshift/origin/pkg/image/apis/image/validation"
 )
 
 // strategy implements behavior for ImageStreamTags.
@@ -15,14 +16,14 @@ type strategy struct {
 }
 
 var Strategy = &strategy{
-	ObjectTyper: kapi.Scheme,
+	ObjectTyper: legacyscheme.Scheme,
 }
 
 func (s *strategy) NamespaceScoped() bool {
 	return false
 }
 
-func (s *strategy) PrepareForCreate(ctx kapi.Context, obj runtime.Object) {
+func (s *strategy) PrepareForCreate(ctx apirequest.Context, obj runtime.Object) {
 	signature := obj.(*imageapi.ImageSignature)
 
 	signature.Conditions = nil
@@ -37,7 +38,7 @@ func (s *strategy) GenerateName(base string) string {
 	return base
 }
 
-func (s *strategy) Validate(ctx kapi.Context, obj runtime.Object) field.ErrorList {
+func (s *strategy) Validate(ctx apirequest.Context, obj runtime.Object) field.ErrorList {
 	signature := obj.(*imageapi.ImageSignature)
 
 	return validation.ValidateImageSignature(signature)

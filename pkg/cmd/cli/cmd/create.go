@@ -7,7 +7,8 @@ import (
 	"github.com/renstrom/dedent"
 	"github.com/spf13/cobra"
 
-	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	//"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	"github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
@@ -58,7 +59,7 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 		Hidden: extended,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Complete(f, cmd, args); err != nil {
-				kcmdutil.CheckErr(kcmdutil.UsageError(cmd, err.Error()))
+				kcmdutil.CheckErr(kcmdutil.UsageErrorf(cmd, err.Error()))
 			}
 			if err := options.RunCreate(out, cmd, args); err != nil {
 				kcmdutil.CheckErr(err)
@@ -93,7 +94,7 @@ func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string)
 	config.Name = o.StoredConfig
 	config.ExposeWebUI = o.ExposeWebUI
 	config.Metrics = o.Metrics
-	result, err := clusters.CreateCluster(o.Name, o.Project, version.GetSparkImage(), &config, o.Client, o.KClient, o.App, o.Ephemeral)
+	result, err := clusters.CreateCluster(o.Name, o.Project, version.GetSparkImage(), &config, o.Config, o.App, o.Ephemeral)
 	if err != nil {
 		return err
 	}

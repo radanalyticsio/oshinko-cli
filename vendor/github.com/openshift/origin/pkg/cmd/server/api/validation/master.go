@@ -6,20 +6,26 @@ import (
 	"net/url"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
+	knet "k8s.io/apimachinery/pkg/util/net"
+	"k8s.io/apimachinery/pkg/util/sets"
+	kuval "k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	auditinternal "k8s.io/apiserver/pkg/apis/audit"
+	auditvalidation "k8s.io/apiserver/pkg/apis/audit/validation"
+	auditpolicy "k8s.io/apiserver/pkg/audit/policy"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/cert"
 	apiserveroptions "k8s.io/kubernetes/cmd/kube-apiserver/app/options"
-	controlleroptions "k8s.io/kubernetes/cmd/kube-controller-manager/app/options"
-	kvalidation "k8s.io/kubernetes/pkg/api/validation"
-	"k8s.io/kubernetes/pkg/serviceaccount"
-	knet "k8s.io/kubernetes/pkg/util/net"
-	"k8s.io/kubernetes/pkg/util/sets"
-	kuval "k8s.io/kubernetes/pkg/util/validation"
-	"k8s.io/kubernetes/pkg/util/validation/field"
+	kcmoptions "k8s.io/kubernetes/cmd/kube-controller-manager/app/options"
+	kvalidation "k8s.io/kubernetes/pkg/apis/core/validation"
 
 	"github.com/openshift/origin/pkg/cmd/server/api"
 	"github.com/openshift/origin/pkg/cmd/server/bootstrappolicy"
+	"github.com/openshift/origin/pkg/cmd/server/cm"
 	"github.com/openshift/origin/pkg/security/mcs"
 	"github.com/openshift/origin/pkg/security/uid"
 	"github.com/openshift/origin/pkg/util/labelselector"
@@ -149,9 +155,7 @@ func ValidateMasterConfig(config *api.MasterConfig, fldPath *field.Path) Validat
 	}
 	if len(config.NetworkConfig.ExternalIPNetworkCIDRs) > 0 {
 		for i, s := range config.NetworkConfig.ExternalIPNetworkCIDRs {
-			if strings.HasPrefix(s, "!") {
-				s = s[1:]
-			}
+			s = strings.TrimPrefix(s, "!")
 			if _, _, err := net.ParseCIDR(s); err != nil {
 				validationResults.AddErrors(field.Invalid(fldPath.Child("networkConfig", "externalIPNetworkCIDRs").Index(i), config.NetworkConfig.ExternalIPNetworkCIDRs[i], "must be a valid CIDR notation IP range (e.g. 172.30.0.0/16) with an optional leading !"))
 			}
@@ -159,6 +163,7 @@ func ValidateMasterConfig(config *api.MasterConfig, fldPath *field.Path) Validat
 	}
 
 	validationResults.AddErrors(ValidateIngressIPNetworkCIDR(config, fldPath.Child("networkConfig", "ingressIPNetworkCIDR").Index(0))...)
+	validationResults.Append(ValidateDeprecatedClusterNetworkConfig(config, fldPath.Child("networkConfig")))
 
 	validationResults.AddErrors(ValidateKubeConfig(config.MasterClients.OpenShiftLoopbackKubeConfig, fldPath.Child("masterClients", "openShiftLoopbackKubeConfig"))...)
 
@@ -182,26 +187,66 @@ func ValidateMasterConfig(config *api.MasterConfig, fldPath *field.Path) Validat
 	validationResults.Append(ValidateAPILevels(config.APILevels, api.KnownOpenShiftAPILevels, api.DeadOpenShiftAPILevels, fldPath.Child("apiLevels")))
 
 	if config.AdmissionConfig.PluginConfig != nil {
-		validationResults.AddErrors(ValidateAdmissionPluginConfig(config.AdmissionConfig.PluginConfig, fldPath.Child("admissionConfig", "pluginConfig"))...)
-		validationResults.Append(ValidateAdmissionPluginConfigConflicts(config))
+		validationResults.Append(ValidateAdmissionPluginConfig(config.AdmissionConfig.PluginConfig, fldPath.Child("admissionConfig", "pluginConfig")))
 	}
 	if len(config.AdmissionConfig.PluginOrderOverride) != 0 {
 		validationResults.AddWarnings(field.Invalid(fldPath.Child("admissionConfig", "pluginOrderOverride"), config.AdmissionConfig.PluginOrderOverride, "specified admission ordering is being phased out.  Convert to DefaultAdmissionConfig in admissionConfig.pluginConfig."))
 	}
 
 	validationResults.Append(ValidateControllerConfig(config.ControllerConfig, fldPath.Child("controllerConfig")))
-
 	validationResults.Append(ValidateAuditConfig(config.AuditConfig, fldPath.Child("auditConfig")))
+	validationResults.Append(ValidateMasterAuthConfig(config.AuthConfig, fldPath.Child("authConfig")))
+	validationResults.Append(ValidateAggregatorConfig(config.AggregatorConfig, fldPath.Child("aggregatorConfig")))
+
+	return validationResults
+}
+
+func ValidateMasterAuthConfig(config api.MasterAuthConfig, fldPath *field.Path) ValidationResults {
+	validationResults := ValidationResults{}
+
+	if config.RequestHeader == nil {
+		return validationResults
+	}
+
+	if len(config.RequestHeader.ClientCA) == 0 {
+		validationResults.AddErrors(field.Required(fldPath.Child("requestHeader.clientCA"), "must be specified for a secure connection"))
+	}
+	if len(config.RequestHeader.ClientCommonNames) == 0 {
+		validationResults.AddErrors(field.Required(fldPath.Child("requestHeader.clientCommonNames"), "must be specified for a secure connection"))
+	}
+	if len(config.RequestHeader.UsernameHeaders) == 0 {
+		validationResults.AddErrors(field.Required(fldPath.Child("requestHeader.usernameHeaders"), "must be specified for a secure connection"))
+	}
+	if len(config.RequestHeader.GroupHeaders) == 0 {
+		validationResults.AddErrors(field.Required(fldPath.Child("requestHeader.groupHeaders"), "must be specified for a secure connection"))
+	}
+	if len(config.RequestHeader.ExtraHeaderPrefixes) == 0 {
+		validationResults.AddErrors(field.Required(fldPath.Child("requestHeader.extraHeaderPrefixes"), "must be specified for a secure connection"))
+	}
+
+	return validationResults
+}
+
+func ValidateAggregatorConfig(config api.AggregatorConfig, fldPath *field.Path) ValidationResults {
+	validationResults := ValidationResults{}
+
+	validationResults.AddErrors(ValidateCertInfo(config.ProxyClientInfo, false, fldPath.Child("proxyClientInfo"))...)
+	if len(config.ProxyClientInfo.CertFile) == 0 && len(config.ProxyClientInfo.KeyFile) == 0 {
+		validationResults.AddWarnings(field.Invalid(fldPath.Child("proxyClientInfo"), "", "if no client certificate is specified, the aggregator will be unable to proxy to remote servers"))
+	}
 
 	return validationResults
 }
 
 func ValidateAuditConfig(config api.AuditConfig, fldPath *field.Path) ValidationResults {
 	validationResults := ValidationResults{}
+	if !config.Enabled {
+		return validationResults
+	}
 
 	if len(config.AuditFilePath) == 0 {
 		// for backwards compatibility reasons we can't error this out
-		validationResults.AddWarnings(field.Required(fldPath.Child("auditFilePath"), "audit can now be logged to a separate file"))
+		validationResults.AddWarnings(field.Required(fldPath.Child("auditFilePath"), "audit can not be logged to a separate file"))
 	}
 	if config.MaximumFileRetentionDays < 0 {
 		validationResults.AddErrors(field.Invalid(fldPath.Child("maximumFileRetentionDays"), config.MaximumFileRetentionDays, "must be greater than or equal to 0"))
@@ -213,13 +258,87 @@ func ValidateAuditConfig(config api.AuditConfig, fldPath *field.Path) Validation
 		validationResults.AddErrors(field.Invalid(fldPath.Child("maximumFileSizeMegabytes"), config.MaximumFileSizeMegabytes, "must be greater than or equal to 0"))
 	}
 
+	// setting policy file will turn the advanced auditing on
+	if config.PolicyConfiguration != nil && len(config.PolicyFile) > 0 {
+		validationResults.AddErrors(field.Forbidden(fldPath.Child("policyFile"), "both policyFile and policyConfiguration cannot be specified"))
+	}
+	if config.PolicyConfiguration != nil || len(config.PolicyFile) > 0 {
+		if config.PolicyConfiguration == nil {
+			policy, err := auditpolicy.LoadPolicyFromFile(config.PolicyFile)
+			if err != nil {
+				validationResults.AddErrors(field.Invalid(fldPath.Child("policyFile"), config.PolicyFile, err.Error()))
+			}
+			if policy == nil || len(policy.Rules) == 0 {
+				validationResults.AddErrors(field.Invalid(fldPath.Child("policyFile"), config.PolicyFile, "a policy file with 0 policies is not valid"))
+			}
+		} else {
+			policyConfiguration, ok := config.PolicyConfiguration.(*auditinternal.Policy)
+			if !ok {
+				validationResults.AddErrors(field.Invalid(fldPath.Child("policyConfiguration"), config.PolicyConfiguration, "must be of type audit/v1alpha1.Policy"))
+			} else {
+				if err := auditvalidation.ValidatePolicy(policyConfiguration); err != nil {
+					validationResults.AddErrors(field.Invalid(fldPath.Child("policyConfiguration"), config.PolicyConfiguration, err.ToAggregate().Error()))
+				}
+				if len(policyConfiguration.Rules) == 0 {
+					validationResults.AddErrors(field.Invalid(fldPath.Child("policyConfiguration"), config.PolicyFile, "a policy configuration with 0 policies is not valid"))
+				}
+			}
+		}
+
+		if len(config.AuditFilePath) == 0 {
+			validationResults.AddErrors(field.Required(fldPath.Child("auditFilePath"), "advanced audit requires a separate log file"))
+		}
+		switch config.LogFormat {
+		case api.LogFormatLegacy, api.LogFormatJson:
+			// ok
+		default:
+			validationResults.AddErrors(field.NotSupported(fldPath.Child("logFormat"), config.LogFormat, []string{string(api.LogFormatLegacy), string(api.LogFormatJson)}))
+		}
+
+		if len(config.WebHookKubeConfig) > 0 {
+			switch config.WebHookMode {
+			case api.WebHookModeBatch, api.WebHookModeBlocking:
+				// ok
+			default:
+				validationResults.AddErrors(field.NotSupported(fldPath.Child("webHookMode"), config.WebHookMode, []string{string(api.WebHookModeBatch), string(api.WebHookModeBlocking)}))
+			}
+			loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+			loadingRules.ExplicitPath = config.WebHookKubeConfig
+			loader := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, &clientcmd.ConfigOverrides{})
+			if _, err := loader.ClientConfig(); err != nil {
+				validationResults.AddErrors(field.Invalid(fldPath.Child("webHookKubeConfig"), config.WebHookKubeConfig, err.Error()))
+			}
+		} else if len(config.WebHookMode) > 0 {
+			validationResults.AddErrors(field.Required(fldPath.Child("webHookKubeConfig"), "must be specified when webHookMode is set"))
+		}
+	}
+
 	return validationResults
 }
 
 func ValidateControllerConfig(config api.ControllerConfig, fldPath *field.Path) ValidationResults {
 	validationResults := ValidationResults{}
 
-	if config.ServiceServingCert.Signer != nil {
+	if election := config.Election; election != nil {
+		if len(election.LockName) == 0 {
+			validationResults.AddErrors(field.Invalid(fldPath.Child("election", "lockName"), election.LockName, "may not be empty"))
+		}
+		for _, msg := range kvalidation.ValidateServiceName(election.LockName, false) {
+			validationResults.AddErrors(field.Invalid(fldPath.Child("election", "lockName"), election.LockName, msg))
+		}
+		if len(election.LockNamespace) == 0 {
+			validationResults.AddErrors(field.Invalid(fldPath.Child("election", "lockNamespace"), election.LockNamespace, "may not be empty"))
+		}
+		for _, msg := range kvalidation.ValidateNamespaceName(election.LockNamespace, false) {
+			validationResults.AddErrors(field.Invalid(fldPath.Child("election", "lockNamespace"), election.LockNamespace, msg))
+		}
+		if len(election.LockResource.Resource) == 0 {
+			validationResults.AddErrors(field.Invalid(fldPath.Child("election", "lockResource", "resource"), election.LockResource.Resource, "may not be empty"))
+		}
+	}
+	if config.ServiceServingCert.Signer == nil {
+		validationResults.AddWarnings(field.Required(fldPath.Child("serviceServingCert", "signer"), "required for the service serving cert signer; automatic serving certificate signing will fail"))
+	} else {
 		validationResults.AddErrors(ValidateCertInfo(*config.ServiceServingCert.Signer, true, fldPath.Child("serviceServingCert.signer"))...)
 	}
 
@@ -313,9 +432,7 @@ func ValidateServiceAccountConfig(config api.ServiceAccountConfig, builtInKubern
 		privateKeyFilePath := fldPath.Child("privateKeyFile")
 		if fileErrs := ValidateFile(config.PrivateKeyFile, privateKeyFilePath); len(fileErrs) > 0 {
 			validationResults.AddErrors(fileErrs...)
-		} else if privateKey, err := serviceaccount.ReadPrivateKey(config.PrivateKeyFile); err != nil {
-			validationResults.AddErrors(field.Invalid(privateKeyFilePath, config.PrivateKeyFile, err.Error()))
-		} else if err := privateKey.Validate(); err != nil {
+		} else if _, err := cert.PrivateKeyFromFile(config.PrivateKeyFile); err != nil {
 			validationResults.AddErrors(field.Invalid(privateKeyFilePath, config.PrivateKeyFile, err.Error()))
 		}
 	} else if builtInKubernetes {
@@ -329,7 +446,7 @@ func ValidateServiceAccountConfig(config api.ServiceAccountConfig, builtInKubern
 		idxPath := fldPath.Child("publicKeyFiles").Index(i)
 		if fileErrs := ValidateFile(publicKeyFile, idxPath); len(fileErrs) > 0 {
 			validationResults.AddErrors(fileErrs...)
-		} else if _, err := serviceaccount.ReadPublicKey(publicKeyFile); err != nil {
+		} else if _, err := cert.PublicKeysFromFile(publicKeyFile); err != nil {
 			validationResults.AddErrors(field.Invalid(idxPath, publicKeyFile, err.Error()))
 		}
 	}
@@ -447,6 +564,28 @@ func ValidateImagePolicyConfig(config api.ImagePolicyConfig, fldPath *field.Path
 	if config.MaxScheduledImageImportsPerMinute == 0 || config.MaxScheduledImageImportsPerMinute < -1 {
 		errs = append(errs, field.Invalid(fldPath.Child("maxScheduledImageImportsPerMinute"), config.MaxScheduledImageImportsPerMinute, "must be a positive integer or -1"))
 	}
+	if config.AllowedRegistriesForImport != nil {
+		for i, registry := range *config.AllowedRegistriesForImport {
+			if len(registry.DomainName) == 0 {
+				errs = append(errs, field.Invalid(fldPath.Index(i).Child("allowedRegistriesForImport", "domainName"), registry.DomainName, "cannot be an empty string"))
+			}
+			parts := strings.Split(registry.DomainName, ":")
+			// Check for ':8080'
+			if len(parts) == 0 || len(parts[0]) == 0 {
+				errs = append(errs, field.Invalid(fldPath.Index(i).Child("allowedRegistriesForImport", "domainName"), registry.DomainName, "invalid domain specified, must be registry.url.local[:port]"))
+			}
+			// Check for 'foo:bar:1234'
+			if len(parts) > 2 {
+				errs = append(errs, field.Invalid(fldPath.Index(i).Child("allowedRegistriesForImport", "domainName"), registry.DomainName, "invalid format, must be registry.url.local[:port]"))
+			}
+			// Check for 'foo:bar'
+			if len(parts) == 2 {
+				if _, err := strconv.Atoi(parts[1]); err != nil {
+					errs = append(errs, field.Invalid(fldPath.Index(i).Child("allowedRegistriesForImport", "domainName"), registry.DomainName, "invalid port format, must be a number"))
+				}
+			}
+		}
+	}
 	return errs
 }
 
@@ -531,10 +670,10 @@ func ValidateKubernetesMasterConfig(config *api.KubernetesMasterConfig, fldPath 
 	}
 
 	if config.AdmissionConfig.PluginConfig != nil {
-		validationResults.AddErrors(ValidateAdmissionPluginConfig(config.AdmissionConfig.PluginConfig, fldPath.Child("admissionConfig", "pluginConfig"))...)
+		validationResults.AddErrors(field.Invalid(fldPath.Child("admissionConfig", "pluginConfig"), config.AdmissionConfig.PluginConfig, "separate admission chains are no longer allowed.  Convert to admissionConfig.pluginConfig."))
 	}
 	if len(config.AdmissionConfig.PluginOrderOverride) != 0 {
-		validationResults.AddWarnings(field.Invalid(fldPath.Child("admissionConfig", "pluginOrderOverride"), config.AdmissionConfig.PluginOrderOverride, "specified admission ordering is being phased out.  Convert to DefaultAdmissionConfig in admissionConfig.pluginConfig."))
+		validationResults.AddErrors(field.Invalid(fldPath.Child("admissionConfig", "pluginOrderOverride"), config.AdmissionConfig.PluginOrderOverride, "separate admission chains are no longer allowed.  Convert to DefaultAdmissionConfig in admissionConfig.pluginConfig."))
 	}
 
 	validationResults.Append(ValidateAPIServerExtendedArguments(config.APIServerArguments, fldPath.Child("apiServerArguments")))
@@ -546,7 +685,6 @@ func ValidateKubernetesMasterConfig(config *api.KubernetesMasterConfig, fldPath 
 func ValidatePolicyConfig(config api.PolicyConfig, fldPath *field.Path) field.ErrorList {
 	allErrs := field.ErrorList{}
 
-	allErrs = append(allErrs, ValidateFile(config.BootstrapPolicyFile, fldPath.Child("bootstrapPolicyFile"))...)
 	allErrs = append(allErrs, ValidateNamespace(config.OpenShiftSharedResourcesNamespace, fldPath.Child("openShiftSharedResourcesNamespace"))...)
 	allErrs = append(allErrs, ValidateNamespace(config.OpenShiftInfrastructureNamespace, fldPath.Child("openShiftInfrastructureNamespace"))...)
 
@@ -615,7 +753,7 @@ func ValidateRoutingConfig(config api.RoutingConfig, fldPath *field.Path) field.
 func ValidateAPIServerExtendedArguments(config api.ExtendedArguments, fldPath *field.Path) ValidationResults {
 	validationResults := ValidationResults{}
 
-	validationResults.AddErrors(ValidateExtendedArguments(config, apiserveroptions.NewAPIServer().AddFlags, fldPath)...)
+	validationResults.AddErrors(ValidateExtendedArguments(config, apiserveroptions.NewServerRunOptions().AddFlags, fldPath)...)
 
 	if len(config["admission-control"]) > 0 {
 		validationResults.AddWarnings(field.Invalid(fldPath.Key("admission-control"), config["admission-control"], "specified admission ordering is being phased out.  Convert to DefaultAdmissionConfig in admissionConfig.pluginConfig."))
@@ -628,36 +766,32 @@ func ValidateAPIServerExtendedArguments(config api.ExtendedArguments, fldPath *f
 }
 
 func ValidateControllerExtendedArguments(config api.ExtendedArguments, fldPath *field.Path) field.ErrorList {
-	return ValidateExtendedArguments(config, controlleroptions.NewCMServer().AddFlags, fldPath)
+	return ValidateExtendedArguments(config, cm.OriginControllerManagerAddFlags(kcmoptions.NewCMServer()), fldPath)
 }
 
-func ValidateAdmissionPluginConfig(pluginConfig map[string]api.AdmissionPluginConfig, fieldPath *field.Path) field.ErrorList {
-	allErrs := field.ErrorList{}
-	for name, config := range pluginConfig {
-		if len(config.Location) > 0 && config.Configuration != nil {
-			allErrs = append(allErrs, field.Invalid(fieldPath.Key(name), "", "cannot specify both location and embedded config"))
-		}
-		if len(config.Location) == 0 && config.Configuration == nil {
-			allErrs = append(allErrs, field.Invalid(fieldPath.Key(name), "", "must specify either a location or an embedded config"))
-		}
-	}
-	return allErrs
-
+// deprecatedAdmissionPluginNames returns the set of admission plugin names that are deprecated from use.
+func deprecatedAdmissionPluginNames() sets.String {
+	return sets.NewString("openshift.io/OriginResourceQuota")
 }
 
-func ValidateAdmissionPluginConfigConflicts(masterConfig *api.MasterConfig) ValidationResults {
+func ValidateAdmissionPluginConfig(pluginConfig map[string]*api.AdmissionPluginConfig, fieldPath *field.Path) ValidationResults {
 	validationResults := ValidationResults{}
 
-	if masterConfig.KubernetesMasterConfig != nil {
-		// check for collisions between openshift and kube plugin config
-		for pluginName, kubeConfig := range masterConfig.KubernetesMasterConfig.AdmissionConfig.PluginConfig {
-			if openshiftConfig, exists := masterConfig.AdmissionConfig.PluginConfig[pluginName]; exists && !reflect.DeepEqual(kubeConfig, openshiftConfig) {
-				validationResults.AddWarnings(field.Invalid(field.NewPath("kubernetesMasterConfig", "admissionConfig", "pluginConfig").Key(pluginName), masterConfig.AdmissionConfig.PluginConfig[pluginName], "conflicts with kubernetesMasterConfig.admissionConfig.pluginConfig.  Separate admission chains are being phased out.  Convert to admissionConfig.pluginConfig."))
-			}
+	deprecatedPlugins := deprecatedAdmissionPluginNames()
+
+	for name, config := range pluginConfig {
+		if deprecatedPlugins.Has(name) {
+			validationResults.AddWarnings(field.Invalid(fieldPath.Key(name), "", "specified admission plugin is deprecated"))
+		}
+		if len(config.Location) > 0 && config.Configuration != nil {
+			validationResults.AddErrors(field.Invalid(fieldPath.Key(name), "", "cannot specify both location and embedded config"))
+		}
+		if len(config.Location) == 0 && config.Configuration == nil {
+			validationResults.AddErrors(field.Invalid(fieldPath.Key(name), "", "must specify either a location or an embedded config"))
 		}
 	}
-
 	return validationResults
+
 }
 
 func ValidateIngressIPNetworkCIDR(config *api.MasterConfig, fldPath *field.Path) (errors field.ErrorList) {
@@ -672,7 +806,7 @@ func ValidateIngressIPNetworkCIDR(config *api.MasterConfig, fldPath *field.Path)
 
 	_, ipNet, err := net.ParseCIDR(cidr)
 	if err != nil {
-		addError("must be a valid CIDR notation IP range (e.g. 172.46.0.0/16)")
+		addError(fmt.Sprintf("must be a valid CIDR notation IP range (e.g. %s)", api.DefaultIngressIPNetworkCIDR))
 		return
 	}
 
@@ -681,8 +815,10 @@ func ValidateIngressIPNetworkCIDR(config *api.MasterConfig, fldPath *field.Path)
 	noCloudProvider := kubeConfig != nil && (len(kubeConfig.ControllerArguments["cloud-provider"]) == 0 || kubeConfig.ControllerArguments["cloud-provider"][0] == "")
 
 	if noCloudProvider {
-		if api.CIDRsOverlap(cidr, config.NetworkConfig.ClusterNetworkCIDR) {
-			addError("conflicts with cluster network CIDR")
+		for _, entry := range config.NetworkConfig.ClusterNetworks {
+			if api.CIDRsOverlap(cidr, entry.CIDR) {
+				addError(fmt.Sprintf("conflicts with cluster network CIDR: %s", entry.CIDR))
+			}
 		}
 		if api.CIDRsOverlap(cidr, config.NetworkConfig.ServiceNetworkCIDR) {
 			addError("conflicts with service network CIDR")
@@ -692,4 +828,16 @@ func ValidateIngressIPNetworkCIDR(config *api.MasterConfig, fldPath *field.Path)
 	}
 
 	return
+}
+
+func ValidateDeprecatedClusterNetworkConfig(config *api.MasterConfig, fldPath *field.Path) ValidationResults {
+	validationResults := ValidationResults{}
+
+	if len(config.NetworkConfig.ClusterNetworks) > 0 && config.NetworkConfig.DeprecatedHostSubnetLength != config.NetworkConfig.ClusterNetworks[0].HostSubnetLength {
+		validationResults.AddErrors(field.Invalid(fldPath.Child("hostSubnetLength"), config.NetworkConfig.DeprecatedHostSubnetLength, "cannot set hostSubnetLength and clusterNetworks, please use clusterNetworks"))
+	}
+	if len(config.NetworkConfig.ClusterNetworks) > 0 && config.NetworkConfig.DeprecatedClusterNetworkCIDR != config.NetworkConfig.ClusterNetworks[0].CIDR {
+		validationResults.AddErrors(field.Invalid(fldPath.Child("clusterNetworkCIDR"), config.NetworkConfig.DeprecatedClusterNetworkCIDR, "cannot set clusterNetworkCIDR and clusterNetworks, please use clusterNetworks"))
+	}
+	return validationResults
 }

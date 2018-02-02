@@ -5,13 +5,15 @@ import (
 	"reflect"
 	"testing"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util/diff"
-	"k8s.io/kubernetes/pkg/util/intstr"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/diff"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 
-	deployapi "github.com/openshift/origin/pkg/deploy/api"
-	imageapi "github.com/openshift/origin/pkg/image/api"
+	appsapi "github.com/openshift/origin/pkg/apps/apis/apps"
+	imageapi "github.com/openshift/origin/pkg/image/apis/image"
 )
 
 type portDesc struct {
@@ -24,7 +26,7 @@ type containerDesc struct {
 	ports []portDesc
 }
 
-func fakeDeploymentConfig(name string, containers ...containerDesc) *deployapi.DeploymentConfig {
+func fakeDeploymentConfig(name string, containers ...containerDesc) *appsapi.DeploymentConfig {
 	specContainers := []kapi.Container{}
 	for _, c := range containers {
 		container := kapi.Container{
@@ -42,11 +44,11 @@ func fakeDeploymentConfig(name string, containers ...containerDesc) *deployapi.D
 
 		specContainers = append(specContainers, container)
 	}
-	return &deployapi.DeploymentConfig{
-		ObjectMeta: kapi.ObjectMeta{
+	return &appsapi.DeploymentConfig{
+		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
-		Spec: deployapi.DeploymentConfigSpec{
+		Spec: appsapi.DeploymentConfigSpec{
 			Replicas: 1,
 			Selector: map[string]string{"name": "test"},
 			Template: &kapi.PodTemplateSpec{
@@ -71,7 +73,7 @@ func expectedService(name string, ports ...portDesc) *kapi.Service {
 	}
 
 	return &kapi.Service{
-		ObjectMeta: kapi.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
 		Spec: kapi.ServiceSpec{
@@ -108,8 +110,8 @@ func TestAcceptUnique(t *testing.T) {
 		obj.Namespace = ns
 		return obj
 	}
-	dc := func(name, ns string) *deployapi.DeploymentConfig {
-		obj := &deployapi.DeploymentConfig{}
+	dc := func(name, ns string) *appsapi.DeploymentConfig {
+		obj := &appsapi.DeploymentConfig{}
 		obj.Name = name
 		obj.Namespace = ns
 		return obj
@@ -139,7 +141,7 @@ func TestAcceptUnique(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		au := NewAcceptUnique(kapi.Scheme)
+		au := NewAcceptUnique(legacyscheme.Scheme)
 		cnt := 0
 		for _, obj := range tc.objs {
 			if au.Accept(obj) {

@@ -21,29 +21,44 @@ import (
 	"github.com/AaronO/go-git-http/auth"
 	"github.com/elazarl/goproxy"
 	docker "github.com/fsouza/go-dockerclient"
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/errors"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	ktestclient "k8s.io/kubernetes/pkg/client/unversioned/testclient"
-	"k8s.io/kubernetes/pkg/runtime"
-	utilerrs "k8s.io/kubernetes/pkg/util/errors"
-	"k8s.io/kubernetes/pkg/util/sets"
 
-	buildapi "github.com/openshift/origin/pkg/build/api"
-	client "github.com/openshift/origin/pkg/client/testclient"
-	deployapi "github.com/openshift/origin/pkg/deploy/api"
-	"github.com/openshift/origin/pkg/dockerregistry"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	ktypes "k8s.io/apimachinery/pkg/types"
+	utilerrs "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
+	kwatch "k8s.io/apimachinery/pkg/watch"
+	krest "k8s.io/client-go/rest"
+	clientgotesting "k8s.io/client-go/testing"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/kubectl/categories"
+	"k8s.io/kubernetes/pkg/kubectl/resource"
+
+	appsapi "github.com/openshift/origin/pkg/apps/apis/apps"
+	buildapi "github.com/openshift/origin/pkg/build/apis/build"
+	"github.com/openshift/origin/pkg/generate"
 	"github.com/openshift/origin/pkg/generate/app"
-	"github.com/openshift/origin/pkg/generate/app/cmd"
 	apptest "github.com/openshift/origin/pkg/generate/app/test"
 	"github.com/openshift/origin/pkg/generate/dockerfile"
 	"github.com/openshift/origin/pkg/generate/git"
+	"github.com/openshift/origin/pkg/generate/jenkinsfile"
 	"github.com/openshift/origin/pkg/generate/source"
-	imageapi "github.com/openshift/origin/pkg/image/api"
-	templateapi "github.com/openshift/origin/pkg/template/api"
-	"github.com/openshift/source-to-image/pkg/test"
+	imageapi "github.com/openshift/origin/pkg/image/apis/image"
+	imagefake "github.com/openshift/origin/pkg/image/generated/internalclientset/fake"
+	imageinternalversion "github.com/openshift/origin/pkg/image/generated/internalclientset/typed/image/internalversion"
+	dockerregistry "github.com/openshift/origin/pkg/image/importer/dockerv1client"
+	clicmd "github.com/openshift/origin/pkg/oc/cli/cmd"
+	"github.com/openshift/origin/pkg/oc/generate/app/cmd"
+	routefake "github.com/openshift/origin/pkg/route/generated/internalclientset/fake"
+	templateapi "github.com/openshift/origin/pkg/template/apis/template"
+	templatefake "github.com/openshift/origin/pkg/template/generated/internalclientset/fake"
 
 	_ "github.com/openshift/origin/pkg/api/install"
+	"github.com/openshift/origin/test/util"
+
+	s2igit "github.com/openshift/source-to-image/pkg/scm/git"
 )
 
 func skipExternalGit(t *testing.T) {
@@ -165,7 +180,7 @@ func TestNewAppResolve(t *testing.T) {
 			name: "Successful docker build",
 			cfg: cmd.AppConfig{
 				GenerationInputs: cmd.GenerationInputs{
-					Strategy: "docker",
+					Strategy: generate.StrategyDocker,
 				},
 			},
 			components: app.ComponentReferences{
@@ -191,7 +206,10 @@ func TestNewAppResolve(t *testing.T) {
 
 func TestNewAppDetectSource(t *testing.T) {
 	skipExternalGit(t)
-	gitLocalDir := test.CreateLocalGitDirectory(t)
+	gitLocalDir, err := s2igit.CreateLocalGitDirectory()
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer os.RemoveAll(gitLocalDir)
 
 	dockerSearcher := app.DockerRegistrySearcher{
@@ -210,8 +228,9 @@ func TestNewAppDetectSource(t *testing.T) {
 			cfg: &cmd.AppConfig{
 				Resolvers: cmd.Resolvers{
 					Detector: app.SourceRepositoryEnumerator{
-						Detectors: source.DefaultDetectors,
-						Tester:    dockerfile.NewTester(),
+						Detectors:         source.DefaultDetectors,
+						DockerfileTester:  dockerfile.NewTester(),
+						JenkinsfileTester: jenkinsfile.NewTester(),
 					},
 					DockerSearcher: dockerSearcher,
 				},
@@ -303,6 +322,13 @@ func TestNewAppRunAll(t *testing.T) {
 	dockerSearcher := app.DockerRegistrySearcher{
 		Client: dockerregistry.NewClient(10*time.Second, true),
 	}
+	failImageClient := &imagefake.Clientset{}
+	failImageClient.AddReactor("get", "images", func(action clientgotesting.Action) (handled bool, ret runtime.Object, err error) {
+		return true, nil, errors.NewInternalError(fmt.Errorf(""))
+	})
+	okTemplateClient := &templatefake.Clientset{}
+	okImageClient := &imagefake.Clientset{}
+	okRouteClient := &routefake.Clientset{}
 	tests := []struct {
 		name            string
 		config          *cmd.AppConfig
@@ -321,28 +347,30 @@ func TestNewAppRunAll(t *testing.T) {
 					SourceRepositories: []string{"https://github.com/openshift/ruby-hello-world"},
 				},
 				Resolvers: cmd.Resolvers{
-					ImageStreamByAnnotationSearcher: app.NewImageStreamByAnnotationSearcher(&client.Fake{}, &client.Fake{}, []string{"default"}),
+					ImageStreamByAnnotationSearcher: app.NewImageStreamByAnnotationSearcher(okImageClient.Image(), okImageClient.Image(), []string{"default"}),
 					TemplateSearcher: app.TemplateSearcher{
-						Client: &client.Fake{},
-						TemplateConfigsNamespacer: &client.Fake{},
-						Namespaces:                []string{"openshift", "default"},
+						Client:     okTemplateClient.Template(),
+						Namespaces: []string{"openshift", "default"},
 					},
 					DockerSearcher: fakeDockerSearcher(),
 					ImageStreamSearcher: app.ImageStreamSearcher{
-						Client:            &client.Fake{},
-						ImageStreamImages: &client.Fake{},
+						Client:            okImageClient.Image(),
+						ImageStreamImages: okImageClient.Image(),
 						Namespaces:        []string{"default"},
 					},
 					Detector: app.SourceRepositoryEnumerator{
-						Detectors: source.DefaultDetectors,
-						Tester:    dockerfile.NewTester(),
+						Detectors:         source.DefaultDetectors,
+						DockerfileTester:  dockerfile.NewTester(),
+						JenkinsfileTester: jenkinsfile.NewTester(),
 					},
 				},
 				GenerationInputs: cmd.GenerationInputs{
-					Strategy: "source",
+					Strategy: generate.StrategySource,
 				},
-				Typer:           kapi.Scheme,
-				OSClient:        &client.Fake{},
+				Typer:           legacyscheme.Scheme,
+				ImageClient:     okImageClient.Image(),
+				TemplateClient:  okTemplateClient.Template(),
+				RouteClient:     okRouteClient.Route(),
 				OriginNamespace: "default",
 			},
 			expected: map[string][]string{
@@ -365,28 +393,30 @@ func TestNewAppRunAll(t *testing.T) {
 				Resolvers: cmd.Resolvers{
 					DockerSearcher: fakeDockerSearcher(),
 					ImageStreamSearcher: app.ImageStreamSearcher{
-						Client:            &client.Fake{},
-						ImageStreamImages: &client.Fake{},
+						Client:            okImageClient.Image(),
+						ImageStreamImages: okImageClient.Image(),
 						Namespaces:        []string{"default"},
 					},
-					ImageStreamByAnnotationSearcher: app.NewImageStreamByAnnotationSearcher(&client.Fake{}, &client.Fake{}, []string{"default"}),
+					ImageStreamByAnnotationSearcher: app.NewImageStreamByAnnotationSearcher(okImageClient.Image(), okImageClient.Image(), []string{"default"}),
 					TemplateSearcher: app.TemplateSearcher{
-						Client: &client.Fake{},
-						TemplateConfigsNamespacer: &client.Fake{},
-						Namespaces:                []string{"openshift", "default"},
+						Client:     okTemplateClient.Template(),
+						Namespaces: []string{"openshift", "default"},
 					},
 					Detector: app.SourceRepositoryEnumerator{
-						Detectors: source.DefaultDetectors,
-						Tester:    dockerfile.NewTester(),
+						Detectors:         source.DefaultDetectors,
+						DockerfileTester:  dockerfile.NewTester(),
+						JenkinsfileTester: jenkinsfile.NewTester(),
 					},
 				},
 
 				GenerationInputs: cmd.GenerationInputs{
-					Strategy: "source",
+					Strategy: generate.StrategySource,
 					Labels:   map[string]string{"label1": "value1", "label2": "value2"},
 				},
-				Typer:           kapi.Scheme,
-				OSClient:        &client.Fake{},
+				Typer:           legacyscheme.Scheme,
+				ImageClient:     okImageClient.Image(),
+				TemplateClient:  okTemplateClient.Template(),
+				RouteClient:     okRouteClient.Route(),
 				OriginNamespace: "default",
 			},
 			expected: map[string][]string{
@@ -409,26 +439,28 @@ func TestNewAppRunAll(t *testing.T) {
 				Resolvers: cmd.Resolvers{
 					DockerSearcher: fakeSimpleDockerSearcher(),
 					ImageStreamSearcher: app.ImageStreamSearcher{
-						Client:            &client.Fake{},
-						ImageStreamImages: &client.Fake{},
+						Client:            okImageClient.Image(),
+						ImageStreamImages: okImageClient.Image(),
 						Namespaces:        []string{"default"},
 					},
-					ImageStreamByAnnotationSearcher: app.NewImageStreamByAnnotationSearcher(&client.Fake{}, &client.Fake{}, []string{"default"}),
+					ImageStreamByAnnotationSearcher: app.NewImageStreamByAnnotationSearcher(okImageClient.Image(), okImageClient.Image(), []string{"default"}),
 					TemplateSearcher: app.TemplateSearcher{
-						Client: &client.Fake{},
-						TemplateConfigsNamespacer: &client.Fake{},
-						Namespaces:                []string{"openshift", "default"},
+						Client:     okTemplateClient.Template(),
+						Namespaces: []string{"openshift", "default"},
 					},
 					Detector: app.SourceRepositoryEnumerator{
-						Detectors: source.DefaultDetectors,
-						Tester:    dockerfile.NewTester(),
+						Detectors:         source.DefaultDetectors,
+						DockerfileTester:  dockerfile.NewTester(),
+						JenkinsfileTester: jenkinsfile.NewTester(),
 					},
 				},
 				GenerationInputs: cmd.GenerationInputs{
-					Strategy: "docker",
+					Strategy: generate.StrategyDocker,
 				},
-				Typer:           kapi.Scheme,
-				OSClient:        &client.Fake{},
+				Typer:           legacyscheme.Scheme,
+				ImageClient:     okImageClient.Image(),
+				TemplateClient:  okTemplateClient.Template(),
+				RouteClient:     okRouteClient.Route(),
 				OriginNamespace: "default",
 			},
 			checkPort: "8080",
@@ -454,20 +486,22 @@ func TestNewAppRunAll(t *testing.T) {
 				Resolvers: cmd.Resolvers{
 					DockerSearcher:                  dockerSearcher,
 					ImageStreamSearcher:             fakeImageStreamSearcher(),
-					ImageStreamByAnnotationSearcher: app.NewImageStreamByAnnotationSearcher(&client.Fake{}, &client.Fake{}, []string{"default"}),
+					ImageStreamByAnnotationSearcher: app.NewImageStreamByAnnotationSearcher(okImageClient.Image(), okImageClient.Image(), []string{"default"}),
 					TemplateSearcher: app.TemplateSearcher{
-						Client: &client.Fake{},
-						TemplateConfigsNamespacer: &client.Fake{},
-						Namespaces:                []string{"openshift", "default"},
+						Client:     okTemplateClient.Template(),
+						Namespaces: []string{"openshift", "default"},
 					},
 					Detector: app.SourceRepositoryEnumerator{
-						Detectors: source.DefaultDetectors,
-						Tester:    dockerfile.NewTester(),
+						Detectors:         source.DefaultDetectors,
+						DockerfileTester:  dockerfile.NewTester(),
+						JenkinsfileTester: jenkinsfile.NewTester(),
 					},
 				},
 
-				Typer:           kapi.Scheme,
-				OSClient:        &client.Fake{},
+				Typer:           legacyscheme.Scheme,
+				ImageClient:     okImageClient.Image(),
+				TemplateClient:  okTemplateClient.Template(),
+				RouteClient:     okRouteClient.Route(),
 				OriginNamespace: "default",
 			},
 			expected: map[string][]string{
@@ -481,6 +515,50 @@ func TestNewAppRunAll(t *testing.T) {
 			expectedErr:     nil,
 		},
 		{
+			name: "failed app generation using missing context dir",
+			config: &cmd.AppConfig{
+				ComponentInputs: cmd.ComponentInputs{
+					SourceRepositories: []string{"https://github.com/openshift/sti-ruby"},
+				},
+				GenerationInputs: cmd.GenerationInputs{
+					ContextDir: "2.0/test/missing-dir",
+				},
+
+				Resolvers: cmd.Resolvers{
+					DockerSearcher:                  dockerSearcher,
+					ImageStreamSearcher:             fakeImageStreamSearcher(),
+					ImageStreamByAnnotationSearcher: app.NewImageStreamByAnnotationSearcher(okImageClient.Image(), okImageClient.Image(), []string{"default"}),
+					TemplateSearcher: app.TemplateSearcher{
+						Client:     okTemplateClient.Template(),
+						Namespaces: []string{"openshift", "default"},
+					},
+					Detector: app.SourceRepositoryEnumerator{
+						Detectors:         source.DefaultDetectors,
+						DockerfileTester:  dockerfile.NewTester(),
+						JenkinsfileTester: jenkinsfile.NewTester(),
+					},
+				},
+
+				Typer:           legacyscheme.Scheme,
+				ImageClient:     okImageClient.Image(),
+				TemplateClient:  okTemplateClient.Template(),
+				RouteClient:     okRouteClient.Route(),
+				OriginNamespace: "default",
+			},
+			expected: map[string][]string{
+				"imageStream":      {"sti-ruby"},
+				"buildConfig":      {"sti-ruby"},
+				"deploymentConfig": {"sti-ruby"},
+				"service":          {"sti-ruby"},
+			},
+			expectedName:    "sti-ruby",
+			expectedVolumes: nil,
+			errFn: func(err error) bool {
+				return err.Error() == "supplied context directory '2.0/test/missing-dir' does not exist in 'https://github.com/openshift/sti-ruby'"
+			},
+		},
+
+		{
 			name: "insecure registry generation",
 			config: &cmd.AppConfig{
 				ComponentInputs: cmd.ComponentInputs{
@@ -488,7 +566,7 @@ func TestNewAppRunAll(t *testing.T) {
 					SourceRepositories: []string{"https://github.com/openshift/ruby-hello-world"},
 				},
 				GenerationInputs: cmd.GenerationInputs{
-					Strategy:         "source",
+					Strategy:         generate.StrategySource,
 					InsecureRegistry: true,
 				},
 
@@ -502,23 +580,32 @@ func TestNewAppRunAll(t *testing.T) {
 						RegistrySearcher: &ExactMatchDockerSearcher{},
 					},
 					ImageStreamSearcher: app.ImageStreamSearcher{
-						Client:            &client.Fake{},
-						ImageStreamImages: &client.Fake{},
+						Client:            okImageClient.Image(),
+						ImageStreamImages: okImageClient.Image(),
 						Namespaces:        []string{"default"},
 					},
 					TemplateSearcher: app.TemplateSearcher{
-						Client: &client.Fake{},
-						TemplateConfigsNamespacer: &client.Fake{},
-						Namespaces:                []string{},
+						Client:     okTemplateClient.Template(),
+						Namespaces: []string{},
 					},
-					TemplateFileSearcher: &app.TemplateFileSearcher{},
+					TemplateFileSearcher: &app.TemplateFileSearcher{
+						Builder: resource.NewBuilder(&resource.Mapper{
+							RESTMapper:   legacyscheme.Registry.RESTMapper(),
+							ObjectTyper:  legacyscheme.Scheme,
+							ClientMapper: resource.DisabledClientForMapping{},
+							Decoder:      legacyscheme.Codecs.UniversalDecoder(),
+						}, nil, &categories.SimpleCategoryExpander{}),
+					},
 					Detector: app.SourceRepositoryEnumerator{
-						Detectors: source.DefaultDetectors,
-						Tester:    dockerfile.NewTester(),
+						Detectors:         source.DefaultDetectors,
+						DockerfileTester:  dockerfile.NewTester(),
+						JenkinsfileTester: jenkinsfile.NewTester(),
 					},
 				},
-				Typer:           kapi.Scheme,
-				OSClient:        &client.Fake{},
+				Typer:           legacyscheme.Scheme,
+				ImageClient:     okImageClient.Image(),
+				TemplateClient:  okTemplateClient.Template(),
+				RouteClient:     okRouteClient.Route(),
 				OriginNamespace: "default",
 			},
 			expected: map[string][]string{
@@ -542,23 +629,25 @@ func TestNewAppRunAll(t *testing.T) {
 				Resolvers: cmd.Resolvers{
 					DockerSearcher: dockerSearcher,
 					ImageStreamSearcher: app.ImageStreamSearcher{
-						Client:            &client.Fake{},
-						ImageStreamImages: &client.Fake{},
+						Client:            okImageClient.Image(),
+						ImageStreamImages: okImageClient.Image(),
 						Namespaces:        []string{"default"},
 					},
 					TemplateSearcher: app.TemplateSearcher{
-						Client: &client.Fake{},
-						TemplateConfigsNamespacer: &client.Fake{},
-						Namespaces:                []string{"openshift", "default"},
+						Client:     okTemplateClient.Template(),
+						Namespaces: []string{"openshift", "default"},
 					},
 					Detector: app.SourceRepositoryEnumerator{
-						Detectors: source.DefaultDetectors,
-						Tester:    dockerfile.NewTester(),
+						Detectors:         source.DefaultDetectors,
+						DockerfileTester:  dockerfile.NewTester(),
+						JenkinsfileTester: jenkinsfile.NewTester(),
 					},
 				},
 
-				Typer:           kapi.Scheme,
-				OSClient:        &client.Fake{},
+				Typer:           legacyscheme.Scheme,
+				ImageClient:     okImageClient.Image(),
+				TemplateClient:  okTemplateClient.Template(),
+				RouteClient:     okRouteClient.Route(),
 				OriginNamespace: "default",
 			},
 
@@ -591,23 +680,25 @@ func TestNewAppRunAll(t *testing.T) {
 						RegistrySearcher: &ExactMatchDockerSearcher{},
 					},
 					ImageStreamSearcher: app.ImageStreamSearcher{
-						Client:            &client.Fake{},
-						ImageStreamImages: &client.Fake{},
+						Client:            okImageClient.Image(),
+						ImageStreamImages: okImageClient.Image(),
 						Namespaces:        []string{"default"},
 					},
-					ImageStreamByAnnotationSearcher: app.NewImageStreamByAnnotationSearcher(&client.Fake{}, &client.Fake{}, []string{"default"}),
+					ImageStreamByAnnotationSearcher: app.NewImageStreamByAnnotationSearcher(okImageClient.Image(), okImageClient.Image(), []string{"default"}),
 					TemplateSearcher: app.TemplateSearcher{
-						Client: &client.Fake{},
-						TemplateConfigsNamespacer: &client.Fake{},
-						Namespaces:                []string{"openshift", "default"},
+						Client:     okTemplateClient.Template(),
+						Namespaces: []string{"openshift", "default"},
 					},
 					Detector: app.SourceRepositoryEnumerator{
-						Detectors: source.DefaultDetectors,
-						Tester:    dockerfile.NewTester(),
+						Detectors:         source.DefaultDetectors,
+						DockerfileTester:  dockerfile.NewTester(),
+						JenkinsfileTester: jenkinsfile.NewTester(),
 					},
 				},
-				Typer:           kapi.Scheme,
-				OSClient:        &client.Fake{},
+				Typer:           legacyscheme.Scheme,
+				ImageClient:     okImageClient.Image(),
+				TemplateClient:  okTemplateClient.Template(),
+				RouteClient:     okRouteClient.Route(),
 				OriginNamespace: "default",
 			},
 			expected: map[string][]string{
@@ -635,23 +726,25 @@ func TestNewAppRunAll(t *testing.T) {
 						Insecure: true,
 					},
 					ImageStreamSearcher: app.ImageStreamSearcher{
-						Client:            &client.Fake{},
-						ImageStreamImages: &client.Fake{},
+						Client:            okImageClient.Image(),
+						ImageStreamImages: okImageClient.Image(),
 						Namespaces:        []string{"default"},
 					},
-					ImageStreamByAnnotationSearcher: app.NewImageStreamByAnnotationSearcher(&client.Fake{}, &client.Fake{}, []string{"default"}),
+					ImageStreamByAnnotationSearcher: app.NewImageStreamByAnnotationSearcher(okImageClient.Image(), okImageClient.Image(), []string{"default"}),
 					TemplateSearcher: app.TemplateSearcher{
-						Client: &client.Fake{},
-						TemplateConfigsNamespacer: &client.Fake{},
-						Namespaces:                []string{"openshift", "default"},
+						Client:     okTemplateClient.Template(),
+						Namespaces: []string{"openshift", "default"},
 					},
 					Detector: app.SourceRepositoryEnumerator{
-						Detectors: source.DefaultDetectors,
-						Tester:    dockerfile.NewTester(),
+						Detectors:         source.DefaultDetectors,
+						DockerfileTester:  dockerfile.NewTester(),
+						JenkinsfileTester: jenkinsfile.NewTester(),
 					},
 				},
-				Typer:           kapi.Scheme,
-				OSClient:        &client.Fake{},
+				Typer:           legacyscheme.Scheme,
+				ImageClient:     okImageClient.Image(),
+				TemplateClient:  okTemplateClient.Template(),
+				RouteClient:     okRouteClient.Route(),
 				OriginNamespace: "default",
 			},
 			expected: map[string][]string{
@@ -687,18 +780,19 @@ func TestNewAppRunAll(t *testing.T) {
 						RegistrySearcher: &ExactMatchDockerSearcher{},
 					},
 					ImageStreamSearcher: app.ImageStreamSearcher{
-						Client:            &client.Fake{},
-						ImageStreamImages: &client.Fake{},
+						Client:            okImageClient.Image(),
+						ImageStreamImages: okImageClient.Image(),
 						Namespaces:        []string{"default"},
 					},
 					TemplateSearcher: app.TemplateSearcher{
-						Client: &client.Fake{},
-						TemplateConfigsNamespacer: &client.Fake{},
-						Namespaces:                []string{"openshift", "default"},
+						Client:     okTemplateClient.Template(),
+						Namespaces: []string{"openshift", "default"},
 					},
 				},
-				Typer:           kapi.Scheme,
-				OSClient:        &client.Fake{},
+				Typer:           legacyscheme.Scheme,
+				ImageClient:     okImageClient.Image(),
+				TemplateClient:  okTemplateClient.Template(),
+				RouteClient:     okRouteClient.Route(),
 				OriginNamespace: "default",
 			},
 			expected: map[string][]string{
@@ -723,22 +817,19 @@ func TestNewAppRunAll(t *testing.T) {
 						RegistrySearcher: &ExactMatchDockerSearcher{Errs: []error{errors.NewInternalError(fmt.Errorf("test error"))}},
 					},
 					ImageStreamSearcher: app.ImageStreamSearcher{
-						Client: client.NewSimpleFake(&unversioned.Status{
-							Status: unversioned.StatusFailure,
-							Code:   http.StatusInternalServerError,
-							Reason: unversioned.StatusReasonInternalError,
-						}),
-						ImageStreamImages: &client.Fake{},
+						Client:            failImageClient.Image(),
+						ImageStreamImages: okImageClient.Image(),
 						Namespaces:        []string{"default"},
 					},
 					TemplateSearcher: app.TemplateSearcher{
-						Client: &client.Fake{},
-						TemplateConfigsNamespacer: &client.Fake{},
-						Namespaces:                []string{"openshift", "default"},
+						Client:     okTemplateClient.Template(),
+						Namespaces: []string{"openshift", "default"},
 					},
 				},
-				Typer:           kapi.Scheme,
-				OSClient:        &client.Fake{},
+				Typer:           legacyscheme.Scheme,
+				ImageClient:     okImageClient.Image(),
+				TemplateClient:  okTemplateClient.Template(),
+				RouteClient:     okRouteClient.Route(),
 				OriginNamespace: "default",
 			},
 			expected: map[string][]string{
@@ -763,129 +854,134 @@ func TestNewAppRunAll(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test.config.Out, test.config.ErrOut = os.Stdout, os.Stderr
-		test.config.Deploy = true
-		res, err := test.config.Run()
-		if test.errFn != nil {
-			if !test.errFn(err) {
-				t.Errorf("%s: Error mismatch! Unexpected error: %#v", test.name, err)
-				continue
+		t.Run(test.name, func(t *testing.T) {
+			test.config.Out, test.config.ErrOut = os.Stdout, os.Stderr
+			test.config.Deploy = true
+			test.config.ImageClient = &NewAppFakeImageClient{
+				proxy: test.config.ImageClient,
 			}
-		} else if err != test.expectedErr {
-			t.Errorf("%s: Error mismatch! Expected %v, got %v", test.name, test.expectedErr, err)
-			continue
-		}
-		if err != nil {
-			continue
-		}
-		if res.Name != test.expectedName {
-			t.Errorf("%s: Name was not correct: %v", test.name, res.Name)
-			continue
-		}
-		imageStreams := []*imageapi.ImageStream{}
-		got := map[string][]string{}
-		gotVolumes := map[string]string{}
-		for _, obj := range res.List.Items {
-			switch tp := obj.(type) {
-			case *buildapi.BuildConfig:
-				got["buildConfig"] = append(got["buildConfig"], tp.Name)
-			case *kapi.Service:
-				if test.checkPort != "" {
-					if len(tp.Spec.Ports) == 0 {
-						t.Errorf("%s: did not get any ports in service", test.name)
-						break
-					}
-					expectedPort, _ := strconv.Atoi(test.checkPort)
-					if tp.Spec.Ports[0].Port != int32(expectedPort) {
-						t.Errorf("%s: did not get expected port in service. Expected: %d. Got %d\n",
-							test.name, expectedPort, tp.Spec.Ports[0].Port)
-					}
+			res, err := test.config.Run()
+			if test.errFn != nil {
+				if !test.errFn(err) {
+					t.Errorf("%s: Error mismatch! Unexpected error: %#v", test.name, err)
+					return
 				}
-				if test.config.Labels != nil {
-					if !mapContains(test.config.Labels, tp.Spec.Selector) {
-						t.Errorf("%s: did not get expected service selector. Expected: %v. Got: %v",
-							test.name, test.config.Labels, tp.Spec.Selector)
-					}
-				}
-				got["service"] = append(got["service"], tp.Name)
-			case *imageapi.ImageStream:
-				got["imageStream"] = append(got["imageStream"], tp.Name)
-				imageStreams = append(imageStreams, tp)
-			case *deployapi.DeploymentConfig:
-				got["deploymentConfig"] = append(got["deploymentConfig"], tp.Name)
-				if podTemplate := tp.Spec.Template; podTemplate != nil {
-					for _, volume := range podTemplate.Spec.Volumes {
-						if volume.VolumeSource.EmptyDir != nil {
-							gotVolumes[volume.Name] = "EmptyDir"
-						} else {
-							gotVolumes[volume.Name] = "UNKNOWN"
+			} else if err != test.expectedErr {
+				t.Errorf("%s: Error mismatch! Expected %v, got %v", test.name, test.expectedErr, err)
+				return
+			}
+			if err != nil {
+				return
+			}
+			if res.Name != test.expectedName {
+				t.Errorf("%s: Name was not correct: %v", test.name, res.Name)
+				return
+			}
+			imageStreams := []*imageapi.ImageStream{}
+			got := map[string][]string{}
+			gotVolumes := map[string]string{}
+			for _, obj := range res.List.Items {
+				switch tp := obj.(type) {
+				case *buildapi.BuildConfig:
+					got["buildConfig"] = append(got["buildConfig"], tp.Name)
+				case *kapi.Service:
+					if test.checkPort != "" {
+						if len(tp.Spec.Ports) == 0 {
+							t.Errorf("%s: did not get any ports in service", test.name)
+							break
+						}
+						expectedPort, _ := strconv.Atoi(test.checkPort)
+						if tp.Spec.Ports[0].Port != int32(expectedPort) {
+							t.Errorf("%s: did not get expected port in service. Expected: %d. Got %d\n",
+								test.name, expectedPort, tp.Spec.Ports[0].Port)
 						}
 					}
-					for _, container := range podTemplate.Spec.Containers {
-						for _, volumeMount := range container.VolumeMounts {
-							got["volumeMounts"] = append(got["volumeMounts"], volumeMount.Name)
+					if test.config.Labels != nil {
+						if !mapContains(test.config.Labels, tp.Spec.Selector) {
+							t.Errorf("%s: did not get expected service selector. Expected: %v. Got: %v",
+								test.name, test.config.Labels, tp.Spec.Selector)
+						}
+					}
+					got["service"] = append(got["service"], tp.Name)
+				case *imageapi.ImageStream:
+					got["imageStream"] = append(got["imageStream"], tp.Name)
+					imageStreams = append(imageStreams, tp)
+				case *appsapi.DeploymentConfig:
+					got["deploymentConfig"] = append(got["deploymentConfig"], tp.Name)
+					if podTemplate := tp.Spec.Template; podTemplate != nil {
+						for _, volume := range podTemplate.Spec.Volumes {
+							if volume.VolumeSource.EmptyDir != nil {
+								gotVolumes[volume.Name] = "EmptyDir"
+							} else {
+								gotVolumes[volume.Name] = "UNKNOWN"
+							}
+						}
+						for _, container := range podTemplate.Spec.Containers {
+							for _, volumeMount := range container.VolumeMounts {
+								got["volumeMounts"] = append(got["volumeMounts"], volumeMount.Name)
+							}
+						}
+					}
+					if test.config.Labels != nil {
+						if !mapContains(test.config.Labels, tp.Spec.Selector) {
+							t.Errorf("%s: did not get expected deployment config rc selector. Expected: %v. Got: %v",
+								test.name, test.config.Labels, tp.Spec.Selector)
 						}
 					}
 				}
-				if test.config.Labels != nil {
-					if !mapContains(test.config.Labels, tp.Spec.Selector) {
-						t.Errorf("%s: did not get expected deployment config rc selector. Expected: %v. Got: %v",
-							test.name, test.config.Labels, tp.Spec.Selector)
-					}
+			}
+
+			if len(test.expected) != len(got) {
+				t.Errorf("%s: Resource kind size mismatch! Expected %d, got %d", test.name, len(test.expected), len(got))
+				return
+			}
+			for k, exp := range test.expected {
+				g, ok := got[k]
+				if !ok {
+					t.Errorf("%s: Didn't find expected kind %s", test.name, k)
+				}
+
+				sort.Strings(g)
+				sort.Strings(exp)
+
+				if !reflect.DeepEqual(g, exp) {
+					t.Errorf("%s: %s resource names mismatch! Expected %v, got %v", test.name, k, exp, g)
+					continue
 				}
 			}
-		}
 
-		if len(test.expected) != len(got) {
-			t.Errorf("%s: Resource kind size mismatch! Expected %d, got %d", test.name, len(test.expected), len(got))
-			continue
-		}
-		for k, exp := range test.expected {
-			g, ok := got[k]
-			if !ok {
-				t.Errorf("%s: Didn't find expected kind %s", test.name, k)
+			if len(test.expectedVolumes) != len(gotVolumes) {
+				t.Errorf("%s: Volume count mismatch! Expected %d, got %d", test.name, len(test.expectedVolumes), len(gotVolumes))
+				return
+			}
+			for k, exp := range test.expectedVolumes {
+				g, ok := gotVolumes[k]
+				if !ok {
+					t.Errorf("%s: Didn't find expected volume %s", test.name, k)
+				}
+
+				if g != exp {
+					t.Errorf("%s: Expected volume of type %s, got %s", test.name, g, exp)
+				}
 			}
 
-			sort.Strings(g)
-			sort.Strings(exp)
-
-			if !reflect.DeepEqual(g, exp) {
-				t.Errorf("%s: %s resource names mismatch! Expected %v, got %v", test.name, k, exp, g)
-				continue
-			}
-		}
-
-		if len(test.expectedVolumes) != len(gotVolumes) {
-			t.Errorf("%s: Volume count mismatch! Expected %d, got %d", test.name, len(test.expectedVolumes), len(gotVolumes))
-			continue
-		}
-		for k, exp := range test.expectedVolumes {
-			g, ok := gotVolumes[k]
-			if !ok {
-				t.Errorf("%s: Didn't find expected volume %s", test.name, k)
+			if test.expectedName != res.Name {
+				t.Errorf("%s: Unexpected name: %s", test.name, test.expectedName)
 			}
 
-			if g != exp {
-				t.Errorf("%s: Expected volume of type %s, got %s", test.name, g, exp)
+			if test.expectInsecure == nil {
+				return
 			}
-		}
-
-		if test.expectedName != res.Name {
-			t.Errorf("%s: Unexpected name: %s", test.name, test.expectedName)
-		}
-
-		if test.expectInsecure == nil {
-			continue
-		}
-		for _, stream := range imageStreams {
-			_, hasAnnotation := stream.Annotations[imageapi.InsecureRepositoryAnnotation]
-			if test.expectInsecure.Has(stream.Name) && !hasAnnotation {
-				t.Errorf("%s: Expected insecure annotation for stream: %s, but did not get one.", test.name, stream.Name)
+			for _, stream := range imageStreams {
+				_, hasAnnotation := stream.Annotations[imageapi.InsecureRepositoryAnnotation]
+				if test.expectInsecure.Has(stream.Name) && !hasAnnotation {
+					t.Errorf("%s: Expected insecure annotation for stream: %s, but did not get one.", test.name, stream.Name)
+				}
+				if !test.expectInsecure.Has(stream.Name) && hasAnnotation {
+					t.Errorf("%s: Got insecure annotation for stream: %s, and was not expecting one.", test.name, stream.Name)
+				}
 			}
-			if !test.expectInsecure.Has(stream.Name) && hasAnnotation {
-				t.Errorf("%s: Got insecure annotation for stream: %s, and was not expecting one.", test.name, stream.Name)
-			}
-		}
+		})
 
 	}
 }
@@ -1063,7 +1159,7 @@ func TestNewAppRunBuilds(t *testing.T) {
 			config: &cmd.AppConfig{
 				GenerationInputs: cmd.GenerationInputs{
 					Dockerfile: "FROM openshift/origin-base\nUSER foo",
-					Strategy:   "source",
+					Strategy:   generate.StrategySource,
 				},
 			},
 			expectedErr: func(err error) bool {
@@ -1075,7 +1171,7 @@ func TestNewAppRunBuilds(t *testing.T) {
 			config: &cmd.AppConfig{
 				GenerationInputs: cmd.GenerationInputs{
 					Dockerfile: "USER foo",
-					Strategy:   "docker",
+					Strategy:   generate.StrategyDocker,
 				},
 			},
 			expectedErr: func(err error) bool {
@@ -1216,9 +1312,141 @@ func TestNewAppRunBuilds(t *testing.T) {
 				return nil
 			},
 		},
+		{
+			name: "successful build from source with autodetected jenkinsfile",
+			config: &cmd.AppConfig{
+				ComponentInputs: cmd.ComponentInputs{
+					SourceRepositories: []string{
+						"https://github.com/openshift/nodejs-ex",
+					},
+				},
+				GenerationInputs: cmd.GenerationInputs{
+					ContextDir: "openshift/pipeline",
+				},
+			},
+			expected: map[string][]string{
+				"buildConfig": {"nodejs-ex"},
+			},
+			checkResult: func(res *cmd.AppResult) error {
+				if len(res.List.Items) != 1 {
+					return fmt.Errorf("expected one Item returned")
+				}
+				bc, ok := res.List.Items[0].(*buildapi.BuildConfig)
+				if !ok {
+					return fmt.Errorf("expected Item of type *buildapi.BuildConfig")
+				}
+				if !reflect.DeepEqual(bc.Spec.Output, buildapi.BuildOutput{}) {
+					return fmt.Errorf("invalid bc.Spec.Output, got %#v", bc.Spec.Output)
+				}
+				if !reflect.DeepEqual(bc.Spec.Source, buildapi.BuildSource{
+					ContextDir: "openshift/pipeline",
+					Git:        &buildapi.GitBuildSource{URI: "https://github.com/openshift/nodejs-ex"},
+					Secrets:    []buildapi.SecretBuildSource{},
+				}) {
+					return fmt.Errorf("invalid bc.Spec.Source, got %#v", bc.Spec.Source)
+				}
+				if !reflect.DeepEqual(bc.Spec.Strategy, buildapi.BuildStrategy{JenkinsPipelineStrategy: &buildapi.JenkinsPipelineBuildStrategy{}}) {
+					return fmt.Errorf("invalid bc.Spec.Strategy, got %#v", bc.Spec.Strategy)
+				}
+				return nil
+			},
+		},
+		{
+			name: "successful build from component with source with pipeline strategy",
+			config: &cmd.AppConfig{
+				ComponentInputs: cmd.ComponentInputs{
+					Components: []string{
+						"centos/nodejs-4-centos7~https://github.com/openshift/nodejs-ex",
+					},
+				},
+				GenerationInputs: cmd.GenerationInputs{
+					ContextDir: "openshift/pipeline",
+					Strategy:   generate.StrategyPipeline,
+				},
+			},
+			expected: map[string][]string{
+				"buildConfig": {"nodejs-ex"},
+			},
+			checkResult: func(res *cmd.AppResult) error {
+				if len(res.List.Items) != 1 {
+					return fmt.Errorf("expected one Item returned")
+				}
+				bc, ok := res.List.Items[0].(*buildapi.BuildConfig)
+				if !ok {
+					return fmt.Errorf("expected Item of type *buildapi.BuildConfig")
+				}
+				if !reflect.DeepEqual(bc.Spec.Output, buildapi.BuildOutput{}) {
+					return fmt.Errorf("invalid bc.Spec.Output, got %#v", bc.Spec.Output)
+				}
+				if !reflect.DeepEqual(bc.Spec.Source, buildapi.BuildSource{
+					ContextDir: "openshift/pipeline",
+					Git:        &buildapi.GitBuildSource{URI: "https://github.com/openshift/nodejs-ex"},
+					Secrets:    []buildapi.SecretBuildSource{},
+				}) {
+					return fmt.Errorf("invalid bc.Spec.Source, got %#v", bc.Spec.Source.Git)
+				}
+				if !reflect.DeepEqual(bc.Spec.Strategy, buildapi.BuildStrategy{JenkinsPipelineStrategy: &buildapi.JenkinsPipelineBuildStrategy{}}) {
+					return fmt.Errorf("invalid bc.Spec.Strategy, got %#v", bc.Spec.Strategy)
+				}
+				return nil
+			},
+		},
+		{
+			name: "successful build from source with jenkinsfile with pipeline strategy",
+			config: &cmd.AppConfig{
+				ComponentInputs: cmd.ComponentInputs{
+					SourceRepositories: []string{
+						"https://github.com/openshift/nodejs-ex",
+					},
+				},
+				GenerationInputs: cmd.GenerationInputs{
+					ContextDir: "openshift/pipeline",
+					Strategy:   generate.StrategyPipeline,
+				},
+			},
+			expected: map[string][]string{
+				"buildConfig": {"nodejs-ex"},
+			},
+		},
+		{
+			name: "failed build from source with jenkinsfile with docker strategy",
+			config: &cmd.AppConfig{
+				ComponentInputs: cmd.ComponentInputs{
+					SourceRepositories: []string{
+						"https://github.com/openshift/nodejs-ex",
+					},
+				},
+				GenerationInputs: cmd.GenerationInputs{
+					ContextDir: "openshift/pipeline",
+					Strategy:   generate.StrategyDocker,
+				},
+			},
+			expectedErr: func(err error) bool {
+				return strings.HasPrefix(err.Error(), "No Dockerfile was found in the repository")
+			},
+		},
+		{
+			name: "failed build from source without jenkinsfile with pipeline strategy",
+			config: &cmd.AppConfig{
+				ComponentInputs: cmd.ComponentInputs{
+					SourceRepositories: []string{
+						"https://github.com/openshift/nodejs-ex",
+					},
+				},
+				GenerationInputs: cmd.GenerationInputs{
+					Strategy: generate.StrategyPipeline,
+				},
+			},
+			expectedErr: func(err error) bool {
+				return strings.HasPrefix(err.Error(), "No Jenkinsfile was found in the repository")
+			},
+		},
 	}
 	for _, test := range tests {
 		stdout, stderr := PrepareAppConfig(test.config)
+		test.config.ImageClient = &NewAppFakeImageClient{
+			proxy: test.config.ImageClient,
+		}
 
 		res, err := test.config.Run()
 		if (test.expectedErr == nil && err != nil) || (test.expectedErr != nil && !test.expectedErr(err)) {
@@ -1272,7 +1500,7 @@ func TestNewAppRunBuilds(t *testing.T) {
 	}
 }
 
-func TestBuildOutputCycleDetection(t *testing.T) {
+func TestNewAppBuildOutputCycleDetection(t *testing.T) {
 	skipExternalGit(t)
 	tests := []struct {
 		name   string
@@ -1450,6 +1678,9 @@ func TestBuildOutputCycleDetection(t *testing.T) {
 	}
 	for _, test := range tests {
 		stdout, stderr := PrepareAppConfig(test.config)
+		test.config.ImageClient = &NewAppFakeImageClient{
+			proxy: test.config.ImageClient,
+		}
 
 		res, err := test.config.Run()
 		if (test.expectedErr == nil && err != nil) || (test.expectedErr != nil && !test.expectedErr(err)) {
@@ -1504,6 +1735,10 @@ func TestNewAppNewBuildEnvVars(t *testing.T) {
 		Client: dockerregistry.NewClient(10*time.Second, true),
 	}
 
+	okTemplateClient := &templatefake.Clientset{}
+	okImageClient := &imagefake.Clientset{}
+	okRouteClient := &routefake.Clientset{}
+
 	tests := []struct {
 		name        string
 		config      *cmd.AppConfig
@@ -1518,20 +1753,22 @@ func TestNewAppNewBuildEnvVars(t *testing.T) {
 					DockerImages:       []string{"centos/ruby-22-centos7", "openshift/nodejs-010-centos7"},
 				},
 				GenerationInputs: cmd.GenerationInputs{
-					AddEnvironmentToBuild: true,
-					OutputDocker:          true,
-					Environment:           []string{"BUILD_ENV_1=env_value_1", "BUILD_ENV_2=env_value_2"},
+					OutputDocker:     true,
+					BuildEnvironment: []string{"BUILD_ENV_1=env_value_1", "BUILD_ENV_2=env_value_2"},
 				},
 
 				Resolvers: cmd.Resolvers{
 					DockerSearcher: dockerSearcher,
 					Detector: app.SourceRepositoryEnumerator{
-						Detectors: source.DefaultDetectors,
-						Tester:    dockerfile.NewTester(),
+						Detectors:         source.DefaultDetectors,
+						DockerfileTester:  dockerfile.NewTester(),
+						JenkinsfileTester: jenkinsfile.NewTester(),
 					},
 				},
-				Typer:           kapi.Scheme,
-				OSClient:        &client.Fake{},
+				Typer:           legacyscheme.Scheme,
+				ImageClient:     okImageClient.Image(),
+				TemplateClient:  okTemplateClient.Template(),
+				RouteClient:     okRouteClient.Route(),
 				OriginNamespace: "default",
 			},
 			expected: []kapi.EnvVar{
@@ -1571,6 +1808,9 @@ func TestNewAppBuildConfigEnvVarsAndSecrets(t *testing.T) {
 	dockerSearcher := app.DockerRegistrySearcher{
 		Client: dockerregistry.NewClient(10*time.Second, true),
 	}
+	okTemplateClient := &templatefake.Clientset{}
+	okImageClient := &imagefake.Clientset{}
+	okRouteClient := &routefake.Clientset{}
 
 	tests := []struct {
 		name            string
@@ -1595,12 +1835,15 @@ func TestNewAppBuildConfigEnvVarsAndSecrets(t *testing.T) {
 				Resolvers: cmd.Resolvers{
 					DockerSearcher: dockerSearcher,
 					Detector: app.SourceRepositoryEnumerator{
-						Detectors: source.DefaultDetectors,
-						Tester:    dockerfile.NewTester(),
+						Detectors:         source.DefaultDetectors,
+						DockerfileTester:  dockerfile.NewTester(),
+						JenkinsfileTester: jenkinsfile.NewTester(),
 					},
 				},
-				Typer:           kapi.Scheme,
-				OSClient:        &client.Fake{},
+				Typer:           legacyscheme.Scheme,
+				ImageClient:     okImageClient.Image(),
+				TemplateClient:  okTemplateClient.Template(),
+				RouteClient:     okRouteClient.Route(),
 				OriginNamespace: "default",
 			},
 			expected:        []kapi.EnvVar{},
@@ -1684,16 +1927,17 @@ func TestNewAppSourceAuthRequired(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		url := setupLocalGitRepo(t, test.passwordProtected, test.useProxy)
+		url, tempRepoDir := setupLocalGitRepo(t, test.passwordProtected, test.useProxy)
 
-		sourceRepo, err := app.NewSourceRepository(url)
+		sourceRepo, err := app.NewSourceRepository(url, generate.StrategySource)
 		if err != nil {
 			t.Fatalf("%v", err)
 		}
 
 		detector := app.SourceRepositoryEnumerator{
-			Detectors: source.DefaultDetectors,
-			Tester:    dockerfile.NewTester(),
+			Detectors:         source.DefaultDetectors,
+			DockerfileTester:  dockerfile.NewTester(),
+			JenkinsfileTester: jenkinsfile.NewTester(),
 		}
 
 		if err = sourceRepo.Detect(detector, true); err != nil {
@@ -1708,12 +1952,62 @@ func TestNewAppSourceAuthRequired(t *testing.T) {
 		if test.expectAuthRequired != sourceRef.RequiresAuth {
 			t.Errorf("%s: unexpected auth required result. Expected: %v. Actual: %v", test.name, test.expectAuthRequired, sourceRef.RequiresAuth)
 		}
+		os.RemoveAll(tempRepoDir)
 	}
 }
 
-func setupLocalGitRepo(t *testing.T, passwordProtected bool, requireProxy bool) string {
+func TestNewAppListAndSearch(t *testing.T) {
+	tests := []struct {
+		name           string
+		options        clicmd.NewAppOptions
+		expectedOutput string
+	}{
+		{
+			name: "search, no oldversion",
+			options: clicmd.NewAppOptions{
+				ObjectGeneratorOptions: &clicmd.ObjectGeneratorOptions{
+					Config: &cmd.AppConfig{
+						ComponentInputs: cmd.ComponentInputs{
+							ImageStreams: []string{"ruby"},
+						},
+						AsSearch: true,
+					}},
+			},
+			expectedOutput: "Image streams (oc new-app --image-stream=<image-stream> [--code=<source>])\n-----\nruby\n  Project: default\n  Tags:    latest\n\n",
+		},
+		{
+			name: "list, no oldversion",
+			options: clicmd.NewAppOptions{
+				ObjectGeneratorOptions: &clicmd.ObjectGeneratorOptions{
+					Config: &cmd.AppConfig{
+						AsList: true,
+					}},
+			},
+			expectedOutput: "Image streams (oc new-app --image-stream=<image-stream> [--code=<source>])\n-----\nruby\n  Project: default\n  Tags:    latest\n\n",
+		},
+	}
+	for _, test := range tests {
+		stdout, stderr := PrepareAppConfig(test.options.Config)
+		test.options.Action.Out, test.options.ErrOut = stdout, stderr
+		test.options.BaseName = "oc"
+		test.options.CommandName = "new-app"
+
+		err := test.options.RunNewApp()
+		if err != nil {
+			t.Errorf("expected err == nil, got err == %v", err)
+		}
+		if stderr.Len() > 0 {
+			t.Errorf("expected stderr == %q, got stderr == %q", "", stderr.Bytes())
+		}
+		if string(stdout.Bytes()) != test.expectedOutput {
+			t.Errorf("expected stdout == %q, got stdout == %q", test.expectedOutput, stdout.Bytes())
+		}
+	}
+}
+
+func setupLocalGitRepo(t *testing.T, passwordProtected bool, requireProxy bool) (string, string) {
 	// Create test directories
-	testDir, err := ioutil.TempDir("", "gitauth")
+	testDir, err := ioutil.TempDir(util.GetBaseDir(), "gitauth")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -1735,7 +2029,12 @@ func setupLocalGitRepo(t *testing.T, passwordProtected bool, requireProxy bool) 
 	}
 
 	// Set initial repo contents
-	gitRepo := git.NewRepository()
+	gitRepo := git.NewRepositoryWithEnv([]string{
+		"GIT_AUTHOR_NAME=developer",
+		"GIT_AUTHOR_EMAIL=developer@example.com",
+		"GIT_COMMITTER_NAME=developer",
+		"GIT_COMMITTER_EMAIL=developer@example.com",
+	})
 	if err = gitRepo.Init(initialRepoDir, false); err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -1797,7 +2096,7 @@ name = developer
 email = developer@org.org
 `
 	if passwordProtected {
-		authSection := `	
+		authSection := `
 [url %q]
 insteadOf = %s
 		`
@@ -1825,19 +2124,36 @@ insteadOf = %s
 	os.Setenv("HOME", userHomeDir)
 	os.Setenv("GIT_ASKPASS", "true")
 
-	return gitURLString
+	return gitURLString, testDir
 
 }
 
 func builderImageStream() *imageapi.ImageStream {
 	return &imageapi.ImageStream{
-		ObjectMeta: kapi.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:            "ruby",
+			Namespace:       "default",
 			ResourceVersion: "1",
+		},
+		Spec: imageapi.ImageStreamSpec{
+			Tags: map[string]imageapi.TagReference{
+				"oldversion": {
+					Annotations: map[string]string{
+						"tags": "hidden",
+					},
+				},
+			},
 		},
 		Status: imageapi.ImageStreamStatus{
 			Tags: map[string]imageapi.TagEventList{
 				"latest": {
+					Items: []imageapi.TagEvent{
+						{
+							Image: "the-image-id",
+						},
+					},
+				},
+				"oldversion": {
 					Items: []imageapi.TagEvent{
 						{
 							Image: "the-image-id",
@@ -1890,32 +2206,32 @@ func dockerBuilderImage() *docker.Image {
 }
 
 func fakeImageStreamSearcher() app.Searcher {
-	client := &client.Fake{}
-	client.AddReactor("get", "imagestreams", func(action ktestclient.Action) (handled bool, ret runtime.Object, err error) {
+	client := &imagefake.Clientset{}
+	client.AddReactor("get", "imagestreams", func(action clientgotesting.Action) (handled bool, ret runtime.Object, err error) {
 		return true, builderImageStream(), nil
 	})
-	client.AddReactor("list", "imagestreams", func(action ktestclient.Action) (handled bool, ret runtime.Object, err error) {
+	client.AddReactor("list", "imagestreams", func(action clientgotesting.Action) (handled bool, ret runtime.Object, err error) {
 		return true, builderImageStreams(), nil
 	})
-	client.AddReactor("get", "imagestreamimages", func(action ktestclient.Action) (handled bool, ret runtime.Object, err error) {
+	client.AddReactor("get", "imagestreamimages", func(action clientgotesting.Action) (handled bool, ret runtime.Object, err error) {
 		return true, builderImage(), nil
 	})
 
 	return app.ImageStreamSearcher{
-		Client:            client,
-		ImageStreamImages: client,
+		Client:            client.Image(),
+		ImageStreamImages: client.Image(),
 		Namespaces:        []string{"default"},
 	}
 }
 
 func fakeTemplateSearcher() app.Searcher {
-	client := &client.Fake{}
-	client.AddReactor("list", "templates", func(action ktestclient.Action) (handled bool, ret runtime.Object, err error) {
+	client := &templatefake.Clientset{}
+	client.AddReactor("list", "templates", func(action clientgotesting.Action) (handled bool, ret runtime.Object, err error) {
 		return true, templateList(), nil
 	})
 
 	return app.TemplateSearcher{
-		Client:     client,
+		Client:     client.Template(),
 		Namespaces: []string{"default"},
 	}
 }
@@ -1925,7 +2241,7 @@ func templateList() *templateapi.TemplateList {
 		Items: []templateapi.Template{
 			{
 				Objects: []runtime.Object{},
-				ObjectMeta: kapi.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Name:      "first-stored-template",
 					Namespace: "default",
 				},
@@ -1968,7 +2284,7 @@ func MockSourceRepositories(t *testing.T, file string) []*app.SourceRepository {
 		"https://github.com/openshift/ruby-hello-world.git",
 		file,
 	} {
-		s, err := app.NewSourceRepository(location)
+		s, err := app.NewSourceRepository(location, generate.StrategySource)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1984,9 +2300,14 @@ func PrepareAppConfig(config *cmd.AppConfig) (stdout, stderr *bytes.Buffer) {
 	stdout, stderr = new(bytes.Buffer), new(bytes.Buffer)
 	config.Out, config.ErrOut = stdout, stderr
 
+	okTemplateClient := &templatefake.Clientset{}
+	okImageClient := &imagefake.Clientset{}
+	okRouteClient := &routefake.Clientset{}
+
 	config.Detector = app.SourceRepositoryEnumerator{
-		Detectors: source.DefaultDetectors,
-		Tester:    dockerfile.NewTester(),
+		Detectors:         source.DefaultDetectors,
+		DockerfileTester:  dockerfile.NewTester(),
+		JenkinsfileTester: jenkinsfile.NewTester(),
 	}
 	if config.DockerSearcher == nil {
 		config.DockerSearcher = app.DockerRegistrySearcher{
@@ -1996,12 +2317,111 @@ func PrepareAppConfig(config *cmd.AppConfig) (stdout, stderr *bytes.Buffer) {
 	config.ImageStreamByAnnotationSearcher = fakeImageStreamSearcher()
 	config.ImageStreamSearcher = fakeImageStreamSearcher()
 	config.OriginNamespace = "default"
-	config.OSClient = &client.Fake{}
+
+	config.ImageClient = okImageClient.Image()
+	config.TemplateClient = okTemplateClient.Template()
+	config.RouteClient = okRouteClient.Route()
+
 	config.TemplateSearcher = app.TemplateSearcher{
-		Client: &client.Fake{},
-		TemplateConfigsNamespacer: &client.Fake{},
-		Namespaces:                []string{"openshift", "default"},
+		Client:     okTemplateClient.Template(),
+		Namespaces: []string{"openshift", "default"},
 	}
-	config.Typer = kapi.Scheme
+	config.Typer = legacyscheme.Scheme
 	return
+}
+
+// NewAppFakeImageClient implements ImageClient interface and overrides some of
+// the default fake client behavior around default, empty imagestreams
+type NewAppFakeImageClient struct {
+	proxy imageinternalversion.ImageInterface
+}
+
+func (c *NewAppFakeImageClient) Images() imageinternalversion.ImageResourceInterface {
+	return c.proxy.Images()
+}
+
+func (c *NewAppFakeImageClient) ImageSignatures() imageinternalversion.ImageSignatureInterface {
+	return c.proxy.ImageSignatures()
+}
+
+func (c *NewAppFakeImageClient) ImageStreams(namespace string) imageinternalversion.ImageStreamInterface {
+	return &NewAppFakeImageStreams{
+		proxy: c.proxy.ImageStreams(namespace),
+	}
+}
+
+func (c *NewAppFakeImageClient) ImageStreamImages(namespace string) imageinternalversion.ImageStreamImageInterface {
+	return c.proxy.ImageStreamImages(namespace)
+}
+
+func (c *NewAppFakeImageClient) ImageStreamImports(namespace string) imageinternalversion.ImageStreamImportInterface {
+	return c.proxy.ImageStreamImports(namespace)
+}
+
+func (c *NewAppFakeImageClient) ImageStreamMappings(namespace string) imageinternalversion.ImageStreamMappingInterface {
+	return c.proxy.ImageStreamMappings(namespace)
+}
+
+func (c *NewAppFakeImageClient) ImageStreamTags(namespace string) imageinternalversion.ImageStreamTagInterface {
+	return c.proxy.ImageStreamTags(namespace)
+}
+
+func (c *NewAppFakeImageClient) RESTClient() krest.Interface {
+	return c.proxy.RESTClient()
+}
+
+// NewAppFakeImageStreams implements the ImageStreamInterface  and overrides some of the
+// default fake client behavior round default, empty imagestreams
+type NewAppFakeImageStreams struct {
+	proxy imageinternalversion.ImageStreamInterface
+}
+
+func (c *NewAppFakeImageStreams) Get(name string, options metav1.GetOptions) (result *imageapi.ImageStream, err error) {
+	result, err = c.proxy.Get(name, options)
+	if err != nil {
+		return nil, err
+	}
+	if len(result.Name) == 0 {
+		// the default faker will return an empty image stream struct if it
+		// cannot find an entry for the given name ... we want nil for our tests,
+		// just like the real client
+		return nil, nil
+	}
+	return result, nil
+}
+
+func (c *NewAppFakeImageStreams) List(opts metav1.ListOptions) (result *imageapi.ImageStreamList, err error) {
+	return c.proxy.List(opts)
+}
+
+func (c *NewAppFakeImageStreams) Watch(opts metav1.ListOptions) (kwatch.Interface, error) {
+	return c.proxy.Watch(opts)
+}
+
+func (c *NewAppFakeImageStreams) Create(imageStream *imageapi.ImageStream) (result *imageapi.ImageStream, err error) {
+	return c.proxy.Create(imageStream)
+}
+
+func (c *NewAppFakeImageStreams) Update(imageStream *imageapi.ImageStream) (result *imageapi.ImageStream, err error) {
+	return c.proxy.Update(imageStream)
+}
+
+func (c *NewAppFakeImageStreams) UpdateStatus(imageStream *imageapi.ImageStream) (*imageapi.ImageStream, error) {
+	return c.proxy.UpdateStatus(imageStream)
+}
+
+func (c *NewAppFakeImageStreams) Delete(name string, options *metav1.DeleteOptions) error {
+	return c.proxy.Delete(name, options)
+}
+
+func (c *NewAppFakeImageStreams) DeleteCollection(options *metav1.DeleteOptions, listOptions metav1.ListOptions) error {
+	return c.proxy.DeleteCollection(options, listOptions)
+}
+
+func (c *NewAppFakeImageStreams) Patch(name string, pt ktypes.PatchType, data []byte, subresources ...string) (result *imageapi.ImageStream, err error) {
+	return c.proxy.Patch(name, pt, data, subresources...)
+}
+
+func (c *NewAppFakeImageStreams) Secrets(imageStreamName string, opts metav1.ListOptions) (result *kapi.SecretList, err error) {
+	return c.proxy.Secrets(imageStreamName, opts)
 }

@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"k8s.io/kubernetes/pkg/client/restclient"
-	"k8s.io/kubernetes/pkg/client/unversioned/clientcmd"
+	restclient "k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/openshift/origin/pkg/cmd/flagtypes"
 )
@@ -68,10 +68,6 @@ func (args KubeConnectionArgs) GetKubernetesAddress(defaultAddress *url.URL) (*u
 	}
 	if ok && len(config.Host) > 0 {
 		return url.Parse(config.Host)
-	}
-
-	if defaultAddress == nil {
-		return nil, errors.New("no default KubernetesAddress present")
 	}
 	return defaultAddress, nil
 }

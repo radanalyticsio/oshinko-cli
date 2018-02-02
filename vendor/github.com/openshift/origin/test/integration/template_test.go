@@ -6,34 +6,33 @@ import (
 	"path/filepath"
 	"testing"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/api/v1"
-	"k8s.io/kubernetes/pkg/runtime"
+	"k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
 
-	"github.com/openshift/origin/pkg/client"
-	templateapi "github.com/openshift/origin/pkg/template/api"
+	templateapi "github.com/openshift/origin/pkg/template/apis/template"
+	"github.com/openshift/origin/pkg/template/client/internalversion"
+	templateclient "github.com/openshift/origin/pkg/template/generated/internalclientset"
 	testutil "github.com/openshift/origin/test/util"
 	testserver "github.com/openshift/origin/test/util/server"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func TestTemplate(t *testing.T) {
-	testutil.RequireEtcd(t)
-	defer testutil.DumpEtcdOnFailure(t)
-	_, path, err := testserver.StartTestMasterAPI()
+	masterConfig, path, err := testserver.StartTestMasterAPI()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, version := range []unversioned.GroupVersion{v1.SchemeGroupVersion} {
+	defer testserver.CleanupMasterEtcd(t, masterConfig)
+
+	for _, version := range []schema.GroupVersion{v1.SchemeGroupVersion} {
 		config, err := testutil.GetClusterAdminClientConfig(path)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		config.GroupVersion = &version
-		c, err := client.New(config)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
 
 		template := &templateapi.Template{
 			Parameters: []templateapi.Parameter{
@@ -46,7 +45,7 @@ func TestTemplate(t *testing.T) {
 
 		templateObjects := []runtime.Object{
 			&v1.Service{
-				ObjectMeta: v1.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Name:      "${NAME}-tester",
 					Namespace: "somevalue",
 				},
@@ -58,17 +57,18 @@ func TestTemplate(t *testing.T) {
 		}
 		templateapi.AddObjectsToTemplate(template, templateObjects, v1.SchemeGroupVersion)
 
-		obj, err := c.TemplateConfigs("default").Create(template)
+		templateProcessor := internalversion.NewTemplateProcessorClient(templateclient.NewForConfigOrDie(config).Template().RESTClient(), "default")
+		obj, err := templateProcessor.Process(template)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if len(obj.Objects) != 1 {
 			t.Fatalf("unexpected object: %#v", obj)
 		}
-		if err := runtime.DecodeList(obj.Objects, runtime.UnstructuredJSONScheme); err != nil {
+		if err := runtime.DecodeList(obj.Objects, unstructured.UnstructuredJSONScheme); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		svc := obj.Objects[0].(*runtime.Unstructured).Object
+		svc := obj.Objects[0].(*unstructured.Unstructured).Object
 		spec := svc["spec"].(map[string]interface{})
 		meta := svc["metadata"].(map[string]interface{})
 		// keep existing values
@@ -117,25 +117,25 @@ func walkJSONFiles(inDir string, fn func(name, path string, data []byte)) error 
 }
 
 func TestTemplateTransformationFromConfig(t *testing.T) {
-	testutil.RequireEtcd(t)
-	defer testutil.DumpEtcdOnFailure(t)
-	_, clusterAdminKubeConfig, err := testserver.StartTestMaster()
+	masterConfig, clusterAdminKubeConfig, err := testserver.StartTestMaster()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	defer testserver.CleanupMasterEtcd(t, masterConfig)
 
-	clusterAdminClient, err := testutil.GetClusterAdminClient(clusterAdminKubeConfig)
+	clusterAdminClientConfig, err := testutil.GetClusterAdminClientConfig(clusterAdminKubeConfig)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	walkJSONFiles("../templates/fixtures", func(name, path string, data []byte) {
-		template, err := runtime.Decode(kapi.Codecs.UniversalDecoder(), data)
+		template, err := runtime.Decode(legacyscheme.Codecs.UniversalDecoder(), data)
 		if err != nil {
 			t.Errorf("%q: unexpected error: %v", path, err)
 			return
 		}
-		config, err := clusterAdminClient.TemplateConfigs("default").Create(template.(*templateapi.Template))
+		templateProcessor := internalversion.NewTemplateProcessorClient(templateclient.NewForConfigOrDie(clusterAdminClientConfig).Template().RESTClient(), "default")
+		config, err := templateProcessor.Process(template.(*templateapi.Template))
 		if err != nil {
 			t.Errorf("%q: unexpected error: %v", path, err)
 			return

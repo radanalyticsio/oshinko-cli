@@ -2,7 +2,8 @@ package cmd
 
 import (
 	"fmt"
-	osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	//osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	osclientcmd "github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	"github.com/spf13/cobra"
@@ -45,7 +46,7 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 		return err
 	}
 	o.Name = currentCluster
-	if err := o.AuthOptions.Complete(f, cmd, args); err != nil {
+	if err := o.AuthOptions.Complete(f, cmd, args, "oshinko"); err != nil {
 		return err
 	}
 	if err := o.GatherInfo(); err != nil {
@@ -57,7 +58,7 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	if cmd.Flags().Lookup("output") != nil {
 		o.Output = kcmdutil.GetFlagString(cmd, "output")
 		if o.Output != "" && o.Output != "yaml" && o.Output != "json" {
-			return cmdutil.UsageError(cmd, "INVALID output format, only yaml|json allowed")
+			return cmdutil.UsageErrorf(cmd, "INVALID output format, only yaml|json allowed")
 		}
 	}
 	if cmd.Flags().Lookup("workers") != nil {
@@ -83,7 +84,7 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 		if o.ExposeWebUI != "" {
 			_, err := strconv.ParseBool(o.ExposeWebUI)
 			if err != nil {
-				return cmdutil.UsageError(cmd, "Value for 'exposeui' must be a boolean")
+				return cmdutil.UsageErrorf(cmd, "Value for 'exposeui' must be a boolean")
 			}
 		}
 	}
@@ -92,14 +93,14 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 		if o.Metrics != "" {
 			_, err := strconv.ParseBool(o.Metrics)
 			if err != nil && o.Metrics != "jolokia" && o.Metrics != "prometheus" {
-				return cmdutil.UsageError(cmd, "Value for 'metrics' must be 'true', 'false', 'jolokia', or 'prometheus'")
+				return cmdutil.UsageErrorf(cmd, "Value for 'metrics' must be 'true', 'false', 'jolokia', or 'prometheus'")
 			}
 		}
 	}
 	if cmd.Flags().Lookup("app-status") != nil {
 		o.AppStatus = kcmdutil.GetFlagString(cmd, "app-status")
 		if o.AppStatus != "" && o.AppStatus != "completed" && o.AppStatus != "terminated" {
-			return cmdutil.UsageError(cmd, "INVALID app-status value, only completed|terminated allowed")
+			return cmdutil.UsageErrorf(cmd, "INVALID app-status value, only completed|terminated allowed")
 		}
 	}
 	if cmd.Flags().Lookup("app") != nil {
@@ -109,7 +110,7 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	if cmd.Flags().Lookup("ephemeral") != nil {
 		o.Ephemeral = kcmdutil.GetFlagBool(cmd, "ephemeral")
 		if o.Ephemeral && o.App == "" {
-			return cmdutil.UsageError(cmd, "An app value must be supplied if ephemeral is used")
+			return cmdutil.UsageErrorf(cmd, "An app value must be supplied if ephemeral is used")
 		}
 	}
 	if cmd.Flags().Lookup("directory") != nil {

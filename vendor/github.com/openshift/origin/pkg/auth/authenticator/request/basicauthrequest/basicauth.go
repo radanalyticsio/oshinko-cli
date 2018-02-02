@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"strings"
 
-	"k8s.io/kubernetes/pkg/auth/user"
-
 	"github.com/golang/glog"
-	"github.com/openshift/origin/pkg/auth/authenticator"
+
+	"k8s.io/apiserver/pkg/authentication/authenticator"
+	"k8s.io/apiserver/pkg/authentication/user"
+
+	"github.com/openshift/origin/pkg/auth/prometheus"
 )
 
 type basicAuthRequestHandler struct {
@@ -31,6 +33,11 @@ func (authHandler *basicAuthRequestHandler) AuthenticateRequest(req *http.Reques
 		return nil, false, nil
 	}
 
+	var result string = metrics.SuccessResult
+	defer func() {
+		metrics.RecordBasicPasswordAuth(result)
+	}()
+
 	user, ok, err := authHandler.passwordAuthenticator.AuthenticatePassword(username, password)
 	if ok && authHandler.removeHeader {
 		req.Header.Del("Authorization")
@@ -39,8 +46,10 @@ func (authHandler *basicAuthRequestHandler) AuthenticateRequest(req *http.Reques
 	switch {
 	case err != nil:
 		glog.Errorf(`Error authenticating login %q with provider %q: %v`, username, authHandler.provider, err)
+		result = metrics.ErrorResult
 	case !ok:
 		glog.V(4).Infof(`Login with provider %q failed for login %q`, authHandler.provider, username)
+		result = metrics.FailResult
 	case ok:
 		glog.V(4).Infof(`Login with provider %q succeeded for login %q: %#v`, authHandler.provider, username, user)
 	}

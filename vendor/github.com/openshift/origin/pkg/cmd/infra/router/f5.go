@@ -9,15 +9,18 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 
-	ocmd "github.com/openshift/origin/pkg/cmd/cli/cmd"
-	"github.com/openshift/origin/pkg/cmd/templates"
+	clientcmd "github.com/openshift/origin/pkg/client/cmd"
 	"github.com/openshift/origin/pkg/cmd/util"
-	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
-	routeapi "github.com/openshift/origin/pkg/route/api"
+	cmdversion "github.com/openshift/origin/pkg/cmd/version"
+	projectinternalclientset "github.com/openshift/origin/pkg/project/generated/internalclientset"
+	routeapi "github.com/openshift/origin/pkg/route/apis/route"
+	routeinternalclientset "github.com/openshift/origin/pkg/route/generated/internalclientset"
 	"github.com/openshift/origin/pkg/router/controller"
 	f5plugin "github.com/openshift/origin/pkg/router/f5"
+	"github.com/openshift/origin/pkg/version"
 )
 
 var (
@@ -150,7 +153,7 @@ func NewCommandF5Router(name string) *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(ocmd.NewCmdVersion(name, nil, os.Stdout, ocmd.VersionOptions{}))
+	cmd.AddCommand(cmdversion.NewCmdVersion(name, version.Get(), os.Stdout))
 
 	flag := cmd.Flags()
 	options.Config.Bind(flag)
@@ -214,18 +217,26 @@ func (o *F5RouterOptions) Run() error {
 		return err
 	}
 
-	oc, kc, err := o.Config.Clients()
+	kc, err := o.Config.Clients()
+	if err != nil {
+		return err
+	}
+	routeclient, err := routeinternalclientset.NewForConfig(o.Config.OpenShiftConfig())
+	if err != nil {
+		return err
+	}
+	projectclient, err := projectinternalclientset.NewForConfig(o.Config.OpenShiftConfig())
 	if err != nil {
 		return err
 	}
 
-	statusPlugin := controller.NewStatusAdmitter(f5Plugin, oc, o.RouterName)
-	uniqueHostPlugin := controller.NewUniqueHost(statusPlugin, o.RouteSelectionFunc(), statusPlugin)
-	plugin := controller.NewHostAdmitter(uniqueHostPlugin, o.F5RouteAdmitterFunc(), false, statusPlugin)
+	statusPlugin := controller.NewStatusAdmitter(f5Plugin, routeclient.Route(), o.RouterName, "")
+	uniqueHostPlugin := controller.NewUniqueHost(statusPlugin, o.RouteSelectionFunc(), o.RouterSelection.DisableNamespaceOwnershipCheck, statusPlugin)
+	plugin := controller.NewHostAdmitter(uniqueHostPlugin, o.F5RouteAdmitterFunc(), false, o.RouterSelection.DisableNamespaceOwnershipCheck, statusPlugin)
 
-	factory := o.RouterSelection.NewFactory(oc, kc)
+	factory := o.RouterSelection.NewFactory(routeclient, projectclient.Project().Projects(), kc)
 	watchNodes := (len(o.InternalAddress) != 0 && len(o.VxlanGateway) != 0)
-	controller := factory.Create(plugin, watchNodes)
+	controller := factory.Create(plugin, watchNodes, o.EnableIngress)
 	controller.Run()
 
 	select {}

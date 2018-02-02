@@ -1,8 +1,8 @@
 package containers
 
 import (
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/resource"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 type OContainer struct {

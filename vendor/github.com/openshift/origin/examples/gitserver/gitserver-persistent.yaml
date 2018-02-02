@@ -12,7 +12,7 @@ items:
     labels:
       app: git
   spec:
-    strategy: 
+    strategy:
       type: Recreate
     replicas: 1 # the git server is not HA and should not be scaled past 1
     selector:
@@ -55,7 +55,7 @@ items:
 
           # The URL that builds must use to access the Git repositories
           # stored in this app.
-          # TOOD: support HTTPS
+          # TODO: support HTTPS
           - name: PUBLIC_URL
             value: http://git.$(POD_NAMESPACE).svc.cluster.local:8080
           # If INTERNAL_URL is specified, then it's used to point
@@ -81,9 +81,9 @@ items:
           - name: GENERATE_ARTIFACTS
             value: "true"
 
-          # The strategy to use when creating build artifacts from a repository. 
-          # With the default empty value, a Docker build  will be generated if 
-          # a Dockerfile is present in the repository. Otherwise, a source build 
+          # The strategy to use when creating build artifacts from a repository.
+          # With the default empty value, a Docker build  will be generated if
+          # a Dockerfile is present in the repository. Otherwise, a source build
           # will be created. Valid values are: "", docker, source
           - name: BUILD_STRATEGY
             value: ""
@@ -217,4 +217,4 @@ items:
     - ReadWriteOnce
     resources:
       requests:
-        storage: 1G
+        storage: 1Gi

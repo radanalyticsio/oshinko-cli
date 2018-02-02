@@ -1,6 +1,7 @@
 package builder
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -13,7 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openshift/origin/pkg/build/api"
+	buildapiv1 "github.com/openshift/api/build/v1"
+	"github.com/openshift/origin/pkg/build/builder/timing"
 	"github.com/openshift/origin/pkg/generate/git"
 )
 
@@ -22,7 +24,7 @@ func TestCheckRemoteGit(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer server.Close()
-	gitRepo := git.NewRepositoryWithEnv([]string{"GIT_ASKPASS=true"})
+	gitRepo := git.NewRepositoryWithEnv([]string{"GIT_ASKPASS=true", fmt.Sprintf("HOME=%s", os.TempDir())})
 
 	var err error
 	err = checkRemoteGit(gitRepo, server.URL, 10*time.Second)
@@ -177,9 +179,10 @@ func TestUnqualifiedClone(t *testing.T) {
 	destDir, err := ioutil.TempDir("", "clone-dest-")
 	defer os.RemoveAll(destDir)
 	client := git.NewRepositoryWithEnv([]string{})
-	source := &api.GitBuildSource{URI: "file://" + repo.Path}
-	revision := api.SourceRevision{Git: &api.GitSourceRevision{}}
-	if _, err = extractGitSource(client, source, &revision, destDir, 10*time.Second); err != nil {
+	source := &buildapiv1.GitBuildSource{URI: "file://" + repo.Path}
+	revision := buildapiv1.SourceRevision{Git: &buildapiv1.GitSourceRevision{}}
+	ctx := timing.NewContext(context.Background())
+	if _, err = extractGitSource(ctx, client, source, &revision, destDir, 10*time.Second); err != nil {
 		t.Errorf("%v", err)
 	}
 	for _, f := range repo.Files {
@@ -220,12 +223,13 @@ func TestCloneFromRef(t *testing.T) {
 	if err != nil {
 		t.Errorf("%v", err)
 	}
-	source := &api.GitBuildSource{
+	source := &buildapiv1.GitBuildSource{
 		URI: "file://" + repo.Path,
 		Ref: firstCommitRef,
 	}
-	revision := api.SourceRevision{Git: &api.GitSourceRevision{}}
-	if _, err = extractGitSource(client, source, &revision, destDir, 10*time.Second); err != nil {
+	revision := buildapiv1.SourceRevision{Git: &buildapiv1.GitSourceRevision{}}
+	ctx := timing.NewContext(context.Background())
+	if _, err = extractGitSource(ctx, client, source, &revision, destDir, 10*time.Second); err != nil {
 		t.Errorf("%v", err)
 	}
 	for _, f := range repo.Files[:len(repo.Files)-1] {
@@ -274,12 +278,13 @@ func TestCloneFromBranch(t *testing.T) {
 	destDir, err := ioutil.TempDir("", "branch-dest-")
 	defer os.RemoveAll(destDir)
 	client := git.NewRepositoryWithEnv([]string{})
-	source := &api.GitBuildSource{
+	source := &buildapiv1.GitBuildSource{
 		URI: "file://" + repo.Path,
 		Ref: "test",
 	}
-	revision := api.SourceRevision{Git: &api.GitSourceRevision{}}
-	if _, err = extractGitSource(client, source, &revision, destDir, 10*time.Second); err != nil {
+	revision := buildapiv1.SourceRevision{Git: &buildapiv1.GitSourceRevision{}}
+	ctx := timing.NewContext(context.Background())
+	if _, err = extractGitSource(ctx, client, source, &revision, destDir, 10*time.Second); err != nil {
 		t.Errorf("%v", err)
 	}
 	for _, f := range repo.Files[:len(repo.Files)-1] {

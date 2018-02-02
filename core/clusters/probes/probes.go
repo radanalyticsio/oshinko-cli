@@ -1,8 +1,8 @@
 package probes
 
 import (
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/util/intstr"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // NewHTTPGetProbe returns a probe object configured for HTTPGet actions,

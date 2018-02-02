@@ -5,7 +5,7 @@ import (
 	"path"
 	"time"
 
-	"k8s.io/kubernetes/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
 	"github.com/openshift/origin/pkg/cmd/server/bootstrappolicy"
@@ -15,6 +15,8 @@ const (
 	CAFilePrefix     = "ca"
 	CABundlePrefix   = "ca-bundle"
 	MasterFilePrefix = "master"
+
+	FrontProxyCAFilePrefix = "frontproxy-ca"
 )
 
 type ClientCertInfo struct {
@@ -104,32 +106,6 @@ func DefaultAPIClientCerts(certDir string) []ClientCertInfo {
 	return []ClientCertInfo{
 		DefaultOpenshiftLoopbackClientCertInfo(certDir),
 		DefaultClusterAdminClientCertInfo(certDir),
-		DefaultRouterClientCertInfo(certDir),
-		DefaultRegistryClientCertInfo(certDir),
-	}
-}
-
-func DefaultRouterClientCertInfo(certDir string) ClientCertInfo {
-	return ClientCertInfo{
-		CertLocation: configapi.CertInfo{
-			CertFile: DefaultCertFilename(certDir, bootstrappolicy.RouterUnqualifiedUsername),
-			KeyFile:  DefaultKeyFilename(certDir, bootstrappolicy.RouterUnqualifiedUsername),
-		},
-		UnqualifiedUser: bootstrappolicy.RouterUnqualifiedUsername,
-		User:            bootstrappolicy.RouterUsername,
-		Groups:          sets.NewString(bootstrappolicy.RouterGroup),
-	}
-}
-
-func DefaultRegistryClientCertInfo(certDir string) ClientCertInfo {
-	return ClientCertInfo{
-		CertLocation: configapi.CertInfo{
-			CertFile: DefaultCertFilename(certDir, bootstrappolicy.RegistryUnqualifiedUsername),
-			KeyFile:  DefaultKeyFilename(certDir, bootstrappolicy.RegistryUnqualifiedUsername),
-		},
-		UnqualifiedUser: bootstrappolicy.RegistryUnqualifiedUsername,
-		User:            bootstrappolicy.RegistryUsername,
-		Groups:          sets.NewString(bootstrappolicy.RegistryGroup),
 	}
 }
 
@@ -145,6 +121,18 @@ func DefaultOpenshiftLoopbackClientCertInfo(certDir string) ClientCertInfo {
 	}
 }
 
+func DefaultAggregatorClientCertInfo(certDir string) ClientCertInfo {
+	return ClientCertInfo{
+		CertLocation: configapi.CertInfo{
+			CertFile: DefaultCertFilename(certDir, bootstrappolicy.AggregatorUnqualifiedUsername),
+			KeyFile:  DefaultKeyFilename(certDir, bootstrappolicy.AggregatorUnqualifiedUsername),
+		},
+		UnqualifiedUser: bootstrappolicy.AggregatorUnqualifiedUsername,
+		User:            bootstrappolicy.AggregatorUsername,
+		Groups:          sets.String{},
+	}
+}
+
 func DefaultClusterAdminClientCertInfo(certDir string) ClientCertInfo {
 	return ClientCertInfo{
 		CertLocation: configapi.CertInfo{
@@ -153,7 +141,7 @@ func DefaultClusterAdminClientCertInfo(certDir string) ClientCertInfo {
 		},
 		UnqualifiedUser: "admin",
 		User:            "system:admin",
-		Groups:          sets.NewString(bootstrappolicy.ClusterAdminGroup),
+		Groups:          sets.NewString(bootstrappolicy.ClusterAdminGroup, bootstrappolicy.MastersGroup),
 	}
 }
 

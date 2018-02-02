@@ -3,28 +3,30 @@ package integration
 import (
 	"testing"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	apierrors "k8s.io/kubernetes/pkg/api/errors"
-	"k8s.io/kubernetes/pkg/client/restclient"
-	kclient "k8s.io/kubernetes/pkg/client/unversioned"
-	"k8s.io/kubernetes/pkg/labels"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apiserver/pkg/storage/names"
+	restclient "k8s.io/client-go/rest"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	kclientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
 
-	"github.com/openshift/origin/pkg/client"
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
 	requestlimit "github.com/openshift/origin/pkg/project/admission/requestlimit/api"
-	projectapi "github.com/openshift/origin/pkg/project/api"
-	userapi "github.com/openshift/origin/pkg/user/api"
+	projectapi "github.com/openshift/origin/pkg/project/apis/project"
+	projectclient "github.com/openshift/origin/pkg/project/generated/internalclientset"
+	userapi "github.com/openshift/origin/pkg/user/apis/user"
+	userclient "github.com/openshift/origin/pkg/user/generated/internalclientset/typed/user/internalversion"
 	testutil "github.com/openshift/origin/test/util"
 	testserver "github.com/openshift/origin/test/util/server"
 )
 
-func setupProjectRequestLimitTest(t *testing.T, pluginConfig *requestlimit.ProjectRequestLimitConfig) (kclient.Interface, client.Interface, *restclient.Config) {
-	testutil.RequireEtcd(t)
+func setupProjectRequestLimitTest(t *testing.T, pluginConfig *requestlimit.ProjectRequestLimitConfig) (kclientset.Interface, *restclient.Config, func()) {
 	masterConfig, err := testserver.DefaultMasterOptions()
 	if err != nil {
 		t.Fatalf("error creating config: %v", err)
 	}
-	masterConfig.AdmissionConfig.PluginConfig = map[string]configapi.AdmissionPluginConfig{
+	masterConfig.AdmissionConfig.PluginConfig = map[string]*configapi.AdmissionPluginConfig{
 		"ProjectRequestLimit": {
 			Configuration: pluginConfig,
 		},
@@ -37,18 +39,16 @@ func setupProjectRequestLimitTest(t *testing.T, pluginConfig *requestlimit.Proje
 	if err != nil {
 		t.Fatalf("error getting client: %v", err)
 	}
-	openshiftClient, err := testutil.GetClusterAdminClient(kubeConfigFile)
-	if err != nil {
-		t.Fatalf("error getting openshift client: %v", err)
-	}
 	clientConfig, err := testutil.GetClusterAdminClientConfig(kubeConfigFile)
 	if err != nil {
 		t.Fatalf("error getting client config: %v", err)
 	}
-	return kubeClient, openshiftClient, clientConfig
+	return kubeClient, clientConfig, func() {
+		testserver.CleanupMasterEtcd(t, masterConfig)
+	}
 }
 
-func setupProjectRequestLimitUsers(t *testing.T, client client.Interface, users map[string]labels.Set) {
+func setupProjectRequestLimitUsers(t *testing.T, client userclient.UserInterface, users map[string]labels.Set) {
 	for userName, labels := range users {
 		user := &userapi.User{}
 		user.Name = userName
@@ -60,13 +60,13 @@ func setupProjectRequestLimitUsers(t *testing.T, client client.Interface, users 
 	}
 }
 
-func setupProjectRequestLimitNamespaces(t *testing.T, kclient kclient.Interface, namespacesByRequester map[string]int) {
+func setupProjectRequestLimitNamespaces(t *testing.T, kclient kclientset.Interface, namespacesByRequester map[string]int) {
 	for requester, nsCount := range namespacesByRequester {
 		for i := 0; i < nsCount; i++ {
 			ns := &kapi.Namespace{}
 			ns.GenerateName = "testns"
 			ns.Annotations = map[string]string{projectapi.ProjectRequester: requester}
-			_, err := kclient.Namespaces().Create(ns)
+			_, err := kclient.Core().Namespaces().Create(ns)
 			if err != nil {
 				t.Fatalf("Could not create namespace for requester %s: %v", requester, err)
 			}
@@ -123,9 +123,9 @@ func projectRequestLimitUsers() map[string]labels.Set {
 }
 
 func TestProjectRequestLimitMultiLevelConfig(t *testing.T) {
-	defer testutil.DumpEtcdOnFailure(t)
-	kclient, oclient, clientConfig := setupProjectRequestLimitTest(t, projectRequestLimitMultiLevelConfig())
-	setupProjectRequestLimitUsers(t, oclient, projectRequestLimitUsers())
+	kclient, clientConfig, fn := setupProjectRequestLimitTest(t, projectRequestLimitMultiLevelConfig())
+	defer fn()
+	setupProjectRequestLimitUsers(t, userclient.NewForConfigOrDie(clientConfig), projectRequestLimitUsers())
 	setupProjectRequestLimitNamespaces(t, kclient, map[string]int{
 		"regular": 0,
 		"silver":  2,
@@ -139,9 +139,9 @@ func TestProjectRequestLimitMultiLevelConfig(t *testing.T) {
 }
 
 func TestProjectRequestLimitEmptyConfig(t *testing.T) {
-	defer testutil.DumpEtcdOnFailure(t)
-	kclient, oclient, clientConfig := setupProjectRequestLimitTest(t, projectRequestLimitEmptyConfig())
-	setupProjectRequestLimitUsers(t, oclient, projectRequestLimitUsers())
+	kclient, clientConfig, fn := setupProjectRequestLimitTest(t, projectRequestLimitEmptyConfig())
+	defer fn()
+	setupProjectRequestLimitUsers(t, userclient.NewForConfigOrDie(clientConfig), projectRequestLimitUsers())
 	setupProjectRequestLimitNamespaces(t, kclient, map[string]int{
 		"regular": 5,
 		"silver":  2,
@@ -155,9 +155,9 @@ func TestProjectRequestLimitEmptyConfig(t *testing.T) {
 }
 
 func TestProjectRequestLimitSingleConfig(t *testing.T) {
-	defer testutil.DumpEtcdOnFailure(t)
-	kclient, oclient, clientConfig := setupProjectRequestLimitTest(t, projectRequestLimitSingleDefaultConfig())
-	setupProjectRequestLimitUsers(t, oclient, projectRequestLimitUsers())
+	kclient, clientConfig, fn := setupProjectRequestLimitTest(t, projectRequestLimitSingleDefaultConfig())
+	defer fn()
+	setupProjectRequestLimitUsers(t, userclient.NewForConfigOrDie(clientConfig), projectRequestLimitUsers())
 	setupProjectRequestLimitNamespaces(t, kclient, map[string]int{
 		"regular": 0,
 		"silver":  1,
@@ -173,16 +173,17 @@ func TestProjectRequestLimitSingleConfig(t *testing.T) {
 // we had a bug where this failed on ` uenxpected error: metadata.name: Invalid value: "system:admin": may not contain ":"`
 // make sure we never have that bug again and that project limits for them work
 func TestProjectRequestLimitAsSystemAdmin(t *testing.T) {
-	defer testutil.DumpEtcdOnFailure(t)
-	_, oclient, _ := setupProjectRequestLimitTest(t, projectRequestLimitSingleDefaultConfig())
+	_, clientConfig, fn := setupProjectRequestLimitTest(t, projectRequestLimitSingleDefaultConfig())
+	defer fn()
+	projectClient := projectclient.NewForConfigOrDie(clientConfig).Project()
 
-	if _, err := oclient.ProjectRequests().Create(&projectapi.ProjectRequest{
-		ObjectMeta: kapi.ObjectMeta{Name: "foo"},
+	if _, err := projectClient.ProjectRequests().Create(&projectapi.ProjectRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: "foo"},
 	}); err != nil {
 		t.Errorf("uenxpected error: %v", err)
 	}
-	if _, err := oclient.ProjectRequests().Create(&projectapi.ProjectRequest{
-		ObjectMeta: kapi.ObjectMeta{Name: "bar"},
+	if _, err := projectClient.ProjectRequests().Create(&projectapi.ProjectRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: "bar"},
 	}); !apierrors.IsForbidden(err) {
 		t.Errorf("missing error: %v", err)
 	}
@@ -190,13 +191,13 @@ func TestProjectRequestLimitAsSystemAdmin(t *testing.T) {
 
 func testProjectRequestLimitAdmission(t *testing.T, errorPrefix string, clientConfig *restclient.Config, tests map[string]bool) {
 	for user, expectSuccess := range tests {
-		oclient, _, _, err := testutil.GetClientForUser(*clientConfig, user)
+		_, clientConfig, err := testutil.GetClientForUser(clientConfig, user)
 		if err != nil {
 			t.Fatalf("Error getting client for user %s: %v", user, err)
 		}
 		projectRequest := &projectapi.ProjectRequest{}
-		projectRequest.Name = kapi.SimpleNameGenerator.GenerateName("test-projectreq")
-		_, err = oclient.ProjectRequests().Create(projectRequest)
+		projectRequest.Name = names.SimpleNameGenerator.GenerateName("test-projectreq")
+		_, err = projectclient.NewForConfigOrDie(clientConfig).Project().ProjectRequests().Create(projectRequest)
 		if err != nil && expectSuccess {
 			t.Errorf("%s: unexpected error for user %s: %v", errorPrefix, user, err)
 			continue

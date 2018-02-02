@@ -8,18 +8,20 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/spf13/pflag"
 
-	kvalidation "k8s.io/kubernetes/pkg/api/validation"
-	"k8s.io/kubernetes/pkg/util/sets"
-	utilvalidation "k8s.io/kubernetes/pkg/util/validation"
-	"k8s.io/kubernetes/pkg/util/validation/field"
+	"k8s.io/apimachinery/pkg/util/sets"
+	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	kvalidation "k8s.io/kubernetes/pkg/apis/core/validation"
 
 	"github.com/openshift/origin/pkg/cmd/server/api"
+	"github.com/openshift/origin/pkg/cmd/server/crypto"
 	cmdutil "github.com/openshift/origin/pkg/cmd/util"
 	cmdflags "github.com/openshift/origin/pkg/cmd/util/flags"
 )
@@ -103,11 +105,11 @@ func ValidateCertInfo(certInfo api.CertInfo, required bool, fldPath *field.Path)
 	return allErrs
 }
 
-func ValidateServingInfo(info api.ServingInfo, fldPath *field.Path) ValidationResults {
+func ValidateServingInfo(info api.ServingInfo, certificatesRequired bool, fldPath *field.Path) ValidationResults {
 	validationResults := ValidationResults{}
 
 	validationResults.AddErrors(ValidateHostPort(info.BindAddress, fldPath.Child("bindAddress"))...)
-	validationResults.AddErrors(ValidateCertInfo(info.ServerCert, false, fldPath)...)
+	validationResults.AddErrors(ValidateCertInfo(info.ServerCert, certificatesRequired, fldPath)...)
 
 	if len(info.NamedCertificates) > 0 && len(info.ServerCert.CertFile) == 0 {
 		validationResults.AddErrors(field.Invalid(fldPath.Child("namedCertificates"), "", "a default certificate and key is required in certFile/keyFile in order to use namedCertificates"))
@@ -126,8 +128,17 @@ func ValidateServingInfo(info api.ServingInfo, fldPath *field.Path) ValidationRe
 			validationResults.AddErrors(ValidateFile(info.ClientCA, fldPath.Child("clientCA"))...)
 		}
 	} else {
-		if len(info.ClientCA) > 0 {
+		if certificatesRequired && len(info.ClientCA) > 0 {
 			validationResults.AddErrors(field.Invalid(fldPath.Child("clientCA"), info.ClientCA, "cannot specify a clientCA without a certFile"))
+		}
+	}
+
+	if _, err := crypto.TLSVersion(info.MinTLSVersion); err != nil {
+		validationResults.AddErrors(field.NotSupported(fldPath.Child("minTLSVersion"), info.MinTLSVersion, crypto.ValidTLSVersions()))
+	}
+	for i, cipher := range info.CipherSuites {
+		if _, err := crypto.CipherSuite(cipher); err != nil {
+			validationResults.AddErrors(field.NotSupported(fldPath.Child("cipherSuites").Index(i), cipher, crypto.ValidCipherSuites()))
 		}
 	}
 
@@ -210,7 +221,7 @@ func ValidateNamedCertificates(fldPath *field.Path, namedCertificates []api.Name
 func ValidateHTTPServingInfo(info api.HTTPServingInfo, fldPath *field.Path) ValidationResults {
 	validationResults := ValidationResults{}
 
-	validationResults.Append(ValidateServingInfo(info.ServingInfo, fldPath))
+	validationResults.Append(ValidateServingInfo(info.ServingInfo, true, fldPath))
 
 	if info.MaxRequestsInFlight < 0 {
 		validationResults.AddErrors(field.Invalid(fldPath.Child("maxRequestsInFlight"), info.MaxRequestsInFlight, "must be zero (no limit) or greater"))
@@ -288,6 +299,33 @@ func ValidateSpecifiedIP(ipString string, fldPath *field.Path) field.ErrorList {
 	return allErrs
 }
 
+func ValidateSpecifiedIPPort(ipPortString string, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+
+	ipString, portString, err := net.SplitHostPort(ipPortString)
+	if err != nil {
+		allErrs = append(allErrs, field.Invalid(fldPath, ipPortString, "must be a valid IP:PORT"))
+		return allErrs
+	}
+
+	ip := net.ParseIP(ipString)
+	if ip == nil {
+		allErrs = append(allErrs, field.Invalid(fldPath, ipString, "must be a valid IP"))
+	} else if ip.IsUnspecified() {
+		allErrs = append(allErrs, field.Invalid(fldPath, ipString, "cannot be an unspecified IP"))
+	}
+	port, err := strconv.Atoi(portString)
+	if err != nil {
+		allErrs = append(allErrs, field.Invalid(fldPath, portString, "must be a valid port"))
+	} else {
+		for _, msg := range utilvalidation.IsValidPortNum(port) {
+			allErrs = append(allErrs, field.Invalid(fldPath, port, msg))
+		}
+	}
+
+	return allErrs
+}
+
 func ValidateSecureURL(urlString string, fldPath *field.Path) (*url.URL, field.ErrorList) {
 	url, urlErrs := ValidateURL(urlString, fldPath)
 	if len(urlErrs) == 0 && url.Scheme != "https" {
@@ -331,7 +369,7 @@ func ValidateFile(path string, fldPath *field.Path) field.ErrorList {
 	if len(path) == 0 {
 		allErrs = append(allErrs, field.Required(fldPath, ""))
 	} else if _, err := os.Stat(path); err != nil {
-		allErrs = append(allErrs, field.Invalid(fldPath, path, "could not read file"))
+		allErrs = append(allErrs, field.Invalid(fldPath, path, fmt.Sprintf("could not read file: %v", err)))
 	}
 
 	return allErrs
@@ -344,7 +382,7 @@ func ValidateDir(path string, fldPath *field.Path) field.ErrorList {
 	} else {
 		fileInfo, err := os.Stat(path)
 		if err != nil {
-			allErrs = append(allErrs, field.Invalid(fldPath, path, "could not read info"))
+			allErrs = append(allErrs, field.Invalid(fldPath, path, fmt.Sprintf("could not read info: %v", err)))
 		} else if !fileInfo.IsDir() {
 			allErrs = append(allErrs, field.Invalid(fldPath, path, "not a directory"))
 		}

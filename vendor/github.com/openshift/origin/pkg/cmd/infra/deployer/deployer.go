@@ -9,21 +9,25 @@ import (
 
 	"github.com/spf13/cobra"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/client/restclient"
-	kclient "k8s.io/kubernetes/pkg/client/unversioned"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kv1core "k8s.io/client-go/kubernetes/typed/core/v1"
+	restclient "k8s.io/client-go/rest"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	kclientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
 	"k8s.io/kubernetes/pkg/kubectl"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 
-	"github.com/openshift/origin/pkg/client"
-	ocmd "github.com/openshift/origin/pkg/cmd/cli/cmd"
-	"github.com/openshift/origin/pkg/cmd/templates"
+	appsapi "github.com/openshift/origin/pkg/apps/apis/apps"
+	"github.com/openshift/origin/pkg/apps/strategy"
+	"github.com/openshift/origin/pkg/apps/strategy/recreate"
+	"github.com/openshift/origin/pkg/apps/strategy/rolling"
+	appsutil "github.com/openshift/origin/pkg/apps/util"
 	"github.com/openshift/origin/pkg/cmd/util"
-	deployapi "github.com/openshift/origin/pkg/deploy/api"
-	"github.com/openshift/origin/pkg/deploy/strategy"
-	"github.com/openshift/origin/pkg/deploy/strategy/recreate"
-	"github.com/openshift/origin/pkg/deploy/strategy/rolling"
-	deployutil "github.com/openshift/origin/pkg/deploy/util"
+	cmdversion "github.com/openshift/origin/pkg/cmd/version"
+	imageclientinternal "github.com/openshift/origin/pkg/image/generated/internalclientset"
+	"github.com/openshift/origin/pkg/version"
 )
 
 var (
@@ -79,7 +83,7 @@ func NewCommandDeployer(name string) *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(ocmd.NewCmdVersion(name, nil, os.Stdout, ocmd.VersionOptions{}))
+	cmd.AddCommand(cmdversion.NewCmdVersion(name, version.Get(), os.Stdout))
 
 	flag := cmd.Flags()
 	flag.StringVar(&cfg.rcName, "deployment", util.Env("OPENSHIFT_DEPLOYMENT_NAME", ""), "The deployment name to start")
@@ -101,40 +105,40 @@ func (cfg *config) RunDeployer() error {
 	if err != nil {
 		return err
 	}
-	kc, err := kclient.New(kcfg)
+	kc, err := kclientset.NewForConfig(kcfg)
 	if err != nil {
 		return err
 	}
-	oc, err := client.New(kcfg)
+	openshiftInternalImageClient, err := imageclientinternal.NewForConfig(kcfg)
 	if err != nil {
 		return err
 	}
 
-	deployer := NewDeployer(kc, oc, cfg.Out, cfg.ErrOut, cfg.Until)
+	deployer := NewDeployer(kc, openshiftInternalImageClient, cfg.Out, cfg.ErrOut, cfg.Until)
 	return deployer.Deploy(cfg.Namespace, cfg.rcName)
 }
 
 // NewDeployer makes a new Deployer from a kube client.
-func NewDeployer(client kclient.Interface, oclient client.Interface, out, errOut io.Writer, until string) *Deployer {
+func NewDeployer(client kclientset.Interface, images imageclientinternal.Interface, out, errOut io.Writer, until string) *Deployer {
 	scaler, _ := kubectl.ScalerFor(kapi.Kind("ReplicationController"), client)
 	return &Deployer{
 		out:    out,
 		errOut: errOut,
 		until:  until,
 		getDeployment: func(namespace, name string) (*kapi.ReplicationController, error) {
-			return client.ReplicationControllers(namespace).Get(name)
+			return client.Core().ReplicationControllers(namespace).Get(name, metav1.GetOptions{})
 		},
 		getDeployments: func(namespace, configName string) (*kapi.ReplicationControllerList, error) {
-			return client.ReplicationControllers(namespace).List(kapi.ListOptions{LabelSelector: deployutil.ConfigSelector(configName)})
+			return client.Core().ReplicationControllers(namespace).List(metav1.ListOptions{LabelSelector: appsutil.ConfigSelector(configName).String()})
 		},
 		scaler: scaler,
-		strategyFor: func(config *deployapi.DeploymentConfig) (strategy.DeploymentStrategy, error) {
+		strategyFor: func(config *appsapi.DeploymentConfig) (strategy.DeploymentStrategy, error) {
 			switch config.Spec.Strategy.Type {
-			case deployapi.DeploymentStrategyTypeRecreate:
-				return recreate.NewRecreateDeploymentStrategy(client, oclient, client.Events(""), kapi.Codecs.UniversalDecoder(), out, errOut, until), nil
-			case deployapi.DeploymentStrategyTypeRolling:
-				recreate := recreate.NewRecreateDeploymentStrategy(client, oclient, client.Events(""), kapi.Codecs.UniversalDecoder(), out, errOut, until)
-				return rolling.NewRollingDeploymentStrategy(config.Namespace, client, oclient, client.Events(""), kapi.Codecs.UniversalDecoder(), recreate, out, errOut, until), nil
+			case appsapi.DeploymentStrategyTypeRecreate:
+				return recreate.NewRecreateDeploymentStrategy(client, images.Image(), &kv1core.EventSinkImpl{Interface: kv1core.New(client.Core().RESTClient()).Events("")}, legacyscheme.Codecs.UniversalDecoder(), out, errOut, until), nil
+			case appsapi.DeploymentStrategyTypeRolling:
+				recreate := recreate.NewRecreateDeploymentStrategy(client, images.Image(), &kv1core.EventSinkImpl{Interface: kv1core.New(client.Core().RESTClient()).Events("")}, legacyscheme.Codecs.UniversalDecoder(), out, errOut, until)
+				return rolling.NewRollingDeploymentStrategy(config.Namespace, client, images.Image(), &kv1core.EventSinkImpl{Interface: kv1core.New(client.Core().RESTClient()).Events("")}, legacyscheme.Codecs.UniversalDecoder(), recreate, out, errOut, until), nil
 			default:
 				return nil, fmt.Errorf("unsupported strategy type: %s", config.Spec.Strategy.Type)
 			}
@@ -156,7 +160,7 @@ type Deployer struct {
 	// until is a condition to run until
 	until string
 	// strategyFor returns a DeploymentStrategy for config.
-	strategyFor func(config *deployapi.DeploymentConfig) (strategy.DeploymentStrategy, error)
+	strategyFor func(config *appsapi.DeploymentConfig) (strategy.DeploymentStrategy, error)
 	// getDeployment finds the named deployment.
 	getDeployment func(namespace, name string) (*kapi.ReplicationController, error)
 	// getDeployments finds all deployments associated with a config.
@@ -174,7 +178,7 @@ func (d *Deployer) Deploy(namespace, rcName string) error {
 	}
 
 	// Decode the config from the deployment.
-	config, err := deployutil.DecodeDeploymentConfig(to, kapi.Codecs.UniversalDecoder())
+	config, err := appsutil.DecodeDeploymentConfig(to, legacyscheme.Codecs.UniversalDecoder())
 	if err != nil {
 		return fmt.Errorf("couldn't decode deployment config from deployment %s: %v", to.Name, err)
 	}
@@ -186,7 +190,7 @@ func (d *Deployer) Deploy(namespace, rcName string) error {
 	}
 
 	// New deployments must have a desired replica count.
-	desiredReplicas, hasDesired := deployutil.DeploymentDesiredReplicas(to)
+	desiredReplicas, hasDesired := appsutil.DeploymentDesiredReplicas(to)
 	if !hasDesired {
 		return fmt.Errorf("deployment %s has already run to completion", to.Name)
 	}
@@ -196,10 +200,13 @@ func (d *Deployer) Deploy(namespace, rcName string) error {
 	if err != nil {
 		return fmt.Errorf("couldn't get controllers in namespace %s: %v", namespace, err)
 	}
-	deployments := unsortedDeployments.Items
+	deployments := make([]*kapi.ReplicationController, 0, len(unsortedDeployments.Items))
+	for i := range unsortedDeployments.Items {
+		deployments = append(deployments, &unsortedDeployments.Items[i])
+	}
 
 	// Sort all the deployments by version.
-	sort.Sort(deployutil.ByLatestVersionDesc(deployments))
+	sort.Sort(appsutil.ByLatestVersionDesc(deployments))
 
 	// Find any last completed deployment.
 	var from *kapi.ReplicationController
@@ -207,13 +214,13 @@ func (d *Deployer) Deploy(namespace, rcName string) error {
 		if candidate.Name == to.Name {
 			continue
 		}
-		if deployutil.IsCompleteDeployment(&candidate) {
-			from = &candidate
+		if appsutil.IsCompleteDeployment(candidate) {
+			from = candidate
 			break
 		}
 	}
 
-	if deployutil.DeploymentVersionFor(to) < deployutil.DeploymentVersionFor(from) {
+	if appsutil.DeploymentVersionFor(to) < appsutil.DeploymentVersionFor(from) {
 		return fmt.Errorf("deployment %s is older than %s", to.Name, from.Name)
 	}
 
@@ -233,7 +240,7 @@ func (d *Deployer) Deploy(namespace, rcName string) error {
 		// Scale the deployment down to zero.
 		retryWaitParams := kubectl.NewRetryParams(1*time.Second, 120*time.Second)
 		if err := d.scaler.Scale(candidate.Namespace, candidate.Name, uint(0), &kubectl.ScalePrecondition{Size: -1, ResourceVersion: ""}, retryWaitParams, retryWaitParams); err != nil {
-			fmt.Fprintf(d.errOut, "error: Couldn't scale down prior deployment %s: %v\n", deployutil.LabelForDeployment(&candidate), err)
+			fmt.Fprintf(d.errOut, "error: Couldn't scale down prior deployment %s: %v\n", appsutil.LabelForDeployment(candidate), err)
 		} else {
 			fmt.Fprintf(d.out, "--> Scaled older deployment %s down\n", candidate.Name)
 		}

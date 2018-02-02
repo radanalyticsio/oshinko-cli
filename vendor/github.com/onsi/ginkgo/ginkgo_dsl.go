@@ -68,6 +68,14 @@ type GinkgoTestingT interface {
 	Fail()
 }
 
+//GinkgoRandomSeed returns the seed used to randomize spec execution order.  It is
+//useful for seeding your own pseudorandom number generators (PRNGs) to ensure
+//consistent executions from run to run, where your tests contain variability (for
+//example, when selecting random test data).
+func GinkgoRandomSeed() int64 {
+	return config.GinkgoConfig.RandomSeed
+}
+
 //GinkgoParallelNode returns the parallel node number for the current ginkgo process
 //The node number is 1-indexed
 func GinkgoParallelNode() int {
@@ -180,6 +188,10 @@ type Benchmarker interface {
 	RecordValueWithPrecision(name string, value float64, units string, precision int, info ...interface{})
 }
 
+func WalkTests(fn func(name string, node types.TestNode)) {
+	globalSuite.WalkTests(fn)
+}
+
 //RunSpecs is the entry point for the Ginkgo test runner.
 //You must call this within a Golang testing TestX(t *testing.T) function.
 //
@@ -218,7 +230,7 @@ func RunSpecsWithCustomReporters(t GinkgoTestingT, description string, specRepor
 func buildDefaultReporter() Reporter {
 	remoteReportingServer := config.GinkgoConfig.StreamHost
 	if remoteReportingServer == "" {
-		stenographer := stenographer.New(!config.DefaultReporterConfig.NoColor)
+		stenographer := stenographer.New(!config.DefaultReporterConfig.NoColor, config.GinkgoConfig.FlakeAttempts > 1)
 		return reporters.NewDefaultReporter(config.DefaultReporterConfig, stenographer)
 	} else {
 		return remote.NewForwardingReporter(remoteReportingServer, &http.Client{}, remote.NewOutputInterceptor())

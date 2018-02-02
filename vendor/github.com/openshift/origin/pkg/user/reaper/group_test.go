@@ -4,16 +4,29 @@ import (
 	"reflect"
 	"testing"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	ktestclient "k8s.io/kubernetes/pkg/client/unversioned/testclient"
-	"k8s.io/kubernetes/pkg/runtime"
-
 	"github.com/davecgh/go-spew/spew"
-	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
-	"github.com/openshift/origin/pkg/client/testclient"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	clientgotesting "k8s.io/client-go/testing"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+
+	authorizationapi "github.com/openshift/origin/pkg/authorization/apis/authorization"
+	authfake "github.com/openshift/origin/pkg/authorization/generated/internalclientset/fake"
+	securityapi "github.com/openshift/origin/pkg/security/apis/security"
+	securityfake "github.com/openshift/origin/pkg/security/generated/internalclientset/fake"
+	userfake "github.com/openshift/origin/pkg/user/generated/internalclientset/fake"
 
 	// install all APIs
 	_ "github.com/openshift/origin/pkg/api/install"
+)
+
+var (
+	groupsResource              = schema.GroupVersionResource{Group: "user.openshift.io", Version: "", Resource: "groups"}
+	clusterRoleBindingsResource = schema.GroupVersionResource{Group: "authorization.openshift.io", Version: "", Resource: "clusterrolebindings"}
+	roleBindingsResource        = schema.GroupVersionResource{Group: "authorization.openshift.io", Version: "", Resource: "rolebindings"}
+	sccResource                 = schema.GroupVersionResource{Group: "security.openshift.io", Version: "", Resource: "securitycontextconstraints"}
 )
 
 func TestGroupReaper(t *testing.T) {
@@ -21,6 +34,7 @@ func TestGroupReaper(t *testing.T) {
 		name     string
 		group    string
 		objects  []runtime.Object
+		sccs     []runtime.Object
 		expected []interface{}
 	}{
 		{
@@ -28,7 +42,7 @@ func TestGroupReaper(t *testing.T) {
 			group:   "mygroup",
 			objects: []runtime.Object{},
 			expected: []interface{}{
-				ktestclient.DeleteActionImpl{ActionImpl: ktestclient.ActionImpl{Verb: "delete", Resource: "groups"}, Name: "mygroup"},
+				clientgotesting.DeleteActionImpl{ActionImpl: clientgotesting.ActionImpl{Verb: "delete", Resource: groupsResource}, Name: "mygroup"},
 			},
 		},
 		{
@@ -36,28 +50,28 @@ func TestGroupReaper(t *testing.T) {
 			group: "mygroup",
 			objects: []runtime.Object{
 				&authorizationapi.ClusterRoleBinding{
-					ObjectMeta: kapi.ObjectMeta{Name: "binding-no-subjects"},
+					ObjectMeta: metav1.ObjectMeta{Name: "binding-no-subjects"},
 					RoleRef:    kapi.ObjectReference{Name: "role"},
 					Subjects:   []kapi.ObjectReference{},
 				},
 				&authorizationapi.ClusterRoleBinding{
-					ObjectMeta: kapi.ObjectMeta{Name: "binding-one-subject"},
+					ObjectMeta: metav1.ObjectMeta{Name: "binding-one-subject"},
 					RoleRef:    kapi.ObjectReference{Name: "role"},
 					Subjects:   []kapi.ObjectReference{{Name: "mygroup", Kind: "Group"}},
 				},
 				&authorizationapi.ClusterRoleBinding{
-					ObjectMeta: kapi.ObjectMeta{Name: "binding-mismatched-subject"},
+					ObjectMeta: metav1.ObjectMeta{Name: "binding-mismatched-subject"},
 					RoleRef:    kapi.ObjectReference{Name: "role"},
 					Subjects:   []kapi.ObjectReference{{Name: "mygroup"}, {Name: "mygroup", Kind: "User"}, {Name: "mygroup", Kind: "Other"}},
 				},
 			},
 			expected: []interface{}{
-				ktestclient.UpdateActionImpl{ActionImpl: ktestclient.ActionImpl{Verb: "update", Resource: "clusterrolebindings"}, Object: &authorizationapi.ClusterRoleBinding{
-					ObjectMeta: kapi.ObjectMeta{Name: "binding-one-subject"},
+				clientgotesting.UpdateActionImpl{ActionImpl: clientgotesting.ActionImpl{Verb: "update", Resource: clusterRoleBindingsResource}, Object: &authorizationapi.ClusterRoleBinding{
+					ObjectMeta: metav1.ObjectMeta{Name: "binding-one-subject"},
 					RoleRef:    kapi.ObjectReference{Name: "role"},
 					Subjects:   []kapi.ObjectReference{},
 				}},
-				ktestclient.DeleteActionImpl{ActionImpl: ktestclient.ActionImpl{Verb: "delete", Resource: "groups"}, Name: "mygroup"},
+				clientgotesting.DeleteActionImpl{ActionImpl: clientgotesting.ActionImpl{Verb: "delete", Resource: groupsResource}, Name: "mygroup"},
 			},
 		},
 		{
@@ -65,74 +79,81 @@ func TestGroupReaper(t *testing.T) {
 			group: "mygroup",
 			objects: []runtime.Object{
 				&authorizationapi.RoleBinding{
-					ObjectMeta: kapi.ObjectMeta{Name: "binding-no-subjects", Namespace: "ns1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "binding-no-subjects", Namespace: "ns1"},
 					RoleRef:    kapi.ObjectReference{Name: "role"},
 					Subjects:   []kapi.ObjectReference{},
 				},
 				&authorizationapi.RoleBinding{
-					ObjectMeta: kapi.ObjectMeta{Name: "binding-one-subject", Namespace: "ns2"},
+					ObjectMeta: metav1.ObjectMeta{Name: "binding-one-subject", Namespace: "ns2"},
 					RoleRef:    kapi.ObjectReference{Name: "role"},
 					Subjects:   []kapi.ObjectReference{{Name: "mygroup", Kind: "Group"}},
 				},
 				&authorizationapi.RoleBinding{
-					ObjectMeta: kapi.ObjectMeta{Name: "binding-mismatched-subject", Namespace: "ns3"},
+					ObjectMeta: metav1.ObjectMeta{Name: "binding-mismatched-subject", Namespace: "ns3"},
 					RoleRef:    kapi.ObjectReference{Name: "role"},
 					Subjects:   []kapi.ObjectReference{{Name: "mygroup"}, {Name: "mygroup", Kind: "User"}, {Name: "mygroup", Kind: "Other"}},
 				},
 			},
 			expected: []interface{}{
-				ktestclient.UpdateActionImpl{ActionImpl: ktestclient.ActionImpl{Verb: "update", Resource: "rolebindings", Namespace: "ns2"}, Object: &authorizationapi.RoleBinding{
-					ObjectMeta: kapi.ObjectMeta{Name: "binding-one-subject", Namespace: "ns2"},
+				clientgotesting.UpdateActionImpl{ActionImpl: clientgotesting.ActionImpl{Verb: "update", Resource: roleBindingsResource, Namespace: "ns2"}, Object: &authorizationapi.RoleBinding{
+					ObjectMeta: metav1.ObjectMeta{Name: "binding-one-subject", Namespace: "ns2"},
 					RoleRef:    kapi.ObjectReference{Name: "role"},
 					Subjects:   []kapi.ObjectReference{},
 				}},
-				ktestclient.DeleteActionImpl{ActionImpl: ktestclient.ActionImpl{Verb: "delete", Resource: "groups"}, Name: "mygroup"},
+				clientgotesting.DeleteActionImpl{ActionImpl: clientgotesting.ActionImpl{Verb: "delete", Resource: groupsResource}, Name: "mygroup"},
 			},
 		},
 		{
 			name:  "sccs",
 			group: "mygroup",
-			objects: []runtime.Object{
-				&kapi.SecurityContextConstraints{
-					ObjectMeta: kapi.ObjectMeta{Name: "scc-no-subjects"},
+			sccs: []runtime.Object{
+				&securityapi.SecurityContextConstraints{
+					ObjectMeta: metav1.ObjectMeta{Name: "scc-no-subjects"},
 					Groups:     []string{},
 				},
-				&kapi.SecurityContextConstraints{
-					ObjectMeta: kapi.ObjectMeta{Name: "scc-one-subject"},
+				&securityapi.SecurityContextConstraints{
+					ObjectMeta: metav1.ObjectMeta{Name: "scc-one-subject"},
 					Groups:     []string{"mygroup"},
 				},
-				&kapi.SecurityContextConstraints{
-					ObjectMeta: kapi.ObjectMeta{Name: "scc-mismatched-subjects"},
+				&securityapi.SecurityContextConstraints{
+					ObjectMeta: metav1.ObjectMeta{Name: "scc-mismatched-subjects"},
 					Users:      []string{"mygroup"},
 					Groups:     []string{"mygroup2"},
 				},
 			},
 			expected: []interface{}{
-				ktestclient.UpdateActionImpl{ActionImpl: ktestclient.ActionImpl{Verb: "update", Resource: "securitycontextconstraints"}, Object: &kapi.SecurityContextConstraints{
-					ObjectMeta: kapi.ObjectMeta{Name: "scc-one-subject"},
+				clientgotesting.UpdateActionImpl{ActionImpl: clientgotesting.ActionImpl{Verb: "update", Resource: sccResource}, Object: &securityapi.SecurityContextConstraints{
+					ObjectMeta: metav1.ObjectMeta{Name: "scc-one-subject"},
 					Groups:     []string{},
 				}},
-				ktestclient.DeleteActionImpl{ActionImpl: ktestclient.ActionImpl{Verb: "delete", Resource: "groups"}, Name: "mygroup"},
+				clientgotesting.DeleteActionImpl{ActionImpl: clientgotesting.ActionImpl{Verb: "delete", Resource: groupsResource}, Name: "mygroup"},
 			},
 		},
 	}
 
 	for _, test := range tests {
-		tc := testclient.NewSimpleFake(test.objects...)
-		ktc := ktestclient.NewSimpleFake(test.objects...)
+		authFake := authfake.NewSimpleClientset(test.objects...)
+		userFake := userfake.NewSimpleClientset()
+		securityFake := securityfake.NewSimpleClientset(test.sccs...)
 
 		actual := []interface{}{}
-		reactor := func(action ktestclient.Action) (handled bool, ret runtime.Object, err error) {
+		oreactor := func(action clientgotesting.Action) (handled bool, ret runtime.Object, err error) {
+			actual = append(actual, action)
+			return false, nil, nil
+		}
+		kreactor := func(action clientgotesting.Action) (handled bool, ret runtime.Object, err error) {
 			actual = append(actual, action)
 			return false, nil, nil
 		}
 
-		tc.PrependReactor("update", "*", reactor)
-		tc.PrependReactor("delete", "*", reactor)
-		ktc.PrependReactor("update", "*", reactor)
-		ktc.PrependReactor("delete", "*", reactor)
+		authFake.PrependReactor("update", "*", oreactor)
+		userFake.PrependReactor("update", "*", oreactor)
+		authFake.PrependReactor("delete", "*", oreactor)
+		userFake.PrependReactor("delete", "*", oreactor)
+		securityFake.Fake.PrependReactor("update", "*", kreactor)
+		securityFake.Fake.PrependReactor("delete", "*", kreactor)
 
-		reaper := NewGroupReaper(tc, tc, tc, ktc)
+		reaper := NewGroupReaper(userFake, authFake, authFake, securityFake.Security().SecurityContextConstraints())
 		err := reaper.Stop("", test.group, 0, nil)
 		if err != nil {
 			t.Errorf("%s: unexpected error: %v", test.name, err)

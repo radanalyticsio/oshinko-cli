@@ -3,11 +3,11 @@ package nodeenv
 import (
 	"testing"
 
-	"k8s.io/kubernetes/pkg/admission"
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/client/cache"
-	clientsetfake "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
-	"k8s.io/kubernetes/pkg/client/unversioned/testclient"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apiserver/pkg/admission"
+	"k8s.io/client-go/tools/cache"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
 
 	projectcache "github.com/openshift/origin/pkg/project/cache"
 	"github.com/openshift/origin/pkg/util/labelselector"
@@ -15,9 +15,8 @@ import (
 
 // TestPodAdmission verifies various scenarios involving pod/project/global node label selectors
 func TestPodAdmission(t *testing.T) {
-	mockClient := &testclient.Fake{}
 	project := &kapi.Namespace{
-		ObjectMeta: kapi.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:      "testProject",
 			Namespace: "",
 		},
@@ -25,10 +24,10 @@ func TestPodAdmission(t *testing.T) {
 	projectStore := projectcache.NewCacheStore(cache.IndexFuncToKeyFuncAdapter(cache.MetaNamespaceIndexFunc))
 	projectStore.Add(project)
 
-	mockClientset := clientsetfake.NewSimpleClientset()
+	mockClientset := fake.NewSimpleClientset()
 	handler := &podNodeEnvironment{client: mockClientset}
 	pod := &kapi.Pod{
-		ObjectMeta: kapi.ObjectMeta{Name: "testPod"},
+		ObjectMeta: metav1.ObjectMeta{Name: "testPod"},
 	}
 
 	tests := []struct {
@@ -106,7 +105,7 @@ func TestPodAdmission(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		cache := projectcache.NewFake(mockClient.Namespaces(), projectStore, test.defaultNodeSelector)
+		cache := projectcache.NewFake(mockClientset.Core().Namespaces(), projectStore, test.defaultNodeSelector)
 		handler.SetProjectCache(cache)
 		if !test.ignoreProjectNodeSelector {
 			project.ObjectMeta.Annotations = map[string]string{"openshift.io/node-selector": test.projectNodeSelector}
@@ -133,7 +132,7 @@ func TestHandles(t *testing.T) {
 		admission.Connect: false,
 		admission.Delete:  false,
 	} {
-		nodeEnvionment, err := NewPodNodeEnvironment(nil)
+		nodeEnvionment, err := NewPodNodeEnvironment()
 		if err != nil {
 			t.Errorf("%v: error getting node environment: %v", op, err)
 			continue

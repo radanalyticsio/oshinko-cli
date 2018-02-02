@@ -3,11 +3,10 @@ package integration
 import (
 	"testing"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	kclient "k8s.io/kubernetes/pkg/client/unversioned"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	kclientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
 
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
-	"github.com/openshift/origin/pkg/cmd/server/bootstrappolicy"
 	serviceadmit "github.com/openshift/origin/pkg/service/admission"
 	testutil "github.com/openshift/origin/test/util"
 	testserver "github.com/openshift/origin/test/util/server"
@@ -24,7 +23,7 @@ var exampleAddresses = map[string]string{
 	"external": "1.2.3.4",
 }
 
-func testOne(t *testing.T, client *kclient.Client, namespace, addrType string, success bool) *kapi.Endpoints {
+func testOne(t *testing.T, client kclientset.Interface, namespace, addrType string, success bool) *kapi.Endpoints {
 	testEndpoint := &kapi.Endpoints{}
 	testEndpoint.GenerateName = "test"
 	testEndpoint.Subsets = []kapi.EndpointSubset{
@@ -43,7 +42,7 @@ func testOne(t *testing.T, client *kclient.Client, namespace, addrType string, s
 		},
 	}
 
-	ep, err := client.Endpoints(namespace).Create(testEndpoint)
+	ep, err := client.Core().Endpoints(namespace).Create(testEndpoint)
 	if err != nil && success {
 		t.Fatalf("unexpected error creating %s network endpoint: %v", addrType, err)
 	} else if err == nil && !success {
@@ -53,18 +52,22 @@ func testOne(t *testing.T, client *kclient.Client, namespace, addrType string, s
 }
 
 func TestEndpointAdmission(t *testing.T) {
-	testutil.RequireEtcd(t)
-	defer testutil.DumpEtcdOnFailure(t)
 	masterConfig, err := testserver.DefaultMasterOptions()
 	if err != nil {
 		t.Fatalf("error creating config: %v", err)
 	}
-	masterConfig.KubernetesMasterConfig.AdmissionConfig.PluginConfig = map[string]configapi.AdmissionPluginConfig{
+	defer testserver.CleanupMasterEtcd(t, masterConfig)
+	masterConfig.AdmissionConfig.PluginConfig = map[string]*configapi.AdmissionPluginConfig{
 		serviceadmit.RestrictedEndpointsPluginName: {
 			Configuration: &configapi.DefaultAdmissionConfig{},
 		},
 	}
-	masterConfig.NetworkConfig.ClusterNetworkCIDR = clusterNetworkCIDR
+	clusterNetworkConfig := []configapi.ClusterNetworkEntry{
+		{
+			CIDR: clusterNetworkCIDR,
+		},
+	}
+	masterConfig.NetworkConfig.ClusterNetworks = clusterNetworkConfig
 	masterConfig.NetworkConfig.ServiceNetworkCIDR = serviceNetworkCIDR
 
 	kubeConfigFile, err := testserver.StartConfiguredMaster(masterConfig)
@@ -74,10 +77,6 @@ func TestEndpointAdmission(t *testing.T) {
 	clusterAdminKubeClient, err := testutil.GetClusterAdminKubeClient(kubeConfigFile)
 	if err != nil {
 		t.Fatalf("error getting kube client: %v", err)
-	}
-	clusterAdminOSClient, err := testutil.GetClusterAdminClient(kubeConfigFile)
-	if err != nil {
-		t.Fatalf("error getting client: %v", err)
 	}
 	clientConfig, err := testutil.GetClusterAdminClientConfig(kubeConfigFile)
 	if err != nil {
@@ -90,7 +89,7 @@ func TestEndpointAdmission(t *testing.T) {
 	testOne(t, clusterAdminKubeClient, "default", "external", true)
 
 	// Endpoint controller service account
-	_, serviceAccountClient, _, err := testutil.GetClientForServiceAccount(clusterAdminKubeClient, *clientConfig, bootstrappolicy.DefaultOpenShiftInfraNamespace, bootstrappolicy.InfraEndpointControllerServiceAccountName)
+	serviceAccountClient, _, err := testutil.GetClientForServiceAccount(clusterAdminKubeClient, *clientConfig, "kube-system", "endpoint-controller")
 	if err != nil {
 		t.Fatalf("error getting endpoint controller service account: %v", err)
 	}
@@ -99,11 +98,11 @@ func TestEndpointAdmission(t *testing.T) {
 	testOne(t, serviceAccountClient, "default", "external", true)
 
 	// Project admin
-	_, err = testserver.CreateNewProject(clusterAdminOSClient, *clientConfig, "myproject", "myadmin")
+	_, _, err = testserver.CreateNewProject(clientConfig, "myproject", "myadmin")
 	if err != nil {
 		t.Fatalf("error creating project: %v", err)
 	}
-	_, projectAdminClient, _, err := testutil.GetClientForUser(*clientConfig, "myadmin")
+	projectAdminClient, _, err := testutil.GetClientForUser(clientConfig, "myadmin")
 	if err != nil {
 		t.Fatalf("error getting project admin client: %v", err)
 	}
@@ -115,12 +114,12 @@ func TestEndpointAdmission(t *testing.T) {
 	// User without restricted endpoint permission can't modify IPs but can still do other modifications
 	ep := testOne(t, clusterAdminKubeClient, "myproject", "cluster", true)
 	ep.Annotations = map[string]string{"foo": "bar"}
-	ep, err = projectAdminClient.Endpoints("myproject").Update(ep)
+	ep, err = projectAdminClient.Core().Endpoints("myproject").Update(ep)
 	if err != nil {
 		t.Fatalf("unexpected error updating endpoint annotation: %v", err)
 	}
 	ep.Subsets[0].Addresses[0].IP = exampleAddresses["service"]
-	ep, err = projectAdminClient.Endpoints("myproject").Update(ep)
+	ep, err = projectAdminClient.Core().Endpoints("myproject").Update(ep)
 	if err == nil {
 		t.Fatalf("unexpected success modifying endpoint")
 	}

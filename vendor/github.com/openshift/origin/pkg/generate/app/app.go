@@ -5,22 +5,25 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net"
-	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
 
+	"github.com/golang/glog"
 	"github.com/pborman/uuid"
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/conversion"
-	"k8s.io/kubernetes/pkg/runtime"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/conversion"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 
-	buildapi "github.com/openshift/origin/pkg/build/api"
-	deployapi "github.com/openshift/origin/pkg/deploy/api"
+	appsapi "github.com/openshift/origin/pkg/apps/apis/apps"
+	buildapi "github.com/openshift/origin/pkg/build/apis/build"
+	"github.com/openshift/origin/pkg/generate"
 	"github.com/openshift/origin/pkg/generate/git"
-	imageapi "github.com/openshift/origin/pkg/image/api"
 	"github.com/openshift/origin/pkg/util"
+
+	s2igit "github.com/openshift/source-to-image/pkg/scm/git"
 )
 
 const (
@@ -82,30 +85,29 @@ func (g *Generated) WithType(slicePtr interface{}) bool {
 	return found
 }
 
-func nameFromGitURL(url *url.URL) (string, bool) {
+func nameFromGitURL(url *s2igit.URL) (string, bool) {
 	if url == nil {
 		return "", false
 	}
 	// from path
-	if name, ok := git.NameFromRepositoryURL(url); ok {
+	if name, ok := git.NameFromRepositoryURL(&url.URL); ok {
 		return name, true
 	}
 	// TODO: path is questionable
-	if len(url.Host) > 0 {
+	if len(url.URL.Host) > 0 {
 		// from host with port
-		if host, _, err := net.SplitHostPort(url.Host); err == nil {
+		if host, _, err := net.SplitHostPort(url.URL.Host); err == nil {
 			return host, true
 		}
 		// from host without port
-		return url.Host, true
+		return url.URL.Host, true
 	}
 	return "", false
 }
 
 // SourceRef is a reference to a build source
 type SourceRef struct {
-	URL        *url.URL
-	Ref        string
+	URL        *s2igit.URL
 	Dir        string
 	Name       string
 	ContextDir string
@@ -120,11 +122,6 @@ type SourceRef struct {
 	Binary bool
 
 	RequiresAuth bool
-}
-
-func urlWithoutRef(url url.URL) string {
-	url.Fragment = ""
-	return url.String()
 }
 
 // SuggestName returns a name derived from the source URL
@@ -162,8 +159,8 @@ func (r *SourceRef) BuildSource() (*buildapi.BuildSource, []buildapi.BuildTrigge
 	}
 	if r.URL != nil {
 		source.Git = &buildapi.GitBuildSource{
-			URI: urlWithoutRef(*r.URL),
-			Ref: r.Ref,
+			URI: r.URL.StringNoFragment(),
+			Ref: r.URL.URL.Fragment,
 		}
 		source.ContextDir = r.ContextDir
 	}
@@ -193,16 +190,25 @@ func (r *SourceRef) BuildSource() (*buildapi.BuildSource, []buildapi.BuildTrigge
 
 // BuildStrategyRef is a reference to a build strategy
 type BuildStrategyRef struct {
-	IsDockerBuild bool
-	Base          *ImageRef
+	Strategy generate.Strategy
+	Base     *ImageRef
 }
 
 // BuildStrategy builds an OpenShift BuildStrategy from a BuildStrategyRef
-func (s *BuildStrategyRef) BuildStrategy(env Environment) (*buildapi.BuildStrategy, []buildapi.BuildTriggerPolicy) {
-	if s.IsDockerBuild {
+func (s *BuildStrategyRef) BuildStrategy(env Environment, dockerStrategyOptions *buildapi.DockerStrategyOptions) (*buildapi.BuildStrategy, []buildapi.BuildTriggerPolicy) {
+	switch s.Strategy {
+	case generate.StrategyPipeline:
+		return &buildapi.BuildStrategy{
+			JenkinsPipelineStrategy: &buildapi.JenkinsPipelineBuildStrategy{},
+		}, s.Base.BuildTriggers()
+
+	case generate.StrategyDocker:
 		var triggers []buildapi.BuildTriggerPolicy
 		strategy := &buildapi.DockerBuildStrategy{
 			Env: env.List(),
+		}
+		if dockerStrategyOptions != nil {
+			strategy.BuildArgs = dockerStrategyOptions.BuildArgs
 		}
 		if s.Base != nil {
 			ref := s.Base.ObjectReference()
@@ -212,23 +218,29 @@ func (s *BuildStrategyRef) BuildStrategy(env Environment) (*buildapi.BuildStrate
 		return &buildapi.BuildStrategy{
 			DockerStrategy: strategy,
 		}, triggers
+
+	case generate.StrategySource:
+		return &buildapi.BuildStrategy{
+			SourceStrategy: &buildapi.SourceBuildStrategy{
+				From: s.Base.ObjectReference(),
+				Env:  env.List(),
+			},
+		}, s.Base.BuildTriggers()
 	}
 
-	return &buildapi.BuildStrategy{
-		SourceStrategy: &buildapi.SourceBuildStrategy{
-			From: s.Base.ObjectReference(),
-			Env:  env.List(),
-		},
-	}, s.Base.BuildTriggers()
+	glog.Error("BuildStrategy called with unknown strategy")
+	return nil, nil
 }
 
 // BuildRef is a reference to a build configuration
 type BuildRef struct {
-	Source   *SourceRef
-	Input    *ImageRef
-	Strategy *BuildStrategyRef
-	Output   *ImageRef
-	Env      Environment
+	Source                *SourceRef
+	Input                 *ImageRef
+	Strategy              *BuildStrategyRef
+	DockerStrategyOptions *buildapi.DockerStrategyOptions
+	Output                *ImageRef
+	Env                   Environment
+	Binary                bool
 }
 
 // BuildConfig creates a buildConfig resource from the build configuration reference
@@ -248,23 +260,32 @@ func (r *BuildRef) BuildConfig() (*buildapi.BuildConfig, error) {
 	strategy := &buildapi.BuildStrategy{}
 	strategyTriggers := []buildapi.BuildTriggerPolicy{}
 	if r.Strategy != nil {
-		strategy, strategyTriggers = r.Strategy.BuildStrategy(r.Env)
+		strategy, strategyTriggers = r.Strategy.BuildStrategy(r.Env, r.DockerStrategyOptions)
 	}
 	output, err := r.Output.BuildOutput()
 	if err != nil {
 		return nil, err
 	}
 
-	if source.Binary == nil {
+	if !r.Binary {
 		configChangeTrigger := buildapi.BuildTriggerPolicy{
 			Type: buildapi.ConfigChangeBuildTriggerType,
 		}
 		triggers = append(triggers, configChangeTrigger)
 		triggers = append(triggers, strategyTriggers...)
+	} else {
+		// remove imagechangetriggers from binary buildconfigs because
+		// triggered builds will fail (no binary input available)
+		filteredTriggers := []buildapi.BuildTriggerPolicy{}
+		for _, trigger := range triggers {
+			if trigger.Type != buildapi.ImageChangeBuildTriggerType {
+				filteredTriggers = append(filteredTriggers, trigger)
+			}
+		}
+		triggers = filteredTriggers
 	}
-
 	return &buildapi.BuildConfig{
-		ObjectMeta: kapi.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
 		Spec: buildapi.BuildConfigSpec{
@@ -295,7 +316,7 @@ type DeploymentConfigRef struct {
 // DeploymentConfig creates a deploymentConfig resource from the deployment configuration reference
 //
 // TODO: take a pod template spec as argument
-func (r *DeploymentConfigRef) DeploymentConfig() (*deployapi.DeploymentConfig, error) {
+func (r *DeploymentConfigRef) DeploymentConfig() (*appsapi.DeploymentConfig, error) {
 	if len(r.Name) == 0 {
 		suggestions := NameSuggestions{}
 		for i := range r.Images {
@@ -317,14 +338,12 @@ func (r *DeploymentConfigRef) DeploymentConfig() (*deployapi.DeploymentConfig, e
 		}
 	}
 
-	triggers := []deployapi.DeploymentTriggerPolicy{
+	triggers := []appsapi.DeploymentTriggerPolicy{
 		// By default, always deploy on change
 		{
-			Type: deployapi.DeploymentTriggerOnConfigChange,
+			Type: appsapi.DeploymentTriggerOnConfigChange,
 		},
 	}
-
-	annotations := make(map[string]string)
 
 	template := kapi.PodSpec{}
 	for i := range r.Images {
@@ -334,9 +353,6 @@ func (r *DeploymentConfigRef) DeploymentConfig() (*deployapi.DeploymentConfig, e
 		}
 		triggers = append(triggers, containerTriggers...)
 		template.Containers = append(template.Containers, *c)
-		if cmd, ok := r.Images[i].Command(); ok {
-			imageapi.SetContainerImageEntrypointAnnotation(annotations, c.Name, cmd)
-		}
 	}
 
 	// Create EmptyDir volumes for all container volume mounts
@@ -355,18 +371,17 @@ func (r *DeploymentConfigRef) DeploymentConfig() (*deployapi.DeploymentConfig, e
 		template.Containers[i].Env = append(template.Containers[i].Env, r.Env.List()...)
 	}
 
-	dc := &deployapi.DeploymentConfig{
-		ObjectMeta: kapi.ObjectMeta{
+	dc := &appsapi.DeploymentConfig{
+		ObjectMeta: metav1.ObjectMeta{
 			Name: r.Name,
 		},
-		Spec: deployapi.DeploymentConfigSpec{
+		Spec: appsapi.DeploymentConfigSpec{
 			Replicas: 1,
 			Test:     r.AsTest,
 			Selector: selector,
 			Template: &kapi.PodTemplateSpec{
-				ObjectMeta: kapi.ObjectMeta{
-					Labels:      selector,
-					Annotations: annotations,
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: selector,
 				},
 				Spec: template,
 			},
@@ -376,9 +391,9 @@ func (r *DeploymentConfigRef) DeploymentConfig() (*deployapi.DeploymentConfig, e
 	if r.PostHook != nil {
 		//dc.Spec.Strategy.Type = "Rolling"
 		if len(r.PostHook.Shell) > 0 {
-			dc.Spec.Strategy.RecreateParams = &deployapi.RecreateDeploymentStrategyParams{
-				Post: &deployapi.LifecycleHook{
-					ExecNewPod: &deployapi.ExecNewPodHook{
+			dc.Spec.Strategy.RecreateParams = &appsapi.RecreateDeploymentStrategyParams{
+				Post: &appsapi.LifecycleHook{
+					ExecNewPod: &appsapi.ExecNewPodHook{
 						Command: []string{"/bin/sh", "-c", r.PostHook.Shell},
 					},
 				},
@@ -465,7 +480,7 @@ func LabelsFromSpec(spec []string) (map[string]string, []string, error) {
 }
 
 // TODO: move to pkg/runtime or pkg/api
-func AsVersionedObjects(objects []runtime.Object, typer runtime.ObjectTyper, convertor runtime.ObjectConvertor, versions ...unversioned.GroupVersion) []error {
+func AsVersionedObjects(objects []runtime.Object, typer runtime.ObjectTyper, convertor runtime.ObjectConvertor, versions ...schema.GroupVersion) []error {
 	var errs []error
 	for i, object := range objects {
 		kinds, _, err := typer.ObjectKinds(object)
@@ -489,7 +504,7 @@ func AsVersionedObjects(objects []runtime.Object, typer runtime.ObjectTyper, con
 	return errs
 }
 
-func isInternalOnly(kinds []unversioned.GroupVersionKind) bool {
+func isInternalOnly(kinds []schema.GroupVersionKind) bool {
 	for _, kind := range kinds {
 		if kind.Version != runtime.APIVersionInternal {
 			return false
@@ -498,7 +513,7 @@ func isInternalOnly(kinds []unversioned.GroupVersionKind) bool {
 	return true
 }
 
-func kindsInVersions(kinds []unversioned.GroupVersionKind, versions []unversioned.GroupVersion) bool {
+func kindsInVersions(kinds []schema.GroupVersionKind, versions []schema.GroupVersion) bool {
 	for _, kind := range kinds {
 		for _, version := range versions {
 			if kind.GroupVersion() == version {
@@ -510,7 +525,7 @@ func kindsInVersions(kinds []unversioned.GroupVersionKind, versions []unversione
 }
 
 // tryConvert attempts to convert the given object to the provided versions in order.
-func tryConvert(convertor runtime.ObjectConvertor, object runtime.Object, versions []unversioned.GroupVersion) (runtime.Object, error) {
+func tryConvert(convertor runtime.ObjectConvertor, object runtime.Object, versions []schema.GroupVersion) (runtime.Object, error) {
 	var last error
 	for _, version := range versions {
 		obj, err := convertor.ConvertToVersion(object, version)

@@ -18,7 +18,7 @@
 #      $ docker run -d --privileged openshift/dind
 #
 
-FROM fedora:24
+FROM fedora:25
 
 # Fix 'WARNING: terminal is not fully functional' when TERM=dumb
 ENV TERM=xterm
@@ -57,12 +57,7 @@ RUN dnf -y update && dnf -y install\
  glibc-langpack-en\
  iptables\
  openssh-clients\
- openssh-server\
- && dnf -y remove\
- docker-v1.10-migrator\
- glibc-all-langpacks\
- selinux-policy-minimum\
- && dnf clean all
+ openssh-server
 
 ## Configure docker
 
@@ -72,7 +67,8 @@ RUN systemctl enable docker.service
 RUN echo "DOCKER_STORAGE_OPTIONS=--storage-driver vfs" >\
  /etc/sysconfig/docker-storage
 
-COPY dind-setup.sh /usr/local/bin
+RUN mkdir -p /usr/local/bin
+COPY dind-setup.sh /usr/local/bin/
 COPY dind-setup.service /etc/systemd/system/
 RUN systemctl enable dind-setup.service
 

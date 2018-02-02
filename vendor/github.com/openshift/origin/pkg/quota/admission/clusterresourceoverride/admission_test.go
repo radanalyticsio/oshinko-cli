@@ -6,14 +6,14 @@ import (
 	"io"
 	"testing"
 
-	"k8s.io/kubernetes/pkg/admission"
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/resource"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/auth/user"
-	"k8s.io/kubernetes/pkg/client/cache"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apiserver/pkg/admission"
+	"k8s.io/apiserver/pkg/authentication/user"
+	"k8s.io/client-go/tools/cache"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
-	ktestclient "k8s.io/kubernetes/pkg/client/unversioned/testclient"
 
 	configapilatest "github.com/openshift/origin/pkg/cmd/server/api/latest"
 	projectcache "github.com/openshift/origin/pkg/project/cache"
@@ -214,14 +214,14 @@ func TestLimitRequestAdmission(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		c, err := newClusterResourceOverride(fake.NewSimpleClientset(), test.config)
+		c, err := newClusterResourceOverride(test.config)
 		if err != nil {
 			t.Errorf("%s: config de/serialize failed: %v", test.name, err)
 			continue
 		}
 		c.(*clusterResourceOverridePlugin).SetProjectCache(fakeProjectCache(test.namespace))
-		attrs := admission.NewAttributesRecord(test.pod, nil, unversioned.GroupVersionKind{}, test.namespace.Name, "name", kapi.Resource("pods").WithVersion("version"), "", admission.Create, fakeUser())
-		if err = c.Admit(attrs); err != nil {
+		attrs := admission.NewAttributesRecord(test.pod, nil, schema.GroupVersionKind{}, test.namespace.Name, "name", kapi.Resource("pods").WithVersion("version"), "", admission.Create, fakeUser())
+		if err = c.(admission.MutationInterface).Admit(attrs); err != nil {
 			t.Errorf("%s: admission controller returned error: %v", test.name, err)
 			continue
 		}
@@ -312,7 +312,7 @@ var nsIndex = 0
 func fakeNamespace(pluginEnabled bool) *kapi.Namespace {
 	nsIndex++
 	ns := &kapi.Namespace{
-		ObjectMeta: kapi.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:        fmt.Sprintf("fakeNS%d", nsIndex),
 			Annotations: map[string]string{},
 		},
@@ -326,7 +326,7 @@ func fakeNamespace(pluginEnabled bool) *kapi.Namespace {
 func fakeProjectCache(ns *kapi.Namespace) *projectcache.ProjectCache {
 	store := projectcache.NewCacheStore(cache.MetaNamespaceKeyFunc)
 	store.Add(ns)
-	return projectcache.NewFake((&ktestclient.Fake{}).Namespaces(), store, "")
+	return projectcache.NewFake((&fake.Clientset{}).Core().Namespaces(), store, "")
 }
 
 func testConfig(lc2mr int64, cr2lr int64, mr2lr int64) *api.ClusterResourceOverrideConfig {

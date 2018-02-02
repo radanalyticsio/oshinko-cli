@@ -17,15 +17,18 @@ import (
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
 
-	kerrors "k8s.io/kubernetes/pkg/api/errors"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apiserver/pkg/util/flag"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/kubernetes/pkg/util"
+	"k8s.io/kubernetes/pkg/master/ports"
 
 	"github.com/openshift/origin/pkg/cmd/server/admin"
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
-	"github.com/openshift/origin/pkg/cmd/server/start/kubernetes"
-	"github.com/openshift/origin/pkg/cmd/templates"
+	"github.com/openshift/origin/pkg/cmd/server/crypto"
 	cmdutil "github.com/openshift/origin/pkg/cmd/util"
+	tsbcmd "github.com/openshift/origin/pkg/templateservicebroker/cmd/server"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 type AllInOneOptions struct {
@@ -33,7 +36,9 @@ type AllInOneOptions struct {
 
 	NodeArgs *NodeArgs
 
-	ConfigDir          util.StringFlag
+	ExpireDays         int
+	SignerExpireDays   int
+	ConfigDir          flag.StringFlag
 	NodeConfigFile     string
 	PrintIP            bool
 	ServiceNetworkCIDR string
@@ -57,13 +62,18 @@ var allInOneLong = templates.LongDesc(`
 	address that will be visible inside running Docker containers. This is not always successful,
 	so if you have problems tell OpenShift what public address it will be via --master=<ip>.
 
-	You may also pass --etcd=<address> to connect to an external etcd server.
-
-	You may also pass --kubeconfig=<path> to connect to an external Kubernetes cluster.`)
+	You may also pass --etcd=<address> to connect to an external etcd server.`)
 
 // NewCommandStartAllInOne provides a CLI handler for 'start' command
 func NewCommandStartAllInOne(basename string, out, errout io.Writer) (*cobra.Command, *AllInOneOptions) {
-	options := &AllInOneOptions{Output: out, MasterOptions: &MasterOptions{Output: out}}
+	options := &AllInOneOptions{
+		MasterOptions: &MasterOptions{
+			Output: out,
+		},
+		ExpireDays:       crypto.DefaultCertificateLifetimeInDays,
+		SignerExpireDays: crypto.DefaultCACertificateLifetimeInDays,
+		Output:           out,
+	}
 	options.MasterOptions.DefaultsFromName(basename)
 
 	cmds := &cobra.Command{
@@ -100,6 +110,8 @@ func NewCommandStartAllInOne(basename string, out, errout io.Writer) (*cobra.Com
 	flags.BoolVar(&options.MasterOptions.CreateCertificates, "create-certs", true, "Indicates whether missing certs should be created.")
 	flags.BoolVar(&options.PrintIP, "print-ip", false, "Print the IP that would be used if no master IP is specified and exit.")
 	flags.StringVar(&options.ServiceNetworkCIDR, "portal-net", NewDefaultNetworkArgs().ServiceNetworkCIDR, "The CIDR string representing the network that portal/service IPs will be assigned from. This must not overlap with any IP ranges assigned to nodes for pods.")
+	flags.IntVar(&options.ExpireDays, "expire-days", options.ExpireDays, "Validity of the certificates in days (defaults to 2 years). WARNING: extending this above default value is highly discouraged.")
+	flags.IntVar(&options.SignerExpireDays, "signer-expire-days", options.SignerExpireDays, "Validity of the CA certificate in days (defaults to 5 years). WARNING: extending this above default value is highly discouraged.")
 
 	masterArgs, nodeArgs, listenArg, imageFormatArgs, _ := GetAllInOneArgs()
 	options.MasterOptions.MasterArgs, options.NodeArgs = masterArgs, nodeArgs
@@ -113,13 +125,12 @@ func NewCommandStartAllInOne(basename string, out, errout io.Writer) (*cobra.Com
 	startNode, _ := NewCommandStartNode(basename, out, errout)
 	startNodeNetwork, _ := NewCommandStartNetwork(basename, out, errout)
 	startEtcdServer, _ := NewCommandStartEtcdServer(RecommendedStartEtcdServerName, basename, out, errout)
+	startTSBServer := tsbcmd.NewCommandStartTemplateServiceBrokerServer(out, errout, wait.NeverStop)
 	cmds.AddCommand(startMaster)
 	cmds.AddCommand(startNode)
 	cmds.AddCommand(startNodeNetwork)
 	cmds.AddCommand(startEtcdServer)
-
-	startKube := kubernetes.NewCommand("kubernetes", basename, out, errout)
-	cmds.AddCommand(startKube)
+	cmds.AddCommand(startTSBServer)
 
 	// autocompletion hints
 	cmds.MarkFlagFilename("write-config")
@@ -194,6 +205,13 @@ func (o AllInOneOptions) Validate(args []string) error {
 		return errors.New("all-in-one cannot start with a remote Kubernetes server, start the master instead")
 	}
 
+	if o.ExpireDays < 0 {
+		return errors.New("expire-days must be valid number of days")
+	}
+	if o.SignerExpireDays < 0 {
+		return errors.New("signer-expire-days must be valid number of days")
+	}
+
 	return nil
 }
 
@@ -219,6 +237,14 @@ func (o *AllInOneOptions) Complete() error {
 	o.NodeArgs.NodeName = strings.ToLower(o.NodeArgs.NodeName)
 	o.NodeArgs.MasterCertDir = o.MasterOptions.MasterArgs.ConfigDir.Value()
 
+	// if the node listen argument inherits the master listen argument, specialize it now to its own value so
+	// that the kubelet can have a customizable port
+	if o.NodeArgs.ListenArg == o.MasterOptions.MasterArgs.ListenArg {
+		o.NodeArgs.ListenArg = NewDefaultListenArg()
+		o.NodeArgs.ListenArg.ListenAddr.Set(fmt.Sprintf("%s:%d", o.MasterOptions.MasterArgs.ListenArg.ListenAddr.Host, ports.KubeletPort))
+		o.NodeArgs.ListenArg.ListenAddr.Default()
+	}
+
 	// For backward compatibility of DNS queries to the master service IP, enabling node DNS
 	// continues to start the master DNS, but the container DNS server will be the node's.
 	// However, if the user has provided an override DNSAddr, we need to honor the value if
@@ -229,6 +255,7 @@ func (o *AllInOneOptions) Complete() error {
 		if dnsAddr.Provided {
 			if dnsAddr.Port == 53 {
 				// the user has set the DNS port to 53, which is the effective default (node on 53, master on 8053)
+				o.NodeArgs.DNSBindAddr = dnsAddr.URL.Host
 				dnsAddr.Port = 8053
 				dnsAddr.URL.Host = net.JoinHostPort(dnsAddr.Host, strconv.Itoa(dnsAddr.Port))
 			} else {
@@ -240,11 +267,16 @@ func (o *AllInOneOptions) Complete() error {
 		}
 
 		// if node DNS is still enabled, then default the node cluster DNS to a reachable master address
-		if o.NodeArgs.Components.Enabled(ComponentDNS) && o.NodeArgs.ClusterDNS == nil {
-			if dnsIP, err := findLocalIPForDNS(o.MasterOptions.MasterArgs); err == nil {
-				o.NodeArgs.ClusterDNS = dnsIP
-			} else {
-				glog.V(2).Infof("Unable to find a local address to report as the node DNS - not using node DNS: %v", err)
+		if o.NodeArgs.Components.Enabled(ComponentDNS) {
+			if o.NodeArgs.ClusterDNS == nil {
+				if dnsIP, err := findLocalIPForDNS(o.MasterOptions.MasterArgs); err == nil {
+					o.NodeArgs.ClusterDNS = dnsIP
+					if len(o.NodeArgs.DNSBindAddr) == 0 {
+						o.NodeArgs.DNSBindAddr = net.JoinHostPort(dnsIP.String(), "53")
+					}
+				} else {
+					glog.V(2).Infof("Unable to find a local address to report as the node DNS - not using node DNS: %v", err)
+				}
 			}
 		}
 	}
@@ -268,11 +300,18 @@ func (o AllInOneOptions) StartAllInOne() error {
 		return nil
 	}
 	masterOptions := *o.MasterOptions
+	masterOptions.ExpireDays = o.ExpireDays
+	masterOptions.SignerExpireDays = o.SignerExpireDays
 	if err := masterOptions.RunMaster(); err != nil {
 		return err
 	}
 
-	nodeOptions := NodeOptions{o.NodeArgs, o.NodeConfigFile, o.MasterOptions.Output}
+	nodeOptions := NodeOptions{
+		NodeArgs:   o.NodeArgs,
+		ExpireDays: o.ExpireDays,
+		ConfigFile: o.NodeConfigFile,
+		Output:     o.MasterOptions.Output,
+	}
 	if err := nodeOptions.RunNode(); err != nil {
 		return err
 	}
@@ -281,7 +320,7 @@ func (o AllInOneOptions) StartAllInOne() error {
 		return nil
 	}
 
-	daemon.SdNotify("READY=1")
+	daemon.SdNotify(false, "READY=1")
 	select {}
 }
 

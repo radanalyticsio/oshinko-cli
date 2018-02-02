@@ -3,8 +3,10 @@ package cli
 import (
 	"fmt"
 	"github.com/openshift/origin/pkg/cmd/flagtypes"
-	"github.com/openshift/origin/pkg/cmd/templates"
-	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	//"github.com/openshift/origin/pkg/cmd/templates"
+	ktemplates "k8s.io/kubernetes/pkg/kubectl/cmd/templates"
+	//"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	"github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/cmd"
 	"github.com/spf13/cobra"
 	"io"
@@ -27,10 +29,10 @@ To see the full list of commands supported, run '%[1]s help'.
 )
 
 func GetCommandGroups(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) (
-	templates.CommandGroups,
+	ktemplates.CommandGroups,
 	*cobra.Command) {
 	first := oshinkocmd.NewCmdGet(fullName, f, in, out)
-	return templates.CommandGroups{
+	return ktemplates.CommandGroups{
 		{
 			Message: "Basic Commands:",
 			Commands: []*cobra.Command{
@@ -78,7 +80,7 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 	// If we move the expose to one of the hidden commands,
 	// then the printing of the help is still messed up for the
 	// exposed flags but at least it's not on one of the main commands
-	templates.ActsAsRootCommand(cmds, filters, groups...).
+	ktemplates.ActsAsRootCommand(cmds, filters, groups...).
 		ExposeFlags(tmp, "server", "client-certificate",
 		"client-key", "certificate-authority", "insecure-skip-tls-verify", "token")
 
@@ -97,7 +99,7 @@ func NewCmdOptions(out io.Writer) *cobra.Command {
 		},
 	}
 
-	templates.UseOptionsTemplates(cmd)
+	ktemplates.UseOptionsTemplates(cmd)
 
 	return cmd
 }
@@ -130,7 +132,7 @@ func CommandFor(basename string) *cobra.Command {
 	cmd = NewCommandCLI(basename, basename, in, out, errout)
 
 	if cmd.UsageFunc() == nil {
-		templates.ActsAsRootCommand(cmd, []string{"options"})
+		ktemplates.ActsAsRootCommand(cmd, []string{"options"})
 	}
 	flagtypes.GLog(cmd.PersistentFlags())
 

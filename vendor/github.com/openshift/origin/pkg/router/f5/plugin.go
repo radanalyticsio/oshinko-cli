@@ -4,12 +4,13 @@ import (
 	"fmt"
 
 	"github.com/golang/glog"
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/types"
-	"k8s.io/kubernetes/pkg/util/sets"
-	"k8s.io/kubernetes/pkg/watch"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/watch"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 
-	routeapi "github.com/openshift/origin/pkg/route/api"
+	routeapi "github.com/openshift/origin/pkg/route/apis/route"
+	"github.com/openshift/origin/pkg/router/controller"
 	"github.com/openshift/origin/pkg/util/netutils"
 )
 
@@ -278,6 +279,11 @@ func (p *F5Plugin) HandleEndpoints(eventType watch.EventType,
 
 			glog.V(4).Infof("Deleting pool %s", poolname)
 
+			// Note: deletePool will throw errors if the route
+			//       has not been deleted as the policy would
+			//       still refer to the pool. That is ok as the
+			//       pool will still get deleted when the route
+			//       gets deleted.
 			err = p.deletePool(poolname)
 			if err != nil {
 				return err
@@ -320,7 +326,8 @@ func (p *F5Plugin) HandleEndpoints(eventType watch.EventType,
 // routeName returns a string that can be used as a rule name in F5 BIG-IP and
 // is distinct for the given route.
 func routeName(route routeapi.Route) string {
-	return fmt.Sprintf("openshift_route_%s_%s", route.Namespace, route.Name)
+	name := controller.GetSafeRouteName(route.Name)
+	return fmt.Sprintf("openshift_route_%s_%s", route.Namespace, name)
 }
 
 // In order to map OpenShift routes to F5 objects, we must divide routes into
@@ -392,6 +399,14 @@ func (p *F5Plugin) addRoute(routename, poolname, hostname, pathname string,
 			glog.V(4).Infof("Error adding TLS profile for route %s: %v",
 				routename, err)
 			return err
+		}
+
+		if tls.Termination == routeapi.TLSTerminationReencrypt {
+			// add to reencrypt dg
+			glog.V(4).Infof("Adding re-encrypt route %s for pool %s,"+
+				" hostname %s, pathname %s...",
+				routename, poolname, hostname, prettyPathname)
+			p.F5Client.AddReencryptRoute(routename, poolname, hostname)
 		}
 
 		// TODO(ramr):  need to handle redirect case for F5.
@@ -493,6 +508,28 @@ func (p *F5Plugin) deleteRoute(routename string) error {
 					routename, err)
 				// Don't continue if we could not clean up the passthrough route.
 				return err
+			}
+		}
+	} else {
+		reencryptRouteExists, err := p.F5Client.ReencryptRouteExists(routename)
+		if err != nil {
+			glog.V(4).Infof("F5Client.ReencryptRouteExists failed: %v", err)
+			return err
+		}
+
+		if reencryptRouteExists {
+			err = p.F5Client.DeleteReencryptRoute(routename)
+			if err != nil {
+				f5err, ok := err.(F5Error)
+				if ok && f5err.httpStatusCode == 404 {
+					glog.V(4).Infof("Reencrypt route %s does not exist.",
+						routename)
+				} else {
+					glog.V(4).Infof("Error deleting reencrypt route %s: %v",
+						routename, err)
+					// Don't continue if we could not clean up the reencrypt route.
+					return err
+				}
 			}
 		}
 	}
@@ -630,6 +667,6 @@ func (p *F5Plugin) HandleRoute(eventType watch.EventType,
 }
 
 // No-op since f5 configuration can be updated piecemeal
-func (p *F5Plugin) SetLastSyncProcessed(processed bool) error {
+func (p *F5Plugin) Commit() error {
 	return nil
 }

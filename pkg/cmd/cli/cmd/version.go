@@ -5,7 +5,8 @@ import (
 	"github.com/spf13/cobra"
 	"io"
 
-	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	//"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	"github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/version"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 )

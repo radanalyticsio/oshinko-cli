@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"k8s.io/kubernetes/pkg/util/sets"
-	"k8s.io/kubernetes/pkg/util/validation/field"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
 // Apply stores the provided arguments onto a flag set, reporting any errors
@@ -34,6 +34,33 @@ func Resolve(args map[string][]string, fn func(*pflag.FlagSet)) []error {
 	fs := pflag.NewFlagSet("extended", pflag.ContinueOnError)
 	fn(fs)
 	return Apply(args, fs)
+}
+
+func AsArgs(fn, defaultFn func(*pflag.FlagSet)) []string {
+	fs := pflag.NewFlagSet("extended", pflag.ContinueOnError)
+	fn(fs)
+	defaults := pflag.NewFlagSet("defaults", pflag.ContinueOnError)
+	defaultFn(defaults)
+	var args []string
+	fs.VisitAll(func(flag *pflag.Flag) {
+		defaultFlag := defaults.Lookup(flag.Name)
+		s := flag.Value.String()
+		defaultValue := defaultFlag.Value.String()
+		if s == defaultValue {
+			return
+		}
+		if values, err := fs.GetStringSlice(flag.Name); err == nil {
+			for _, s := range values {
+				args = append(args, fmt.Sprintf("--%s=%s", flag.Name, s))
+			}
+		} else {
+			if len(s) == 0 {
+				s = defaultValue
+			}
+			args = append(args, fmt.Sprintf("--%s=%s", flag.Name, s))
+		}
+	})
+	return args
 }
 
 // ComponentFlag represents a set of enabled components used in a command line.

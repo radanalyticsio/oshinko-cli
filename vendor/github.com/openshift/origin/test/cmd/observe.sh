@@ -30,11 +30,14 @@ os::cmd::expect_failure_and_text 'oc observe services --exit-after=1m --all-name
 # argument templates
 os::cmd::expect_success_and_text 'oc observe services --once --all-namespaces -a "{ .spec.clusterIP }"' '172.30.0.1'
 os::cmd::expect_success_and_text 'oc observe services --once --all-namespaces -a "{{ .spec.clusterIP }}" --output=gotemplate' '172.30.0.1'
-os::cmd::expect_success_and_text 'oc observe services --once --all-namespaces -a "bad{ .metadata.annotations.unset }key"' 'badkey'
-os::cmd::expect_failure_and_text 'oc observe services --once --all-namespaces -a "bad{ .metadata.annotations.unset }key" --strict-templates' 'annotations is not found'
+os::cmd::expect_success_and_text 'oc observe services --once --all-namespaces -a "bad{ .missingkey }key"' 'badkey'
+os::cmd::expect_failure_and_text 'oc observe services --once --all-namespaces -a "bad{ .missingkey }key" --strict-templates' 'missingkey is not found'
 os::cmd::expect_success_and_text 'oc observe services --once --all-namespaces -a "{{ .unknown }}" --output=gotemplate' '""'
 os::cmd::expect_success_and_text 'oc observe services --once --all-namespaces -a "bad{{ or (.unknown) \"\" }}key" --output=gotemplate' 'badkey'
 os::cmd::expect_success_and_text 'oc observe services --once --all-namespaces -a "bad{{ .unknown }}key" --output=gotemplate --strict-templates' '\<no value\>'
+
+# --type-env-var
+os::cmd::expect_success_and_text 'MYENV=should_be_passed oc observe services --once --all-namespaces --type-env-var=EVENT -- /bin/sh -c "echo \$EVENT \$MYENV"' 'Sync should_be_passed'
 
 echo "observe: ok"
 os::test::junit::declare_suite_end

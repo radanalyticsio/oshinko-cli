@@ -7,38 +7,37 @@ import (
 	"strings"
 	"testing"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 
-	"github.com/openshift/origin/pkg/build/api"
-	"github.com/openshift/origin/pkg/build/webhook"
+	buildapi "github.com/openshift/origin/pkg/build/apis/build"
 )
 
-var testBuildConfig = &api.BuildConfig{
-	Spec: api.BuildConfigSpec{
-		Triggers: []api.BuildTriggerPolicy{
+var testBuildConfig = &buildapi.BuildConfig{
+	Spec: buildapi.BuildConfigSpec{
+		Triggers: []buildapi.BuildTriggerPolicy{
 			{
-				Type: api.GitHubWebHookBuildTriggerType,
-				GitHubWebHook: &api.WebHookTrigger{
+				Type: buildapi.GitHubWebHookBuildTriggerType,
+				GitHubWebHook: &buildapi.WebHookTrigger{
 					Secret: "secret101",
 				},
 			},
 			{
-				Type: api.GitHubWebHookBuildTriggerType,
-				GitHubWebHook: &api.WebHookTrigger{
+				Type: buildapi.GitHubWebHookBuildTriggerType,
+				GitHubWebHook: &buildapi.WebHookTrigger{
 					Secret: "secret100",
 				},
 			},
 			{
-				Type: api.GitHubWebHookBuildTriggerType,
-				GitHubWebHook: &api.WebHookTrigger{
+				Type: buildapi.GitHubWebHookBuildTriggerType,
+				GitHubWebHook: &buildapi.WebHookTrigger{
 					Secret: "secret102",
 				},
 			},
 		},
-		CommonSpec: api.CommonSpec{
-			Source: api.BuildSource{
-				Git: &api.GitBuildSource{
+		CommonSpec: buildapi.CommonSpec{
+			Source: buildapi.BuildSource{
+				Git: &buildapi.GitBuildSource{
 					URI: "git://github.com/my/repo.git",
 				},
 			},
@@ -47,8 +46,8 @@ var testBuildConfig = &api.BuildConfig{
 	},
 }
 
-var mockBuildStrategy = api.BuildStrategy{
-	SourceStrategy: &api.SourceBuildStrategy{
+var mockBuildStrategy = buildapi.BuildStrategy{
+	SourceStrategy: &buildapi.SourceBuildStrategy{
 		From: kapi.ObjectReference{
 			Kind: "DockerImage",
 			Name: "repository/image",
@@ -58,8 +57,8 @@ var mockBuildStrategy = api.BuildStrategy{
 
 type okBuildConfigInstantiator struct{}
 
-func (*okBuildConfigInstantiator) Instantiate(namespace string, request *api.BuildRequest) (*api.Build, error) {
-	return &api.Build{}, nil
+func (*okBuildConfigInstantiator) Instantiate(namespace string, request *buildapi.BuildRequest) (*buildapi.Build, error) {
+	return &buildapi.Build{}, nil
 }
 
 type fakeResponder struct {
@@ -86,19 +85,19 @@ func (r *fakeResponder) Error(err error) {
 	r.err = err
 }
 
-var buildConfig = &api.BuildConfig{
-	Spec: api.BuildConfigSpec{
-		Triggers: []api.BuildTriggerPolicy{
+var buildConfig = &buildapi.BuildConfig{
+	Spec: buildapi.BuildConfigSpec{
+		Triggers: []buildapi.BuildTriggerPolicy{
 			{
-				Type: api.GitHubWebHookBuildTriggerType,
-				GitHubWebHook: &api.WebHookTrigger{
+				Type: buildapi.GitHubWebHookBuildTriggerType,
+				GitHubWebHook: &buildapi.WebHookTrigger{
 					Secret: "secret100",
 				},
 			},
 		},
-		CommonSpec: api.CommonSpec{
-			Source: api.BuildSource{
-				Git: &api.GitBuildSource{},
+		CommonSpec: buildapi.CommonSpec{
+			Source: buildapi.BuildSource{
+				Git: &buildapi.GitBuildSource{},
 			},
 		},
 	},
@@ -112,26 +111,10 @@ func GivenRequest(method string) *http.Request {
 func TestVerifyRequestForMethod(t *testing.T) {
 	req := GivenRequest("GET")
 	plugin := New()
-	revision, _, proceed, err := plugin.Extract(buildConfig, "secret100", "", req)
+	revision, _, _, proceed, err := plugin.Extract(buildConfig, buildConfig.Spec.Triggers[0].GitHubWebHook, req)
 
 	if err == nil || !strings.Contains(err.Error(), "unsupported HTTP method") {
 		t.Errorf("Expected unsupported HTTP method, got %v", err)
-	}
-	if proceed {
-		t.Error("Expected 'proceed' return value to be 'false'")
-	}
-	if revision != nil {
-		t.Error("Expected the 'revision' return value to be nil")
-	}
-}
-
-func TestWrongSecret(t *testing.T) {
-	req := GivenRequest("POST")
-	plugin := New()
-	revision, _, proceed, err := plugin.Extract(buildConfig, "wrongsecret", "", req)
-
-	if err != webhook.ErrSecretMismatch {
-		t.Errorf("Expected %v, got %v", webhook.ErrSecretMismatch, err)
 	}
 	if proceed {
 		t.Error("Expected 'proceed' return value to be 'false'")
@@ -145,10 +128,10 @@ func TestMissingEvent(t *testing.T) {
 	req := GivenRequest("POST")
 	req.Header.Add("Content-Type", "application/json")
 	plugin := New()
-	revision, _, proceed, err := plugin.Extract(buildConfig, "secret100", "", req)
+	revision, _, _, proceed, err := plugin.Extract(buildConfig, buildConfig.Spec.Triggers[0].GitLabWebHook, req)
 
-	if err == nil || !strings.Contains(err.Error(), "missing X-GitHub-Event, X-Gogs-Event or X-Gitlab-Event") {
-		t.Errorf("Expected missing X-GitHub-Event, X-Gogs-Event or X-Gitlab-Event, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "missing X-GitHub-Event or X-Gogs-Event") {
+		t.Errorf("Expected missing X-GitHub-Event or X-Gogs-Event, got %v", err)
 	}
 	if proceed {
 		t.Error("Expected 'proceed' return value to be 'false'")
@@ -163,10 +146,10 @@ func TestWrongGitHubEvent(t *testing.T) {
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("X-GitHub-Event", "wrong")
 	plugin := New()
-	revision, _, proceed, err := plugin.Extract(buildConfig, "secret100", "", req)
+	revision, _, _, proceed, err := plugin.Extract(buildConfig, buildConfig.Spec.Triggers[0].GitLabWebHook, req)
 
-	if err == nil || !strings.Contains(err.Error(), "Unknown X-GitHub-Event, X-Gogs-Event or X-Gitlab-Event") {
-		t.Errorf("Expected missing Unknown X-GitHub-Event, X-Gogs-Event or X-Gitlab-Event, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "Unknown X-GitHub-Event or X-Gogs-Event") {
+		t.Errorf("Expected missing Unknown X-GitHub-Event or X-Gogs-Event, got %v", err)
 	}
 	if proceed {
 		t.Error("Expected 'proceed' return value to be 'false'")
@@ -179,7 +162,7 @@ func TestWrongGitHubEvent(t *testing.T) {
 func TestJsonPingEvent(t *testing.T) {
 	req := postFile("X-GitHub-Event", "ping", "pingevent.json", "http://some.url", http.StatusOK, t)
 	plugin := New()
-	_, _, proceed, err := plugin.Extract(buildConfig, "secret100", "", req)
+	_, _, _, proceed, err := plugin.Extract(buildConfig, buildConfig.Spec.Triggers[0].GitLabWebHook, req)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -192,7 +175,7 @@ func TestJsonPingEvent(t *testing.T) {
 func TestJsonPushEventError(t *testing.T) {
 	req := post("X-GitHub-Event", "push", []byte{}, "http://some.url", http.StatusBadRequest, t)
 	plugin := New()
-	revision, _, proceed, err := plugin.Extract(buildConfig, "secret100", "", req)
+	revision, _, _, proceed, err := plugin.Extract(buildConfig, buildConfig.Spec.Triggers[0].GitLabWebHook, req)
 
 	if err == nil || !strings.Contains(err.Error(), "unexpected end of JSON input") {
 		t.Errorf("Expected unexpected end of JSON input, got %v", err)
@@ -208,7 +191,7 @@ func TestJsonPushEventError(t *testing.T) {
 func TestJsonGitHubPushEvent(t *testing.T) {
 	req := postFile("X-GitHub-Event", "push", "pushevent.json", "http://some.url", http.StatusOK, t)
 	plugin := New()
-	_, _, proceed, err := plugin.Extract(buildConfig, "secret100", "", req)
+	_, _, _, proceed, err := plugin.Extract(buildConfig, buildConfig.Spec.Triggers[0].GitLabWebHook, req)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -221,7 +204,7 @@ func TestJsonGitHubPushEvent(t *testing.T) {
 func TestJsonGitHubPushEventWithCharset(t *testing.T) {
 	req := postFileWithCharset("X-GitHub-Event", "push", "pushevent.json", "http://some.url", "application/json; charset=utf-8", http.StatusOK, t)
 	plugin := New()
-	_, _, proceed, err := plugin.Extract(buildConfig, "secret100", "", req)
+	_, _, _, proceed, err := plugin.Extract(buildConfig, buildConfig.Spec.Triggers[0].GitLabWebHook, req)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -234,7 +217,7 @@ func TestJsonGitHubPushEventWithCharset(t *testing.T) {
 func TestJsonGogsPushEvent(t *testing.T) {
 	req := postFile("X-Gogs-Event", "push", "pushevent.json", "http://some.url", http.StatusOK, t)
 	plugin := New()
-	_, _, proceed, err := plugin.Extract(buildConfig, "secret100", "", req)
+	_, _, _, proceed, err := plugin.Extract(buildConfig, buildConfig.Spec.Triggers[0].GitLabWebHook, req)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -274,40 +257,40 @@ func postWithCharset(eventHeader, eventName string, data []byte, url, charset st
 }
 
 type testContext struct {
-	plugin   WebHook
-	buildCfg *api.BuildConfig
+	plugin   WebHookPlugin
+	buildCfg *buildapi.BuildConfig
 	req      *http.Request
 	path     string
 }
 
 func setup(t *testing.T, filename, eventType, ref string) *testContext {
 	context := testContext{
-		plugin: WebHook{},
-		buildCfg: &api.BuildConfig{
-			Spec: api.BuildConfigSpec{
-				Triggers: []api.BuildTriggerPolicy{
+		plugin: WebHookPlugin{},
+		buildCfg: &buildapi.BuildConfig{
+			Spec: buildapi.BuildConfigSpec{
+				Triggers: []buildapi.BuildTriggerPolicy{
 					{
-						Type: api.GitHubWebHookBuildTriggerType,
-						GitHubWebHook: &api.WebHookTrigger{
+						Type: buildapi.GitHubWebHookBuildTriggerType,
+						GitHubWebHook: &buildapi.WebHookTrigger{
 							Secret: "secret101",
 						},
 					},
 					{
-						Type: api.GitHubWebHookBuildTriggerType,
-						GitHubWebHook: &api.WebHookTrigger{
+						Type: buildapi.GitHubWebHookBuildTriggerType,
+						GitHubWebHook: &buildapi.WebHookTrigger{
 							Secret: "secret100",
 						},
 					},
 					{
-						Type: api.GitHubWebHookBuildTriggerType,
-						GitHubWebHook: &api.WebHookTrigger{
+						Type: buildapi.GitHubWebHookBuildTriggerType,
+						GitHubWebHook: &buildapi.WebHookTrigger{
 							Secret: "secret102",
 						},
 					},
 				},
-				CommonSpec: api.CommonSpec{
-					Source: api.BuildSource{
-						Git: &api.GitBuildSource{
+				CommonSpec: buildapi.CommonSpec{
+					Source: buildapi.BuildSource{
+						Git: &buildapi.GitBuildSource{
 							URI: "git://github.com/my/repo.git",
 							Ref: ref,
 						},
@@ -338,7 +321,7 @@ func TestExtractForAPingEvent(t *testing.T) {
 	context := setup(t, "pingevent.json", "ping", "")
 
 	//execute
-	_, _, proceed, err := context.plugin.Extract(context.buildCfg, "secret101", context.path, context.req)
+	_, _, _, proceed, err := context.plugin.Extract(context.buildCfg, buildConfig.Spec.Triggers[0].GitLabWebHook, context.req)
 
 	//validation
 	if err != nil {
@@ -354,7 +337,7 @@ func TestExtractProvidesValidBuildForAPushEvent(t *testing.T) {
 	context := setup(t, "pushevent.json", "push", "")
 
 	//execute
-	revision, _, proceed, err := context.plugin.Extract(context.buildCfg, "secret101", context.path, context.req)
+	revision, _, _, proceed, err := context.plugin.Extract(context.buildCfg, buildConfig.Spec.Triggers[0].GitLabWebHook, context.req)
 
 	//validation
 	if err != nil {
@@ -376,7 +359,7 @@ func TestExtractProvidesValidBuildForAPushEventOtherThanMaster(t *testing.T) {
 	//setup
 	context := setup(t, "pushevent-not-master-branch.json", "push", "my_other_branch")
 	//execute
-	revision, _, proceed, err := context.plugin.Extract(context.buildCfg, "secret101", context.path, context.req)
+	revision, _, _, proceed, err := context.plugin.Extract(context.buildCfg, buildConfig.Spec.Triggers[0].GitLabWebHook, context.req)
 
 	//validation
 	if err != nil {
@@ -398,7 +381,7 @@ func TestExtractSkipsBuildForUnmatchedBranches(t *testing.T) {
 	context := setup(t, "pushevent.json", "push", "wrongref")
 
 	//execute
-	_, _, proceed, _ := context.plugin.Extract(context.buildCfg, "secret101", context.path, context.req)
+	_, _, _, proceed, _ := context.plugin.Extract(context.buildCfg, buildConfig.Spec.Triggers[0].GitLabWebHook, context.req)
 	if proceed {
 		t.Errorf("Expecting to not continue from this event because the branch is not for this buildConfig '%s'", context.buildCfg.Spec.Source.Git.Ref)
 	}

@@ -4,21 +4,24 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	kapi "k8s.io/kubernetes/pkg/api"
-	kerrors "k8s.io/kubernetes/pkg/api/errors"
-	kclient "k8s.io/kubernetes/pkg/client/unversioned"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/kubectl"
 
-	"github.com/openshift/origin/pkg/client"
+	authclient "github.com/openshift/origin/pkg/authorization/generated/internalclientset"
+	oauthclient "github.com/openshift/origin/pkg/oauth/generated/internalclientset"
+	securitytypedclient "github.com/openshift/origin/pkg/security/generated/internalclientset/typed/security/internalversion"
+	userclient "github.com/openshift/origin/pkg/user/generated/internalclientset"
 )
 
 func NewUserReaper(
-	userClient client.UsersInterface,
-	groupClient client.GroupsInterface,
-	clusterBindingClient client.ClusterRoleBindingsInterface,
-	bindingClient client.RoleBindingsNamespacer,
-	authorizationsClient client.OAuthClientAuthorizationsInterface,
-	sccClient kclient.SecurityContextConstraintsInterface,
+	userClient userclient.Interface,
+	groupClient userclient.Interface,
+	clusterBindingClient authclient.Interface,
+	bindingClient authclient.Interface,
+	authorizationsClient oauthclient.Interface,
+	sccClient securitytypedclient.SecurityContextConstraintsInterface,
 ) kubectl.Reaper {
 	return &UserReaper{
 		userClient:           userClient,
@@ -31,17 +34,17 @@ func NewUserReaper(
 }
 
 type UserReaper struct {
-	userClient           client.UsersInterface
-	groupClient          client.GroupsInterface
-	clusterBindingClient client.ClusterRoleBindingsInterface
-	bindingClient        client.RoleBindingsNamespacer
-	authorizationsClient client.OAuthClientAuthorizationsInterface
-	sccClient            kclient.SecurityContextConstraintsInterface
+	userClient           userclient.Interface
+	groupClient          userclient.Interface
+	clusterBindingClient authclient.Interface
+	bindingClient        authclient.Interface
+	authorizationsClient oauthclient.Interface
+	sccClient            securitytypedclient.SecurityContextConstraintsInterface
 }
 
 // Stop on a reaper is actually used for deletion.  In this case, we'll delete referencing identities, clusterBindings, and bindings,
 // then delete the user
-func (r *UserReaper) Stop(namespace, name string, timeout time.Duration, gracePeriod *kapi.DeleteOptions) error {
+func (r *UserReaper) Stop(namespace, name string, timeout time.Duration, gracePeriod *metav1.DeleteOptions) error {
 	removedSubject := kapi.ObjectReference{Kind: "User", Name: name}
 
 	if err := reapClusterBindings(removedSubject, r.clusterBindingClient); err != nil {
@@ -53,7 +56,7 @@ func (r *UserReaper) Stop(namespace, name string, timeout time.Duration, gracePe
 	}
 
 	// Remove the user from sccs
-	sccs, err := r.sccClient.SecurityContextConstraints().List(kapi.ListOptions{})
+	sccs, err := r.sccClient.List(metav1.ListOptions{})
 	if err != nil {
 		return err
 	}
@@ -67,14 +70,14 @@ func (r *UserReaper) Stop(namespace, name string, timeout time.Duration, gracePe
 		if len(retainedUsers) != len(scc.Users) {
 			updatedSCC := scc
 			updatedSCC.Users = retainedUsers
-			if _, err := r.sccClient.SecurityContextConstraints().Update(&updatedSCC); err != nil && !kerrors.IsNotFound(err) {
+			if _, err := r.sccClient.Update(&updatedSCC); err != nil && !kerrors.IsNotFound(err) {
 				glog.Infof("Cannot update scc/%s: %v", scc.Name, err)
 			}
 		}
 	}
 
 	// Remove the user from groups
-	groups, err := r.groupClient.Groups().List(kapi.ListOptions{})
+	groups, err := r.groupClient.User().Groups().List(metav1.ListOptions{})
 	if err != nil {
 		return err
 	}
@@ -88,7 +91,7 @@ func (r *UserReaper) Stop(namespace, name string, timeout time.Duration, gracePe
 		if len(retainedUsers) != len(group.Users) {
 			updatedGroup := group
 			updatedGroup.Users = retainedUsers
-			if _, err := r.groupClient.Groups().Update(&updatedGroup); err != nil && !kerrors.IsNotFound(err) {
+			if _, err := r.groupClient.User().Groups().Update(&updatedGroup); err != nil && !kerrors.IsNotFound(err) {
 				glog.Infof("Cannot update groups/%s: %v", group.Name, err)
 			}
 		}
@@ -97,13 +100,13 @@ func (r *UserReaper) Stop(namespace, name string, timeout time.Duration, gracePe
 	// Remove the user's OAuthClientAuthorizations
 	// Once https://github.com/kubernetes/kubernetes/pull/28112 is fixed, use a field selector
 	// to filter on the userName, rather than fetching all authorizations and filtering client-side
-	authorizations, err := r.authorizationsClient.OAuthClientAuthorizations().List(kapi.ListOptions{})
+	authorizations, err := r.authorizationsClient.Oauth().OAuthClientAuthorizations().List(metav1.ListOptions{})
 	if err != nil {
 		return err
 	}
 	for _, authorization := range authorizations.Items {
 		if authorization.UserName == name {
-			if err := r.authorizationsClient.OAuthClientAuthorizations().Delete(authorization.Name); err != nil && !kerrors.IsNotFound(err) {
+			if err := r.authorizationsClient.Oauth().OAuthClientAuthorizations().Delete(authorization.Name, &metav1.DeleteOptions{}); err != nil && !kerrors.IsNotFound(err) {
 				return err
 			}
 		}
@@ -114,7 +117,7 @@ func (r *UserReaper) Stop(namespace, name string, timeout time.Duration, gracePe
 	// If the admin wants to remove the identities, that is a distinct operation
 
 	// Remove the user
-	if err := r.userClient.Users().Delete(name); err != nil && !kerrors.IsNotFound(err) {
+	if err := r.userClient.User().Users().Delete(name, &metav1.DeleteOptions{}); err != nil && !kerrors.IsNotFound(err) {
 		return err
 	}
 
