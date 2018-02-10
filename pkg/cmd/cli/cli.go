@@ -3,9 +3,7 @@ package cli
 import (
 	"fmt"
 	"github.com/openshift/origin/pkg/cmd/flagtypes"
-	//"github.com/openshift/origin/pkg/cmd/templates"
 	ktemplates "k8s.io/kubernetes/pkg/kubectl/cmd/templates"
-	//"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 	"github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/cmd"
 	"github.com/spf13/cobra"
@@ -62,6 +60,7 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 	}
 
 	f := clientcmd.New(cmds.PersistentFlags())
+
 	groups, _ := GetCommandGroups(fullName, f, in, out)
 	groups.Add(cmds)
 	changeSharedFlagDefaults(cmds)

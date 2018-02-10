@@ -1,9 +1,8 @@
 package routes
 
 import (
+	routeapi "github.com/openshift/api/route/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	routeapi "github.com/openshift/origin/pkg/route/apis/route"
-
 )
 
 // NewRoute returns a route object,

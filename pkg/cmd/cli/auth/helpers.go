@@ -19,8 +19,10 @@ import (
 	kterm "k8s.io/kubernetes/pkg/kubectl/util/term"
 
 	"github.com/openshift/origin/pkg/cmd/util/term"
-	userapi "github.com/openshift/origin/pkg/user/apis/user"
-	userclient "github.com/openshift/origin/pkg/user/generated/internalclientset"
+	//userapi "github.com/openshift/origin/pkg/user/apis/user"
+	userapi "github.com/openshift/api/user/v1"
+	//userclient "github.com/openshift/origin/pkg/user/generated/internalclientset"
+	userclient "github.com/openshift/client-go/user/clientset/versioned"
 )
 
 // getMatchingClusters examines the kubeconfig for all clusters that point to the same server

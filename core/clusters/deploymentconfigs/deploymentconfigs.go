@@ -1,9 +1,9 @@
 package deploymentconfigs
 
 import (
-	appsapi "github.com/openshift/origin/pkg/apps/apis/apps"
+	appsapi "github.com/openshift/api/apps/v1"
+	kapi "k8s.io/api/core/v1"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters/podtemplates"
-	kapi "k8s.io/kubernetes/pkg/apis/core"
 )
 
 type ODeploymentConfig struct {

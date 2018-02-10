@@ -13,22 +13,14 @@ import (
 	ort "github.com/radanalyticsio/oshinko-cli/core/clusters/routes"
 	osv "github.com/radanalyticsio/oshinko-cli/core/clusters/services"
 
-	kapi "k8s.io/kubernetes/pkg/apis/core"
-	//v1 "k8s.io/api/core/v1"
-	appsapi "github.com/openshift/origin/pkg/apps/apis/apps"
-
+	"k8s.io/client-go/rest"
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	routeclient "github.com/openshift/origin/pkg/route/generated/internalclientset"
-	dclient "github.com/openshift/origin/pkg/apps/generated/internalclientset"
-	//see clientcmd.go to understand clients
-	kclientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
-	internal  "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/typed/core/internalversion"
-
-
-	//corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	//"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
+	appsapi "github.com/openshift/api/apps/v1"
+	routeclient "github.com/openshift/client-go/route/clientset/versioned"
+	dclient "github.com/openshift/client-go/apps/clientset/versioned"
+	"k8s.io/client-go/kubernetes"
 
 )
 
@@ -92,8 +84,8 @@ type SparkCluster struct {
 	Pods         []SparkPod
 }
 
-func getKubeClient(restconfig *rest.Config) *kclientset.Clientset {
-	kubecl, _ := kclientset.NewForConfig(restconfig)
+func getKubeClient(restconfig *rest.Config) *kubernetes.Clientset {
+	kubecl, _ := kubernetes.NewForConfig(restconfig)
 	return kubecl
 	}
 
@@ -135,9 +127,9 @@ func makeSelector(otype string, clustername string) metav1.ListOptions {
 	return metav1.ListOptions{LabelSelector: sel.String()}
 }
 
-func retrieveServiceURL(client *kclientset.Clientset, stype, clustername, ns string) string {
+func retrieveServiceURL(client *kubernetes.Clientset, stype, clustername, ns string) string {
 	selectorlist := makeSelector(stype, clustername)
-	srvs, err := client.Core().Services(ns).List(selectorlist)
+	srvs, err := client.CoreV1().Services(ns).List(selectorlist)
 	if err == nil && len(srvs.Items) != 0 {
 		srv := srvs.Items[0]
 		scheme := "http://"
@@ -310,8 +302,8 @@ func service(name string,
 		Label(typeLabel, otype).PodSelectors(podselectors).Ports(p), p
 }
 
-func checkForConfigMap(cm internal.ConfigMapInterface, name string) error {
-	_, err := cm.Get(name, metav1.GetOptions{})
+func checkForConfigMap(restconfig *rest.Config, namespace string, name string) error {
+	_, err := getKubeClient(restconfig).CoreV1().ConfigMaps(namespace).Get(name, metav1.GetOptions{})
 	if err != nil {
 		if strings.Index(err.Error(), "not found") != -1 {
 			return generalErr(err, fmt.Sprintf(missingConfigMsg, name), ClusterConfigCode)
@@ -334,11 +326,11 @@ func checkForConfigMap(cm internal.ConfigMapInterface, name string) error {
 //	return cnt, pods, err
 //}
 
-func getDriverDeployment(client *kclientset.Clientset, app, namespace string) string {
+func getDriverDeployment(client *kubernetes.Clientset, app, namespace string) string {
 
 	// When we make calls from a driver pod, the most likely value we have is a deployment
 	// so use that first
-	rcc := client.Core().ReplicationControllers(namespace)
+	rcc := client.CoreV1().ReplicationControllers(namespace)
 	rc, err := rcc.Get(app, metav1.GetOptions{})
 	if err == nil && rc != nil {
 		return app
@@ -388,8 +380,8 @@ func CreateCluster(
 	}
 
 	// Copy any named config referenced and update it with any explicit config values
-	cmInterface := getKubeClient(restconfig).Core().ConfigMaps(namespace)
-	finalconfig, err := GetClusterConfig(config, cmInterface)
+
+	finalconfig, err := GetClusterConfig(config, restconfig, namespace)
 	if err != nil {
 		return result, generalErr(err, clusterConfigMsg, ErrorCode(err))
 	}
@@ -409,7 +401,7 @@ func CreateCluster(
 	// as volumes on spark pods and the path stored in the environment
 	// variable UPDATE_SPARK_CONF_DIR
 	if finalconfig.SparkMasterConfig != "" {
-		err := checkForConfigMap(cmInterface, finalconfig.SparkMasterConfig)
+		err := checkForConfigMap(restconfig, namespace, finalconfig.SparkMasterConfig)
 		if err != nil {
 			return result, err
 		}
@@ -417,7 +409,7 @@ func CreateCluster(
 	}
 
 	if finalconfig.SparkWorkerConfig != "" {
-		err := checkForConfigMap(cmInterface, finalconfig.SparkWorkerConfig)
+		err := checkForConfigMap(restconfig, namespace, finalconfig.SparkWorkerConfig)
 		if err != nil {
 			return result, err
 		}
@@ -504,7 +496,7 @@ func CreateCluster(
 	if finalconfig.ExposeWebUI != "" {
 		webui, _ := strconv.ParseBool(finalconfig.ExposeWebUI)
 		if webui {
-			rc := getRouteClient(restconfig).Route().Routes(namespace)
+			rc := getRouteClient(restconfig).RouteV1().Routes(namespace)
 			_, err = rc.Create(webuiroute)
 		}
 	}
@@ -602,8 +594,8 @@ func DeleteCluster(clustername, namespace string, restconfig *rest.Config, app, 
 				// completed case the driver is the only instance)
 				repl, err := rcc.Get(deployment, metav1.GetOptions{})
 				delete = err != nil ||
-					(repl.Spec.Replicas == 0) ||
-					(appstatus == "completed" && (repl.Spec.Replicas == 1))
+					(repl.Spec.Replicas != nil && *repl.Spec.Replicas == 0) ||
+					(appstatus == "completed" && (repl.Spec.Replicas == nil || *repl.Spec.Replicas == 1))
 				if !delete {
 					info = append(info, "driver replica count > 0 (or > 1 for completed app)")
 				}
@@ -848,10 +840,10 @@ func newestRepl(list *kapi.ReplicationControllerList ) *kapi.ReplicationControll
 	return &newestRepl
 }
 
-func getReplController(client *kclientset.Clientset, clustername, namespace, otype string) (*kapi.ReplicationController, error) {
+func getReplController(client *kubernetes.Clientset, clustername, namespace, otype string) (*kapi.ReplicationController, error) {
 
 	selectorlist := makeSelector(otype, clustername)
-	repls, err := client.Core().ReplicationControllers(namespace).List(selectorlist)
+	repls, err := client.CoreV1().ReplicationControllers(namespace).List(selectorlist)
 	if err != nil || len(repls.Items) == 0 {
 		return nil, err
 	}
@@ -972,7 +964,7 @@ func UpdateCluster(name, namespace string, config *ClusterConfig, restconfig *re
 	}
 
 	// Copy any named config referenced and update it with any explicit config values
-	finalconfig, err := GetClusterConfig(config, getKubeClient(restconfig).Core().ConfigMaps(namespace))
+	finalconfig, err := GetClusterConfig(config, restconfig, namespace)
 	if err != nil {
 		return result, generalErr(err, clusterConfigMsg, ErrorCode(err))
 	}

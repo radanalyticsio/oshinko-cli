@@ -2,13 +2,13 @@ package cmd
 
 import (
 	"fmt"
-	//osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	"io"
 	osclientcmd "github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
+	//kclientcmd "k8s.io/client-go/tools/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	"github.com/spf13/cobra"
-	"io"
-	//kapierrors "k8s.io/kubernetes/pkg/api/errors"
+
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"os"
@@ -91,8 +91,8 @@ func CmdGet(f *osclientcmd.Factory, reader io.Reader, out io.Writer, extended bo
 		Out:    out,
 	}
 	options := &CmdOptions{
-		AuthOptions: *authOptions,
-		Verbose:     false,
+		AuthOptions:    *authOptions,
+		Verbose:        false,
 		NoNameRequired: true,
 	}
 
@@ -103,8 +103,8 @@ func CmdGet(f *osclientcmd.Factory, reader io.Reader, out io.Writer, extended bo
 	}
 
 	cmds := &cobra.Command{
-		Use:   cmdString,
-		Short: "Get running spark clusters",
+		Use:    cmdString,
+		Short:  "Get running spark clusters",
 		Hidden: extended,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Complete(f, cmd, args); err != nil {

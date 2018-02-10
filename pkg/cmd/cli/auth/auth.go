@@ -8,31 +8,32 @@ import (
 	"io"
 	"net"
 	"os"
+	"time"
+	"crypto/tls"
+	"net/url"
 
-
-	//kapi "k8s.io/kubernetes/pkg/api"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
-	rest "k8s.io/client-go/rest"
 	kclientcmd "k8s.io/client-go/tools/clientcmd"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
-
-	userapi "github.com/openshift/origin/pkg/user/apis/user"
-	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+	kclientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/apimachinery/pkg/util/sets"
+	rest "k8s.io/client-go/rest"
+	//kapi "k8s.io/api/core/v1"
+
+	kterm "k8s.io/kubernetes/pkg/kubectl/util/term"
+	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+
 
 	cliconfig "github.com/openshift/origin/pkg/oc/cli/config"
 	"github.com/openshift/origin/pkg/client/config"
 	"github.com/openshift/origin/pkg/cmd/flagtypes"
 	osclientcmd "github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
-	"time"
-
-	"crypto/tls"
 	"github.com/openshift/origin/pkg/cmd/util/term"
-	kterm "k8s.io/kubernetes/pkg/kubectl/util/term"
-	projectclient "github.com/openshift/origin/pkg/project/generated/internalclientset"
-	"net/url"
+
+	userapi "github.com/openshift/api/user/v1"
+	projectclient "github.com/openshift/client-go/project/clientset/versioned"
+	//userclient "github.com/openshift/client-go/user/clientset/versioned"
 )
 
 const defaultClusterURL = "https://localhost:8443"
@@ -50,7 +51,7 @@ type AuthOptions struct {
 	Project  string
 
 	// infra
-	StartingKubeConfig *clientcmdapi.Config
+	StartingKubeConfig *kclientcmdapi.Config
 	DefaultNamespace   string
 	Config             *rest.Config
 	Reader             io.Reader
@@ -72,36 +73,21 @@ func (o *AuthOptions) tokenProvided() bool {
 	return len(o.Token) > 0
 }
 
-//func (o AuthOptions) whoAmI() (*userapi.User, error) {
-//	client, err := client.New(o.Config)
-//	if err != nil {
-//		return nil, err
-//	}
-//	return whoAmI(client)
-//}
-
-//func (o AuthOptions) WhoAmI() (*userapi.User, error) {
-//	me, err := o.UserInterface.Get("~", metav1.GetOptions{})
-//	if err == nil {
-//		fmt.Fprintf(o.Out, "%s\n", me.Name)
-//	}
-//
-//	return me, err
-//}
-
 func (o *AuthOptions) serverProvided() bool {
 	return (len(o.Server) > 0)
 }
 
 func (o *AuthOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args []string, commandName string) error {
 	kubeconfig, err := f.OpenShiftClientConfig().RawConfig()
+	//f.ClientConfig()
+	//config1, err := rest.InClusterConfig()
 	o.StartingKubeConfig = &kubeconfig
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return err
 		}
 		// build a valid object to use if we failed on a non-existent file
-		o.StartingKubeConfig = clientcmdapi.NewConfig()
+		o.StartingKubeConfig = kclientcmdapi.NewConfig()
 	}
 
 	unparsedTimeout := kcmdutil.GetFlagString(cmd, "request-timeout")
@@ -155,12 +141,13 @@ func (o *AuthOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args 
 }
 
 
-func (o AuthOptions) whoAmI() (*userapi.User, error) {
-	return whoAmI(o.Config)
-}
-
-//func whoAmI(client *client.Client) (*api.User, error) {
-//	me, err := client.Users().Get("~")
+//func (o AuthOptions) whoAmI() (*userapi.User, error) {
+//	return whoAmI(o.Config)
+//}
+//
+//func whoAmI(clientConfig *rest.Config) (*userapi.User, error) {
+//	client, err := userclient.NewForConfig(clientConfig)
+//	me, err := client.UserV1().Users().Get("~", metav1.GetOptions{})
 //	if err != nil {
 //		return nil, err
 //	}
@@ -173,8 +160,6 @@ func (o *AuthOptions) getClientConfig() (*rest.Config, error) {
 		return o.Config, nil
 	}
 
-	clientConfig := &rest.Config{}
-
 	if len(o.Server) == 0 {
 		// we need to have a server to talk to
 		if kterm.IsTerminal(o.Reader) {
@@ -185,6 +170,8 @@ func (o *AuthOptions) getClientConfig() (*rest.Config, error) {
 			}
 		}
 	}
+
+	clientConfig := &rest.Config{}
 
 	// ensure clientConfig has timeout option
 	if o.RequestTimeout > 0 {
@@ -244,107 +231,6 @@ func (o *AuthOptions) getClientConfig() (*rest.Config, error) {
 	return o.Config, nil
 }
 
-// getHostPort returns the host and port parts of the given URL string. It's
-// expected that the provided URL is already normalized (always has host and port).
-//func getHostPort(hostURL string) (string, string, *url.URL, error) {
-//	parsedURL, err := url.Parse(hostURL)
-//	if err != nil {
-//		return "", "", nil, err
-//	}
-//	host, port, err := net.SplitHostPort(parsedURL.Host)
-//	return host, port, parsedURL, err
-//}
-
-//func promptForInsecureTLS(reader io.Reader, out io.Writer, reason error) bool {
-//	var insecureTLSRequestReason string
-//	if reason != nil {
-//		switch reason.(type) {
-//		case x509.UnknownAuthorityError:
-//			insecureTLSRequestReason = "The server uses a certificate signed by an unknown authority."
-//		case x509.HostnameError:
-//			insecureTLSRequestReason = fmt.Sprintf("The server is using a certificate that does not match its hostname: %s", reason.Error())
-//		case x509.CertificateInvalidError:
-//			insecureTLSRequestReason = fmt.Sprintf("The server is using an invalid certificate: %s", reason.Error())
-//		}
-//	}
-//	var input bool
-//	if kterm.IsTerminal(reader) {
-//		if len(insecureTLSRequestReason) > 0 {
-//			fmt.Fprintln(out, insecureTLSRequestReason)
-//		}
-//		fmt.Fprintln(out, "You can bypass the certificate check, but any data you send to the server could be intercepted by others.")
-//		input = term.PromptForBool(os.Stdin, out, "Use insecure connections? (y/n): ")
-//		fmt.Fprintln(out)
-//	}
-//	return input
-//}
-
-// dialToServer takes the Server URL from the given clientConfig and dials to
-// make sure the server is reachable. Note the config received is not mutated.
-//func dialToServer(clientConfig restclient.Config) error {
-//	// take a RoundTripper based on the config we already have (TLS, proxies, etc)
-//	rt, err := restclient.TransportFor(&clientConfig)
-//	if err != nil {
-//		return err
-//	}
-//
-//	parsedURL, err := url.Parse(clientConfig.Host)
-//	if err != nil {
-//		return err
-//	}
-//
-//	// Do a HEAD request to serverPathToDial to make sure the server is alive.
-//	// We don't care about the response, any err != nil is valid for the sake of reachability.
-//	serverURLToDial := (&url.URL{Scheme: parsedURL.Scheme, Host: parsedURL.Host, Path: "/"}).String()
-//	req, err := http.NewRequest("HEAD", serverURLToDial, nil)
-//	if err != nil {
-//		return err
-//	}
-//
-//	res, err := rt.RoundTrip(req)
-//	if err != nil {
-//		return err
-//	}
-//
-//	defer res.Body.Close()
-//	return nil
-//}
-
-// findExistingClientCA returns *either* the existing client CA file name as a string,
-// *or* data in a []byte for a given host, and true if it exists in the given config
-//func findExistingClientCA(host string, kubeconfig kclientcmdapi.Config) (string, []byte, bool) {
-//	for _, cluster := range kubeconfig.Clusters {
-//		if cluster.Server == host {
-//			if len(cluster.CertificateAuthority) > 0 {
-//				return cluster.CertificateAuthority, nil, true
-//			}
-//			if len(cluster.CertificateAuthorityData) > 0 {
-//				return "", cluster.CertificateAuthorityData, true
-//			}
-//		}
-//	}
-//	return "", nil, false
-//}
-
-//func hasExistingInsecureCluster(clientConfigToTest restclient.Config, kubeconfig kclientcmdapi.Config) bool {
-//	clientConfigToTest.Insecure = true
-//	matchingClusters := getMatchingClusters(clientConfigToTest, kubeconfig)
-//	return len(matchingClusters) > 0
-//}
-
-// getMatchingClusters examines the kubeconfig for all clusters that point to the same server
-//func getMatchingClusters(clientConfig restclient.Config, kubeconfig kclientcmdapi.Config) sets.String {
-//	ret := sets.String{}
-//
-//	for key, cluster := range kubeconfig.Clusters {
-//		if (cluster.Server == clientConfig.Host) && (cluster.InsecureSkipTLSVerify == clientConfig.Insecure) && (cluster.CertificateAuthority == clientConfig.CAFile) && (bytes.Compare(cluster.CertificateAuthorityData, clientConfig.CAData) == 0) {
-//			ret.Insert(key)
-//		}
-//	}
-//
-//	return ret
-//}
-
 func (o *AuthOptions) GatherAuthInfo() (string, error) {
 	var msg string
 	directClientConfig, err := o.getClientConfig()
@@ -389,7 +275,16 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 		//if currentContext != nil {
 		//	currentProject = currentContext.Namespace
 		//}
+
+		//client, err := f.OpenshiftInternalUserClient()
+		//if err != nil {
+		//	return err
+		//}
 		//
+		//o.UserInterface = client.User().Users()
+		//o.Out = out
+		//
+		//_, err = o.WhoAmI()
 		//var err error
 		//me, err := whoAmI(o.Client)
 		//if err != nil {
@@ -398,14 +293,6 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 		//o.Username = me.Name
 		//msg += fmt.Sprintf("Logged into %q as %q using the token provided.\n\n", o.Config.Host, o.Username)
 		//
-		//switch err := confirmProjectAccess(currentProject, o.Client, o.KClient); {
-		//case osclientcmd.IsForbidden(err):
-		//	return msg, fmt.Errorf("you do not have rights to view project %q.", currentProject)
-		//case kapierrors.IsNotFound(err):
-		//	return msg, fmt.Errorf("the project %q specified in your config does not exist.", currentProject)
-		//case err != nil:
-		//	return msg, err
-		//}
 		//
 		//defaultContextName := cliconfig.GetContextNickname(currentContext.Namespace, currentContext.Cluster, currentContext.AuthInfo)
 		//
@@ -417,9 +304,9 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 		//} else {
 		//	msg += fmt.Sprintf("Using project %q from context named %q on server %q.\n", currentProject, config.CurrentContext, o.Config.Host)
 		//}
-		if kerrors.IsUnauthorized(err) {
-			return "", fmt.Errorf("The token provided is invalid or expired.\n\n")
-		}
+		//if kerrors.IsUnauthorized(err) {
+		//	return "", fmt.Errorf("The token provided is invalid or expired.\n\n")
+		//}
 
 		return "", err
 	}
@@ -428,20 +315,10 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 	return msg, nil
 }
 
-//func confirmProjectAccess(currentProject string, oClient *client.Client, kClient kclient.Interface) error {
-//	_, projectErr := oClient.Projects().Get(currentProject)
-//	if !kapierrors.IsNotFound(projectErr) {
-//		return projectErr
-//	}
-//
-//	// at this point we know the error is a not found, but we'll test namespaces just in case we're running on kube
-//	if _, err := kClient.Namespaces().Get(currentProject); err == nil {
-//		return nil
-//	}
-//
-//	// otherwise return the openshift error default
-//	return projectErr
-//}
+
+func (o AuthOptions) whoAmI() (*userapi.User, error) {
+	return whoAmI(o.Config)
+}
 
 func (o *AuthOptions) GatherProjectInfo() (string, error) {
 	var msg string
@@ -462,7 +339,7 @@ func (o *AuthOptions) GatherProjectInfo() (string, error) {
 		return "", err
 	}
 
-	projectsList, err := projectClient.Project().Projects().List(metav1.ListOptions{})
+	projectsList, err := projectClient.ProjectV1().Projects().List(metav1.ListOptions{})
 	// if we're running on kube (or likely kube), just set it to "default"
 	if kerrors.IsNotFound(err) || kerrors.IsForbidden(err) {
 		msg += fmt.Sprintf( "Using \"default\".  You can switch projects with:\n\n '%s project <projectname>'\n", o.CommandName)
@@ -481,7 +358,7 @@ func (o *AuthOptions) GatherProjectInfo() (string, error) {
 
 	if len(o.DefaultNamespace) > 0 && !projects.Has(o.DefaultNamespace) {
 		// Attempt a direct get of our current project in case it hasn't appeared in the list yet
-		if currentProject, err := projectClient.Project().Projects().Get(o.DefaultNamespace, metav1.GetOptions{}); err == nil {
+		if currentProject, err := projectClient.ProjectV1().Projects().Get(o.DefaultNamespace, metav1.GetOptions{}); err == nil {
 			// If we get it successfully, add it to the list
 			projectsItems = append(projectsItems, *currentProject)
 			projects.Insert(currentProject.Name)
@@ -516,7 +393,7 @@ func (o *AuthOptions) GatherProjectInfo() (string, error) {
 			}
 		}
 
-		current, err := projectClient.Project().Projects().Get(namespace, metav1.GetOptions{})
+		current, err := projectClient.ProjectV1().Projects().Get(namespace, metav1.GetOptions{})
 		if err != nil && !kapierrors.IsNotFound(err) && !osclientcmd.IsForbidden(err) {
 			return "", err
 		}
