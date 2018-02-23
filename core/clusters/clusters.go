@@ -203,7 +203,10 @@ func sparkWorker(namespace, image string, replicas int, clustername, sparkconfdi
 	// Port list
 	webport := 8081
 	webp := ocon.ContainerPort(webPortName, webport)
-	ports := []*ocon.OContainerPort{webp}
+	// metrics option
+	promport := 7777
+	metricp := ocon.ContainerPort("sparkmetrics", promport)
+	ports := []*ocon.OContainerPort{webp,metricp}
 
 	// Create a container with the correct ports and start command
 	cont := ocon.Container(dc.Name, image).
