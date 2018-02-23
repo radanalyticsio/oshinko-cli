@@ -52,6 +52,7 @@ const webuiType = "webui"
 const masterPortName = "spark-master"
 const masterPort = 7077
 const webPortName = "spark-webui"
+
 const webPort = 8080
 const metricsPortName = "spark-metrics"
 const metricsPort = 7777
@@ -202,15 +203,9 @@ func sparkWorker(namespace, image string, replicas int, clustername, sparkconfdi
 
 	// Port list
 	webport := 8081
-	webp := ocon.ContainerPort(webPortName, webport)
-	// metrics option
-	promport := 7777
-	metricp := ocon.ContainerPort("sparkmetrics", promport)
-	ports := []*ocon.OContainerPort{webp,metricp}
-
 	// Create a container with the correct ports and start command
 	cont := ocon.Container(dc.Name, image).
-		Ports(ports...).
+		Ports(addPromPortToPod(metrics, webPort)...).
 		SetLivenessProbe(probes.NewHTTPGetProbe(webport)).EnvVars(makeWorkerEnvVars(clustername, sparkconfdir, metrics))
 
 	if sparkworkerconfig != "" {
@@ -221,6 +216,15 @@ func sparkWorker(namespace, image string, replicas int, clustername, sparkconfdi
 	// Finally, assign the container to the pod template spec and
 	// assign the pod template spec to the deployment config
 	return dc.PodTemplateSpec(pt.Containers(cont))
+}
+func addPromPortToPod( metrics string, webport int )  []*ocon.OContainerPort {
+	webp := ocon.ContainerPort(webPortName, webport)
+	if metrics != "false"{
+		promport := 7777
+		metricp := ocon.ContainerPort(metricsPortName, promport)
+		return  []*ocon.OContainerPort{webp, metricp}
+	}
+		return []*ocon.OContainerPort{webp}
 }
 
 func mastername(clustername string) string {
