@@ -154,7 +154,7 @@ func retrieveRouteForService(client *routeclient.Clientset, stype, clustername, 
 
 func checkForDeploymentConfigs(client *dclient.Clientset, clustername, namespace string) (bool, *appsapi.DeploymentConfig, error) {
 	selectorlist := makeSelector(masterType, clustername)
-	dc := client.Apps().DeploymentConfigs(namespace)
+	dc := client.AppsV1().DeploymentConfigs(namespace)
 	dcs, err := dc.List(selectorlist)
 	if err != nil {
 		return false, nil, err
@@ -451,7 +451,7 @@ func CreateCluster(
 	workerdc := sparkWorker(namespace, sparkimage, workercount, clustername, workerconfdir, finalconfig.SparkWorkerConfig, finalconfig.Metrics)
 
 	// Launch all of the objects
-	dcc := getDcClient(restconfig).Apps().DeploymentConfigs(namespace)
+	dcc := getDcClient(restconfig).AppsV1().DeploymentConfigs(namespace)
 	_, err = dcc.Create(&masterdc.DeploymentConfig)
 	if err != nil {
 		return result, generalErr(err, fmt.Sprintf(createDepConfigMsg, masterdc.Name), createCode(err))
@@ -463,7 +463,7 @@ func CreateCluster(
 		return result, generalErr(err, fmt.Sprintf(createDepConfigMsg, workerdc.Name), createCode(err))
 	}
 
-	sc := getKubeClient(restconfig).Core().Services(namespace)
+	sc := getKubeClient(restconfig).CoreV1().Services(namespace)
 	_, err = sc.Create(&mastersv.Service)
 	if err != nil {
 		// Since we've created things, try to clean up
@@ -523,7 +523,7 @@ func CreateCluster(
 	// Now that the creation actually worked, label the dc if the app value was passed.
 	// Note that updates can fail if someone updates the object underneath us, so
 	// we have to try again.  Try for 5 seconds
-	rcc := getKubeClient(restconfig).Core().ReplicationControllers(namespace)
+	rcc := getKubeClient(restconfig).CoreV1().ReplicationControllers(namespace)
 	if driverrc != "" {
 		for i := 0; i < 20; i++ {
 			driver, err := rcc.Get(driverrc, metav1.GetOptions{})
@@ -569,8 +569,8 @@ func DeleteCluster(clustername, namespace string, restconfig *rest.Config, app, 
 	rcnames := []string{}
 
 
-	dcc := getDcClient(restconfig).Apps().DeploymentConfigs(namespace)
-	rcc := getKubeClient(restconfig).Core().ReplicationControllers(namespace)
+	dcc := getDcClient(restconfig).AppsV1().DeploymentConfigs(namespace)
+	rcc := getKubeClient(restconfig).CoreV1().ReplicationControllers(namespace)
 
 	// If we have supplied an appstatus flag, then we only delete the cluster if it is marked as ephemeral
 	// If it's not marked as ephemeral then we skip the delete
@@ -624,7 +624,7 @@ func DeleteCluster(clustername, namespace string, restconfig *rest.Config, app, 
 	}
 
 	// Delete the rcs
-	rcc = getKubeClient(restconfig).Core().ReplicationControllers(namespace)
+	rcc = getKubeClient(restconfig).CoreV1().ReplicationControllers(namespace)
 	repls, err := rcc.List(selectorlist)
 	for i := range repls.Items {
 		rcnames = append(rcnames, repls.Items[i].Name)
@@ -663,7 +663,7 @@ func DeleteCluster(clustername, namespace string, restconfig *rest.Config, app, 
 		}
 	}
 
-	rc := getRouteClient(restconfig).Route().Routes(namespace)
+	rc := getRouteClient(restconfig).RouteV1().Routes(namespace)
 	webUIRouteName := clustername + "-ui-route"
 	err = rc.Delete(webUIRouteName, nil)
 	if err != nil {
@@ -692,7 +692,7 @@ func DeleteCluster(clustername, namespace string, restconfig *rest.Config, app, 
 
 func findClusterBody(clustername, namespace string, restconfig *rest.Config, result *SparkCluster) {
 
-	dc := getDcClient(restconfig).Apps().DeploymentConfigs(namespace)
+	dc := getDcClient(restconfig).AppsV1().DeploymentConfigs(namespace)
 
 	result.Name = clustername
 	result.Namespace = namespace
@@ -762,7 +762,7 @@ func FindSingleCluster(name, namespace string, restconfig *rest.Config) (SparkCl
         var result SparkCluster
 	findClusterBody(name, namespace, restconfig, &result)
 
-	pc := getKubeClient(restconfig).Core().Pods(namespace)
+	pc := getKubeClient(restconfig).CoreV1().Pods(namespace)
 	pods, err := pc.List(makeSelector("", name))
 	if err != nil {
 		return result, generalErr(err, podListMsg, ClientOperationCode)
@@ -782,8 +782,8 @@ func FindSingleCluster(name, namespace string, restconfig *rest.Config) (SparkCl
 // Find all clusters and return their representation
 func FindClusters(namespace string, restconfig *rest.Config, app string) ([]SparkCluster, error) {
 
-	dcc := getDcClient(restconfig).Apps().DeploymentConfigs(namespace)
-	rc := getKubeClient(restconfig).Core().ReplicationControllers(namespace)
+	dcc := getDcClient(restconfig).AppsV1().DeploymentConfigs(namespace)
+	rc := getKubeClient(restconfig).CoreV1().ReplicationControllers(namespace)
 
 	// If app is not null, look for a driver label.
 	// If we find it get the name of the cluster and call FindSingleCluster.
@@ -856,9 +856,9 @@ func getDepConfig(client *dclient.Clientset, clustername, namespace, otype strin
 	var dep *appsapi.DeploymentConfig
 	var err error
 	if otype == masterType {
-		dep, err = client.Apps().DeploymentConfigs(namespace).Get(mastername(clustername), metav1.GetOptions{})
+		dep, err = client.AppsV1().DeploymentConfigs(namespace).Get(mastername(clustername), metav1.GetOptions{})
 	} else {
-		dep, err = client.Apps().DeploymentConfigs(namespace).Get(workername(clustername), metav1.GetOptions{})
+		dep, err = client.AppsV1().DeploymentConfigs(namespace).Get(workername(clustername), metav1.GetOptions{})
 	}
 	return dep, err
 }

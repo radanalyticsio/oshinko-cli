@@ -110,7 +110,9 @@ func CmdGet(f *osclientcmd.Factory, reader io.Reader, out io.Writer, extended bo
 			if err := options.Complete(f, cmd, args); err != nil {
 				kcmdutil.CheckErr(err)
 			}
-
+			/*
+			#	Config should work from this point below
+			 */
 			err := options.RunClusters()
 
 			if kapierrors.IsUnauthorized(err) {

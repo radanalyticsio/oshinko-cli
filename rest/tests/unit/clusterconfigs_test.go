@@ -7,8 +7,10 @@ import (
 	"github.com/radanalyticsio/oshinko-cli/core/clusters"
 	//"github.com/radanalyticsio/oshinko-cli/rest/models"
 	"fmt"
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/watch"
+	api "k8s.io/api/core/v1"
+	//"k8s.io/kubernetes/pkg/api"
+	"k8s.io/apimachinery/pkg/watch"
+	//"k8s.io/kubernetes/pkg/watch"
 )
 
 var tiny clusters.ClusterConfig = clusters.ClusterConfig{

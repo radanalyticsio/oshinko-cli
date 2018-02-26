@@ -46,9 +46,18 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 		return err
 	}
 	o.Name = currentCluster
+
+	/*
+	#
+	#	Fill AuthOptions
+	#
+	 */
 	if err := o.AuthOptions.Complete(f, cmd, args, "oshinko"); err != nil {
 		return err
 	}
+	/*
+	#
+	 */
 	if err := o.GatherInfo(); err != nil {
 		return err
 	}

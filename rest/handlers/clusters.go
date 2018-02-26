@@ -153,18 +153,13 @@ func CreateClusterResponse(params apiclusters.CreateClusterParams) middleware.Re
 	// an image even if no default is set in the environment
 	image := info.GetSparkImage()
 
-	client, err := osa.GetKubeClient()
-	if err != nil {
-		return reterr(fail(err, clientMsg, 500))
-	}
-
-	osclient, err := osa.GetOpenShiftClient()
+	restConfig, err := osa.GetConfig()
 	if err != nil {
 		return reterr(fail(err, clientMsg, 500))
 	}
 
 	config := assignConfig(params.Cluster.Config)
-	sc, err := coreclusters.CreateCluster(clustername, namespace, image, config, osclient, client, "", false)
+	sc, err := coreclusters.CreateCluster(clustername, namespace, image, config, restConfig, "", false)
 	if err != nil {
 		return reterr(fail(err, "", getErrorCode(err)))
 	}
@@ -189,17 +184,12 @@ func DeleteClusterResponse(params apiclusters.DeleteSingleClusterParams) middlew
 		return reterr(fail(err, nameSpaceMsg, 500))
 	}
 
-	osclient, err := osa.GetOpenShiftClient()
+	restConfig, err := osa.GetConfig()
 	if err != nil {
 		return reterr(fail(err, clientMsg, 500))
 	}
 
-	client, err := osa.GetKubeClient()
-	if err != nil {
-		return reterr(fail(err, clientMsg, 500))
-	}
-
-	_, err = coreclusters.DeleteCluster(params.Name, namespace, osclient, client, "", "")
+	_, err = coreclusters.DeleteCluster(params.Name, namespace, restConfig, "", "")
 	if err != nil {
 		return reterr(fail(err, "", getErrorCode(err)))
 	}
@@ -224,16 +214,12 @@ func FindClustersResponse(params apiclusters.FindClustersParams) middleware.Resp
 		return reterr(fail(err, nameSpaceMsg, 500))
 	}
 
-	osclient, err := osa.GetOpenShiftClient()
-	if err != nil {
-		return reterr(fail(err, clientMsg, 500))
-	}
-	client, err := osa.GetKubeClient()
+	restConfig, err := osa.GetConfig()
 	if err != nil {
 		return reterr(fail(err, clientMsg, 500))
 	}
 
-	scs, err := coreclusters.FindClusters(namespace, osclient, client, "")
+	scs, err := coreclusters.FindClusters(namespace, restConfig, "")
 	if err != nil {
 		return reterr(fail(err, "", getErrorCode(err)))
 	}
@@ -276,17 +262,12 @@ func FindSingleClusterResponse(params apiclusters.FindSingleClusterParams) middl
 		return reterr(fail(err, nameSpaceMsg, 500))
 	}
 
-	osclient, err := osa.GetOpenShiftClient()
+	restConfig, err := osa.GetConfig()
 	if err != nil {
 		return reterr(fail(err, clientMsg, 500))
 	}
 
-	client, err := osa.GetKubeClient()
-	if err != nil {
-		return reterr(fail(err, clientMsg, 500))
-	}
-
-	sc, err := coreclusters.FindSingleCluster(clustername, namespace, osclient, client)
+	sc, err := coreclusters.FindSingleCluster(clustername, namespace, restConfig)
 	if err != nil {
 		return reterr(fail(err, "", getErrorCode(err)))
 	}
@@ -320,15 +301,11 @@ func UpdateSingleClusterResponse(params apiclusters.UpdateSingleClusterParams) m
 		return reterr(fail(err, nameSpaceMsg, 500))
 	}
 
-	osclient, err := osa.GetOpenShiftClient()
+	restConfig, err := osa.GetConfig()
 	if err != nil {
 		return reterr(fail(err, clientMsg, 500))
 	}
 
-	client, err := osa.GetKubeClient()
-	if err != nil {
-		return reterr(fail(err, clientMsg, 500))
-	}
 
 	// Simple things first. At this time we do not support cluster name change and
 	// we do not suppport scaling the master count (likely need HA setup for that to make sense)
@@ -337,7 +314,7 @@ func UpdateSingleClusterResponse(params apiclusters.UpdateSingleClusterParams) m
 	}
 
 	config := assignConfig(params.Cluster.Config)
-	sc, err := coreclusters.UpdateCluster(clustername, namespace, config, osclient, client)
+	sc, err := coreclusters.UpdateCluster(clustername, namespace, config, restConfig)
 	if err != nil {
 		return reterr(fail(err, "", getErrorCode(err)))
 	}

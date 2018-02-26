@@ -26,23 +26,6 @@ To see the full list of commands supported, run '%[1]s help'.
 `
 )
 
-func GetCommandGroups(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) (
-	ktemplates.CommandGroups,
-	*cobra.Command) {
-	first := oshinkocmd.NewCmdGet(fullName, f, in, out)
-	return ktemplates.CommandGroups{
-		{
-			Message: "Basic Commands:",
-			Commands: []*cobra.Command{
-				first,
-				oshinkocmd.NewCmdDelete(fullName, f, in, out),
-				oshinkocmd.NewCmdCreate(fullName, f, in, out),
-				oshinkocmd.NewCmdScale(fullName, f, in, out),
-			},
-		},
-	}, first
-}
-
 func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *cobra.Command {
 	// Main command
 	cmds := &cobra.Command{
@@ -61,7 +44,19 @@ func NewCommandCLI(name, fullName string, in io.Reader, out, errout io.Writer) *
 
 	f := clientcmd.New(cmds.PersistentFlags())
 
-	groups, _ := GetCommandGroups(fullName, f, in, out)
+	first := oshinkocmd.NewCmdGet(fullName, f, in, out)
+	groups:= ktemplates.CommandGroups{
+		{
+			Message: "Basic Commands:",
+			Commands: []*cobra.Command{
+				first,
+				oshinkocmd.NewCmdWhoAmI("whoami", fullName, f, out),
+				oshinkocmd.NewCmdDelete(fullName, f, in, out),
+				oshinkocmd.NewCmdCreate(fullName, f, in, out),
+				oshinkocmd.NewCmdScale(fullName, f, in, out),
+			},
+		},
+	}
 	groups.Add(cmds)
 	changeSharedFlagDefaults(cmds)
 

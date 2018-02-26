@@ -2,7 +2,7 @@ package unittest
 
 import (
 	"gopkg.in/check.v1"
-	kapi "k8s.io/kubernetes/pkg/api"
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/kubernetes/pkg/api/resource"
 
 	"github.com/radanalyticsio/oshinko-cli/core/clusters/containers"

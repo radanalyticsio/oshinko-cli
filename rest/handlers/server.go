@@ -2,7 +2,8 @@ package handlers
 
 import (
 	middleware "github.com/go-openapi/runtime/middleware"
-
+	routeclient "github.com/openshift/client-go/route/clientset/versioned"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	osa "github.com/radanalyticsio/oshinko-cli/rest/helpers/authentication"
 	"github.com/radanalyticsio/oshinko-cli/rest/helpers/info"
 	"github.com/radanalyticsio/oshinko-cli/rest/restapi/operations/server"
@@ -28,12 +29,14 @@ func ServerResponse(params server.GetServerInfoParams) middleware.Responder {
 // Will return empty string if no route can be found
 func GetWebServiceURL() string {
 	weburl := ""
-	osclient, err := osa.GetOpenShiftClient()
+	restConfig, err := osa.GetConfig()
 	if err != nil {
 		return ""
 	}
 	namespace, _ := info.GetNamespace()
-	route, err := osclient.Routes(namespace).Get(info.GetWebServiceName())
+	routecl, _ := routeclient.NewForConfig(restConfig)
+	route, err := routecl.RouteV1().Routes(namespace).Get(info.GetWebServiceName(), metav1.GetOptions{})
+
 	if err != nil || len(route.Status.Ingress) == 0 {
 		return ""
 	}
