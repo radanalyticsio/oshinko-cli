@@ -18,7 +18,7 @@ import (
 	"github.com/radanalyticsio/oshinko-cli/rest/restapi/operations/clusters"
 	"github.com/radanalyticsio/oshinko-cli/rest/restapi/operations/server"
 	"github.com/radanalyticsio/oshinko-cli/rest/version"
-	//"k8s.io/kubernetes/pkg/util/logs"
+	"k8s.io/apiserver/pkg/util/logs"
 )
 
 // This file is safe to edit. Once it exists it will not be overwritten
@@ -44,7 +44,7 @@ func configureAPI(api *operations.OshinkoRestAPI) http.Handler {
 
 	api.ServerShutdown = func() {}
 
-	//logs.InitLogs()
+	logs.InitLogs()
 
 	logging.Debug("Setting log level ", flags.LogLevel())
 	flag.Set("v", flags.LogLevel())

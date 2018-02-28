@@ -5,11 +5,19 @@ import (
 
 	_ "github.com/openshift/origin/pkg/api/install"
 	restclient "k8s.io/client-go/rest"
+	kclientcmd "k8s.io/client-go/tools/clientcmd"
 	certutil "k8s.io/client-go/util/cert"
 	"github.com/radanalyticsio/oshinko-cli/rest/helpers/info"
 )
 
 func GetConfig() (*restclient.Config, error) {
+
+	credentials, err := kclientcmd.NewDefaultClientConfigLoadingRules().Load()
+	clusterConfig, err := kclientcmd.NewDefaultClientConfig(*credentials, &kclientcmd.ConfigOverrides{}).ClientConfig()
+	if err == nil  {
+		return clusterConfig, nil
+	}
+
 	//fetch proxy IP + port
 	host, err := info.GetKubeProxyAddress()
 	if err != nil {

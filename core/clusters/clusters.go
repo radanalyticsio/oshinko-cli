@@ -141,7 +141,6 @@ func retrieveServiceURL(client *kubernetes.Clientset, stype, clustername, ns str
 	return "<missing>"
 }
 
-// TODO tmckay we need to pass in a config object here so we can get new openshift clients
 func retrieveRouteForService(client *routeclient.Clientset, stype, clustername, namespace string, ) string {
 	selectorlist := makeSelector(stype, clustername)
 	routes, err := client.Route().Routes(namespace).List(selectorlist)
@@ -312,19 +311,6 @@ func checkForConfigMap(restconfig *rest.Config, namespace string, name string) e
 	}
 	return nil
 }
-
-//func countWorkers(client kubernetes.Clientset, clustername, namespace string) (int, *v1.PodList, error) {
-//	// If we are  unable to retrieve a list of worker pods, return -1 for count
-//	// This is an error case, differnt from a list of length 0. Let the caller
-//	// decide whether to report the error or the -1 count
-//	cnt := -1
-//	selectorlist := makeSelector(workerType, clustername)
-//	pods, err := client.CoreV1().Pods(namespace).List(selectorlist)
-//	if pods != nil {
-//		cnt = len(pods.Items)
-//	}
-//	return cnt, pods, err
-//}
 
 func getDriverDeployment(client *kubernetes.Clientset, app, namespace string) string {
 
