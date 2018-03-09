@@ -203,9 +203,15 @@ func sparkWorker(namespace, image string, replicas int, clustername, sparkconfdi
 
 	// Port list
 	webport := 8081
+	webp := ocon.ContainerPort(webPortName, webport)
+	ports := []*ocon.OContainerPort{webp}
+	if metrics != "false" {
+		mp := ocon.ContainerPort(metricsPortName, metricsPort)
+		ports = append(ports, mp)
+	}
 	// Create a container with the correct ports and start command
 	cont := ocon.Container(dc.Name, image).
-		Ports(addPromPortToPod(metrics, webPort)...).
+		Ports(ports...).
 		SetLivenessProbe(probes.NewHTTPGetProbe(webport)).EnvVars(makeWorkerEnvVars(clustername, sparkconfdir, metrics))
 
 	if sparkworkerconfig != "" {
