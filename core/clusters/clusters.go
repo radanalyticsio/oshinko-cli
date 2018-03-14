@@ -223,15 +223,6 @@ func sparkWorker(namespace, image string, replicas int, clustername, sparkconfdi
 	// assign the pod template spec to the deployment config
 	return dc.PodTemplateSpec(pt.Containers(cont))
 }
-func addPromPortToPod( metrics string, webport int )  []*ocon.OContainerPort {
-	webp := ocon.ContainerPort(webPortName, webport)
-	if metrics != "false"{
-		promport := 7777
-		metricp := ocon.ContainerPort(metricsPortName, promport)
-		return  []*ocon.OContainerPort{webp, metricp}
-	}
-		return []*ocon.OContainerPort{webp}
-}
 
 func mastername(clustername string) string {
 	return clustername + "-m"
