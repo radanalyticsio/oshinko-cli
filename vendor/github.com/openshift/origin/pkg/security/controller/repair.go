@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"time"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	client "k8s.io/kubernetes/pkg/client/unversioned"
-	"k8s.io/kubernetes/pkg/registry/rangeallocation"
-	utilruntime "k8s.io/kubernetes/pkg/util/runtime"
-	utilwait "k8s.io/kubernetes/pkg/util/wait"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
+	kcoreclient "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/kubernetes/pkg/registry/core/rangeallocation"
 
 	"github.com/openshift/origin/pkg/security"
 	"github.com/openshift/origin/pkg/security/uid"
@@ -24,14 +24,14 @@ import (
 //
 type Repair struct {
 	interval time.Duration
-	client   client.NamespaceInterface
+	client   kcoreclient.NamespaceInterface
 	alloc    rangeallocation.RangeRegistry
 	uidRange *uid.Range
 }
 
 // NewRepair creates a controller that periodically ensures that all UIDs labels that are allocated in the cluster
 // are claimed.
-func NewRepair(interval time.Duration, client client.NamespaceInterface, uidRange *uid.Range, alloc rangeallocation.RangeRegistry) *Repair {
+func NewRepair(interval time.Duration, client kcoreclient.NamespaceInterface, uidRange *uid.Range, alloc rangeallocation.RangeRegistry) *Repair {
 	return &Repair{
 		interval: interval,
 		client:   client,
@@ -63,7 +63,7 @@ func (c *Repair) RunOnce() error {
 		return fmt.Errorf("unable to refresh the security allocation UID blocks: %v", err)
 	}
 
-	list, err := c.client.List(kapi.ListOptions{})
+	list, err := c.client.List(metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("unable to refresh the security allocation UID blocks: %v", err)
 	}

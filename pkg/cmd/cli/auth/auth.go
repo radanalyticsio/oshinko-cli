@@ -1,37 +1,30 @@
 package auth
 
 import (
-	//"errors"
-	"crypto/x509"
 	"fmt"
 	"github.com/spf13/cobra"
 	"io"
-	"net"
-	"net/http"
-	"net/url"
 	"os"
+	"time"
 	"strings"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	kapierrors "k8s.io/kubernetes/pkg/api/errors"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/client/restclient"
-	kclient "k8s.io/kubernetes/pkg/client/unversioned"
-	kclientcmd "k8s.io/kubernetes/pkg/client/unversioned/clientcmd"
-	kclientcmdapi "k8s.io/kubernetes/pkg/client/unversioned/clientcmd/api"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
+	kclientcmd "k8s.io/client-go/tools/clientcmd"
+
+	kclientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	"k8s.io/apimachinery/pkg/util/sets"
+	rest "k8s.io/client-go/rest"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/kubernetes/pkg/util/sets"
-
-	"github.com/openshift/origin/pkg/client"
-	cliconfig "github.com/openshift/origin/pkg/cmd/cli/config"
+	cliconfig "github.com/openshift/origin/pkg/oc/cli/config"
+	clientcfg "github.com/openshift/origin/pkg/client/config"
 	"github.com/openshift/origin/pkg/cmd/flagtypes"
-	osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
-
-	"bytes"
-	"crypto/tls"
-	"github.com/openshift/origin/pkg/cmd/util/term"
-	"github.com/openshift/origin/pkg/user/api"
-	kterm "k8s.io/kubernetes/pkg/util/term"
+	osclientcmd "github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
+	projectclient "github.com/openshift/client-go/project/clientset/versioned"
+	//certutil "k8s.io/client-go/util/cert"
+	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
+	projectinternalversion "github.com/openshift/origin/pkg/project/generated/internalclientset/typed/project/internalversion"
 )
 
 const defaultClusterURL = "https://localhost:8443"
@@ -41,7 +34,7 @@ type AuthOptions struct {
 	Server      string
 	CAFile      string
 	InsecureTLS bool
-	APIVersion  unversioned.GroupVersion
+	//APIVersion  unversioned.GroupVersion
 
 	// flags and printing helpers
 	Username string
@@ -51,38 +44,32 @@ type AuthOptions struct {
 	// infra
 	StartingKubeConfig *kclientcmdapi.Config
 	DefaultNamespace   string
-	Config             *restclient.Config
+	Config             *rest.Config
+
+	KubeClient			internalclientset.Interface
+	ProjectClient 		projectinternalversion.ProjectInterface
 	Reader             io.Reader
 	Out                io.Writer
-	Client             *client.Client
-	KClient            kclient.Interface
 
 	// cert data to be used when authenticating
 	CertFile    string
 	KeyFile     string
 	Token       string
 	PathOptions *kclientcmd.PathOptions
-	ClientFn    func() (*client.Client, kclient.Interface, error)
+	CommandName    string
+	RequestTimeout time.Duration
 }
 
 func (o *AuthOptions) tokenProvided() bool {
 	return len(o.Token) > 0
 }
 
-func (o AuthOptions) whoAmI() (*api.User, error) {
-	client, err := client.New(o.Config)
-	if err != nil {
-		return nil, err
-	}
-	return whoAmI(client)
-}
-
 func (o *AuthOptions) serverProvided() bool {
 	return (len(o.Server) > 0)
 }
 
-func (o *AuthOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args []string) error {
-	kubeconfig, err := f.OpenShiftClientConfig.RawConfig()
+func (o *AuthOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args []string, commandName string) error {
+	kubeconfig, err := f.OpenShiftClientConfig().RawConfig()
 	o.StartingKubeConfig = &kubeconfig
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -110,243 +97,99 @@ func (o *AuthOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args 
 
 	o.CertFile = kcmdutil.GetFlagString(cmd, "client-certificate")
 	o.KeyFile = kcmdutil.GetFlagString(cmd, "client-key")
-	apiVersionString := kcmdutil.GetFlagString(cmd, "api-version")
-	o.APIVersion = unversioned.GroupVersion{}
 
 	namespaceFlag := kcmdutil.GetFlagString(cmd, "namespace")
 	if namespaceFlag != "" {
 		o.Project = namespaceFlag
 	}
 
-	// if the API version isn't explicitly passed, use the API version from the default context (same rules as the server above)
-	if len(apiVersionString) == 0 {
-		if defaultContext, defaultContextExists := o.StartingKubeConfig.Contexts[o.StartingKubeConfig.CurrentContext]; defaultContextExists {
-			if cluster, exists := o.StartingKubeConfig.Clusters[defaultContext.Cluster]; exists {
-				apiVersionString = cluster.APIVersion
-			}
-		}
-	}
-
-	o.APIVersion, err = unversioned.ParseGroupVersion(apiVersionString)
-	if err != nil {
-		return err
-	}
-
 	o.CAFile = kcmdutil.GetFlagString(cmd, "certificate-authority")
 	o.InsecureTLS = kcmdutil.GetFlagBool(cmd, "insecure-skip-tls-verify")
 	o.Token = kcmdutil.GetFlagString(cmd, "token")
-	o.DefaultNamespace, _, _ = f.OpenShiftClientConfig.Namespace()
+	o.DefaultNamespace, _, _ = f.OpenShiftClientConfig().Namespace()
 	o.PathOptions = cliconfig.NewPathOptions(cmd)
 
-	// for looking at kubeconfig
-	o.Config, err = f.OpenShiftClientConfig.ClientConfig()
+	//Look for kubeconfig
+	o.Config, err = o.getClientConfig()
 	if err != nil {
 		var errstrings []string
-		if strings.Contains(err.Error(), "Missing or incomplete configuration info") {
-			errstrings = append(errstrings, "oshinko-cli cannot find KUBECONFIG file.Please login or provide --token value.")
+		if strings.Contains(err.Error(), "could not load client configuration") {
+			//we have no kubeconfig
+			//do we have token ?
+			if !o.tokenProvided(){
+				errstrings = append(errstrings, "oshinko-cli cannot find KUBECONFIG file.Please login or provide --token value.")
+			} else {
+				//get from token
+				o.Config, err = o.createClientConfig()
+				if err != nil {
+					errstrings = append(errstrings, err.Error())
+				}
+			}
 		} else {
 			errstrings = append(errstrings, err.Error())
 		}
-		return fmt.Errorf(strings.Join(errstrings, "\n"))
+		if len(errstrings)!=0 {
+			return fmt.Errorf(strings.Join(errstrings, "\n"))
+		}
 	}
-	o.ClientFn = func() (*client.Client, kclient.Interface, error) {
-		return f.Clients()
+	o.KubeClient, err = f.ClientSet()
+	if err != nil {
+		return err
 	}
+	projectClient, err := f.OpenshiftInternalProjectClient()
+	if err != nil {
+		return err
+	}
+	o.ProjectClient = projectClient.Project()
+
 
 	return nil
 }
 
-func whoAmI(client *client.Client) (*api.User, error) {
-	me, err := client.Users().Get("~")
+func (o *AuthOptions) createClientConfig() (*rest.Config, error) {
+	tlsClientConfig := rest.TLSClientConfig{}
+	if len(o.CertFile) == 0 {
+		return nil, fmt.Errorf("Certificate File needed")
+	}
+	tlsClientConfig.CertFile = o.CertFile
+	if len(o.KeyFile) == 0 {
+		return nil, fmt.Errorf("Key File needed")
+	}
+	tlsClientConfig.KeyFile = o.KeyFile
+	if len(o.CAFile) == 0 {
+		return nil, fmt.Errorf("CA File needed")
+	}
+	tlsClientConfig.CAFile = o.CAFile
+	return &rest.Config{
+		Host:            o.Server,
+		BearerToken:     string(o.Token),
+		TLSClientConfig: tlsClientConfig,
+	}, nil
+}
+
+func (o *AuthOptions) getClientConfig() (*rest.Config, error) {
+	clusterConfig, err := rest.InClusterConfig()
+	if err == nil {
+		return clusterConfig, nil
+	}
+
+	credentials, err := kclientcmd.NewDefaultClientConfigLoadingRules().Load()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not load credentials from config>: %v", err)
 	}
 
-	return me, nil
-}
-
-func (o *AuthOptions) getClientConfig() (*restclient.Config, error) {
-	if o.Config != nil {
-		return o.Config, nil
-	}
-
-	clientConfig := &restclient.Config{}
-
-	if len(o.Server) == 0 {
-		// we need to have a server to talk to
-		if kterm.IsTerminal(o.Reader) {
-			for !o.serverProvided() {
-				defaultServer := defaultClusterURL
-				promptMsg := fmt.Sprintf("Server [%s]: ", defaultServer)
-				o.Server = term.PromptForStringWithDefault(o.Reader, o.Out, defaultServer, promptMsg)
-			}
-		}
-	}
-
-	// normalize the provided server to a format expected by config
-	serverNormalized, err := cliconfig.NormalizeServerURL(o.Server)
+	clusterConfig, err = kclientcmd.NewDefaultClientConfig(*credentials, &kclientcmd.ConfigOverrides{}).ClientConfig()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not load client configuration: %v", err)
 	}
-	o.Server = serverNormalized
-	clientConfig.Host = o.Server
-
-	// use specified CA or find existing CA
-	if len(o.CAFile) > 0 {
-		clientConfig.CAFile = o.CAFile
-		clientConfig.CAData = nil
-	} else if caFile, caData, ok := findExistingClientCA(clientConfig.Host, *o.StartingKubeConfig); ok {
-		clientConfig.CAFile = caFile
-		clientConfig.CAData = caData
-	}
-	// try to TCP connect to the server to make sure it's reachable, and discover
-	// about the need of certificates or insecure TLS
-	if err := dialToServer(*clientConfig); err != nil {
-		switch err.(type) {
-		// certificate authority unknown, check or prompt if we want an insecure
-		// connection or if we already have a cluster stanza that tells us to
-		// connect to this particular server insecurely
-		case x509.UnknownAuthorityError, x509.HostnameError, x509.CertificateInvalidError:
-			if o.InsecureTLS ||
-				hasExistingInsecureCluster(*clientConfig, *o.StartingKubeConfig) ||
-				promptForInsecureTLS(o.Reader, o.Out, err) {
-				clientConfig.Insecure = true
-				clientConfig.CAFile = ""
-				clientConfig.CAData = nil
-			} else {
-				return nil, osclientcmd.GetPrettyErrorForServer(err, o.Server)
-			}
-		// TLS record header errors, like oversized record which usually means
-		// the server only supports "http"
-		case tls.RecordHeaderError:
-			return nil, osclientcmd.GetPrettyErrorForServer(err, o.Server)
-		default:
-			// suggest the port used in the cluster URL by default, in case we're not already using it
-			host, port, parsed, err1 := getHostPort(o.Server)
-			_, defaultClusterPort, _, err2 := getHostPort(defaultClusterURL)
-			if err1 == nil && err2 == nil && port != defaultClusterPort {
-				parsed.Host = net.JoinHostPort(host, defaultClusterPort)
-				return nil, fmt.Errorf("%s\nYou may want to try using the default cluster port: %s", err.Error(), parsed.String())
-			}
-			return nil, err
-		}
-	}
-
-	// check for matching api version
-	if !o.APIVersion.Empty() {
-		clientConfig.GroupVersion = &o.APIVersion
-	}
-	o.Config = clientConfig
-	return o.Config, nil
+	return clusterConfig, nil
 }
 
-// getHostPort returns the host and port parts of the given URL string. It's
-// expected that the provided URL is already normalized (always has host and port).
-func getHostPort(hostURL string) (string, string, *url.URL, error) {
-	parsedURL, err := url.Parse(hostURL)
-	if err != nil {
-		return "", "", nil, err
-	}
-	host, port, err := net.SplitHostPort(parsedURL.Host)
-	return host, port, parsedURL, err
-}
-
-func promptForInsecureTLS(reader io.Reader, out io.Writer, reason error) bool {
-	var insecureTLSRequestReason string
-	if reason != nil {
-		switch reason.(type) {
-		case x509.UnknownAuthorityError:
-			insecureTLSRequestReason = "The server uses a certificate signed by an unknown authority."
-		case x509.HostnameError:
-			insecureTLSRequestReason = fmt.Sprintf("The server is using a certificate that does not match its hostname: %s", reason.Error())
-		case x509.CertificateInvalidError:
-			insecureTLSRequestReason = fmt.Sprintf("The server is using an invalid certificate: %s", reason.Error())
-		}
-	}
-	var input bool
-	if kterm.IsTerminal(reader) {
-		if len(insecureTLSRequestReason) > 0 {
-			fmt.Fprintln(out, insecureTLSRequestReason)
-		}
-		fmt.Fprintln(out, "You can bypass the certificate check, but any data you send to the server could be intercepted by others.")
-		input = term.PromptForBool(os.Stdin, out, "Use insecure connections? (y/n): ")
-		fmt.Fprintln(out)
-	}
-	return input
-}
-
-// dialToServer takes the Server URL from the given clientConfig and dials to
-// make sure the server is reachable. Note the config received is not mutated.
-func dialToServer(clientConfig restclient.Config) error {
-	// take a RoundTripper based on the config we already have (TLS, proxies, etc)
-	rt, err := restclient.TransportFor(&clientConfig)
-	if err != nil {
-		return err
-	}
-
-	parsedURL, err := url.Parse(clientConfig.Host)
-	if err != nil {
-		return err
-	}
-
-	// Do a HEAD request to serverPathToDial to make sure the server is alive.
-	// We don't care about the response, any err != nil is valid for the sake of reachability.
-	serverURLToDial := (&url.URL{Scheme: parsedURL.Scheme, Host: parsedURL.Host, Path: "/"}).String()
-	req, err := http.NewRequest("HEAD", serverURLToDial, nil)
-	if err != nil {
-		return err
-	}
-
-	res, err := rt.RoundTrip(req)
-	if err != nil {
-		return err
-	}
-
-	defer res.Body.Close()
-	return nil
-}
-
-// findExistingClientCA returns *either* the existing client CA file name as a string,
-// *or* data in a []byte for a given host, and true if it exists in the given config
-func findExistingClientCA(host string, kubeconfig kclientcmdapi.Config) (string, []byte, bool) {
-	for _, cluster := range kubeconfig.Clusters {
-		if cluster.Server == host {
-			if len(cluster.CertificateAuthority) > 0 {
-				return cluster.CertificateAuthority, nil, true
-			}
-			if len(cluster.CertificateAuthorityData) > 0 {
-				return "", cluster.CertificateAuthorityData, true
-			}
-		}
-	}
-	return "", nil, false
-}
-
-func hasExistingInsecureCluster(clientConfigToTest restclient.Config, kubeconfig kclientcmdapi.Config) bool {
-	clientConfigToTest.Insecure = true
-	matchingClusters := getMatchingClusters(clientConfigToTest, kubeconfig)
-	return len(matchingClusters) > 0
-}
-
-// getMatchingClusters examines the kubeconfig for all clusters that point to the same server
-func getMatchingClusters(clientConfig restclient.Config, kubeconfig kclientcmdapi.Config) sets.String {
-	ret := sets.String{}
-
-	for key, cluster := range kubeconfig.Clusters {
-		if (cluster.Server == clientConfig.Host) && (cluster.InsecureSkipTLSVerify == clientConfig.Insecure) && (cluster.CertificateAuthority == clientConfig.CAFile) && (bytes.Compare(cluster.CertificateAuthorityData, clientConfig.CAData) == 0) {
-			ret.Insert(key)
-		}
-	}
-
-	return ret
-}
 
 func (o *AuthOptions) GatherAuthInfo() (string, error) {
 	var msg string
-	directClientConfig, err := o.getClientConfig()
-	if err != nil {
-		return "", err
-	}
+	directClientConfig := o.Config
+
 
 	// make a copy and use it to avoid mutating the original
 	t := *directClientConfig
@@ -355,34 +198,15 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 	// if a token were explicitly provided, try to use it
 	if o.tokenProvided() {
 		clientConfig.BearerToken = o.Token
-		if osClient, err := client.New(clientConfig); err == nil {
-			me, err := whoAmI(osClient)
+			me, err := whoAmI(clientConfig)
 			if err == nil {
 				o.Username = me.Name
-				o.Config = clientConfig
-
+				//fmt.Println(me.Name)
 				clientConfig.CertData = []byte{}
 				clientConfig.KeyData = []byte{}
 				clientConfig.CertFile = o.CertFile
 				clientConfig.KeyFile = o.KeyFile
 
-				osClient, err := client.New(clientConfig)
-				if err != nil {
-					return "", err
-				}
-				o.Client = osClient
-
-				kubeclient, err := kclient.New(o.Config)
-				if err != nil {
-					return "", err
-				}
-				o.KClient = kubeclient
-
-				me, err := whoAmI(osClient)
-				if err != nil {
-					return "", err
-				}
-				o.Username = me.Name
 				o.Config = clientConfig
 
 				msg += fmt.Sprintf("Logged into %q as %q using the token provided.\n\n", o.Config.Host, o.Username)
@@ -394,8 +218,8 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 			}
 
 			return "", fmt.Errorf("The token provided is invalid or expired.\n\n")
-		}
 	} else {
+		//Only use config for contexts
 		config := o.StartingKubeConfig
 		currentContext := config.Contexts[config.CurrentContext]
 		var currentProject string
@@ -404,18 +228,16 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 		}
 
 		var err error
-		o.Client, o.KClient, err = o.ClientFn()
-		if err != nil {
-			return msg, err
-		}
-		me, err := whoAmI(o.Client)
+
+
+		me, err := whoAmI(o.Config)
 		if err != nil {
 			return "", err
 		}
 		o.Username = me.Name
 		msg += fmt.Sprintf("Logged into %q as %q using the token provided.\n\n", o.Config.Host, o.Username)
 
-		switch err := confirmProjectAccess(currentProject, o.Client, o.KClient); {
+		switch err := confirmProjectAccess(currentProject, o.ProjectClient, o.KubeClient); {
 		case osclientcmd.IsForbidden(err):
 			return msg, fmt.Errorf("you do not have rights to view project %q.", currentProject)
 		case kapierrors.IsNotFound(err):
@@ -424,7 +246,7 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 			return msg, err
 		}
 
-		defaultContextName := cliconfig.GetContextNickname(currentContext.Namespace, currentContext.Cluster, currentContext.AuthInfo)
+		defaultContextName := clientcfg.GetContextNickname(currentContext.Namespace, currentContext.Cluster, currentContext.AuthInfo)
 
 		// if they specified a project name and got a generated context, then only show the information they care about.  They won't recognize
 		// a context name they didn't choose
@@ -440,27 +262,19 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 	return msg, nil
 }
 
-func confirmProjectAccess(currentProject string, oClient *client.Client, kClient kclient.Interface) error {
-	_, projectErr := oClient.Projects().Get(currentProject)
-	if !kapierrors.IsNotFound(projectErr) {
-		return projectErr
-	}
 
-	// at this point we know the error is a not found, but we'll test namespaces just in case we're running on kube
-	if _, err := kClient.Namespaces().Get(currentProject); err == nil {
-		return nil
-	}
-
-	// otherwise return the openshift error default
-	return projectErr
-}
-
+/*
+#	Who Am I?
+#	Which Project Am I in ?
+#	Do I have permissions ?
+#	This method needs a valid ClientConfig
+ */
 func (o *AuthOptions) GatherProjectInfo() (string, error) {
 	var msg string
 	if o.Project != "" {
 		return fmt.Sprintf("Using project %q.\n", o.Project), nil
 	}
-	me, err := o.whoAmI()
+	me, err := whoAmI(o.Config)
 	if err != nil {
 		return "", err
 	}
@@ -469,12 +283,38 @@ func (o *AuthOptions) GatherProjectInfo() (string, error) {
 		return "", fmt.Errorf("current user, %v, does not match expected user %v", me.Name, o.Username)
 	}
 
-	projects, err := o.Client.Projects().List(kapi.ListOptions{})
+	projectClient, err := projectclient.NewForConfig(o.Config)
+
 	if err != nil {
 		return "", err
 	}
 
-	projectsItems := projects.Items
+	projectsList, err := projectClient.ProjectV1().Projects().List(metav1.ListOptions{})
+	// if we're running on kube (or likely kube), just set it to "default"
+	if kerrors.IsNotFound(err) || kerrors.IsForbidden(err) {
+		msg += fmt.Sprintf( "Using \"default\".  You can switch projects with:\n\n '%s project <projectname>'\n", o.CommandName)
+		o.Project = "default"
+		return msg, nil
+	}
+	if err != nil {
+		return "", err
+	}
+
+	projectsItems := projectsList.Items
+	projects := sets.String{}
+	for _, project := range projectsItems {
+		//fmt.Println(project.Name)
+		projects.Insert(project.Name)
+	}
+
+	if len(o.DefaultNamespace) > 0 && !projects.Has(o.DefaultNamespace) {
+		// Attempt a direct get of our current project in case it hasn't appeared in the list yet
+		if currentProject, err := projectClient.ProjectV1().Projects().Get(o.DefaultNamespace, metav1.GetOptions{}); err == nil {
+			// If we get it successfully, add it to the list
+			projectsItems = append(projectsItems, *currentProject)
+			projects.Insert(currentProject.Name)
+		}
+	}
 
 	switch len(projectsItems) {
 	case 0:
@@ -484,6 +324,7 @@ func (o *AuthOptions) GatherProjectInfo() (string, error) {
 
 `)
 		o.Project = ""
+		return "", fmt.Errorf("There are no projects for this user.Please create a Project")
 
 	case 1:
 		o.Project = projectsItems[0].Name
@@ -497,14 +338,14 @@ func (o *AuthOptions) GatherProjectInfo() (string, error) {
 
 		namespace := o.DefaultNamespace
 		if !projects.Has(namespace) {
-			if namespace != kapi.NamespaceDefault && projects.Has(kapi.NamespaceDefault) {
-				namespace = kapi.NamespaceDefault
+			if namespace != metav1.NamespaceDefault && projects.Has(metav1.NamespaceDefault) {
+				namespace = metav1.NamespaceDefault
 			} else {
 				namespace = projects.List()[0]
 			}
 		}
 
-		current, err := o.Client.Projects().Get(namespace)
+		current, err := projectClient.ProjectV1().Projects().Get(namespace, metav1.GetOptions{})
 		if err != nil && !kapierrors.IsNotFound(err) && !osclientcmd.IsForbidden(err) {
 			return "", err
 		}

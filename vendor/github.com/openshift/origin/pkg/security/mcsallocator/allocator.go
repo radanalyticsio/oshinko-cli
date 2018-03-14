@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/registry/service/allocator"
+	api "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/registry/core/service/allocator"
 
 	"github.com/openshift/origin/pkg/security/mcs"
 )

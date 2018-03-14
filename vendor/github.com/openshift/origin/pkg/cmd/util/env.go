@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/sets"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 )
 
 func EnvInt(key string, defaultValue int32, minValue int32) int32 {
@@ -39,10 +39,8 @@ func GetEnv(key string) (string, bool) {
 	return val, true
 }
 
-type Environment map[string]string
-
-var argumentEnvironment = regexp.MustCompile("(?ms)^(.+)\\=(.*)$")
-var validArgumentEnvironment = regexp.MustCompile("(?ms)^(\\w+)\\=(.*)$")
+var argumentEnvironment = regexp.MustCompile(`(?ms)^(.+)\=(.*)$`)
+var validArgumentEnvironment = regexp.MustCompile(`(?ms)^(\w+)\=(.*)$`)
 
 func IsEnvironmentArgument(s string) bool {
 	return argumentEnvironment.MatchString(s)
@@ -72,47 +70,29 @@ func SplitEnvironmentFromResources(args []string) (resources, envArgs []string, 
 	return resources, envArgs, true
 }
 
-func ParseEnvironmentArguments(s []string) (Environment, []string, []error) {
-	errs := []error{}
-	duplicates := []string{}
-	env := make(Environment)
-	for _, s := range s {
-		switch matches := validArgumentEnvironment.FindStringSubmatch(s); len(matches) {
-		case 3:
-			k, v := matches[1], matches[2]
-			if exist, ok := env[k]; ok {
-				duplicates = append(duplicates, fmt.Sprintf("%s=%s", k, exist))
-			}
-			env[k] = v
-		default:
-			errs = append(errs, fmt.Errorf("environment variables must be of the form key=value: %s", s))
-		}
-	}
-	return env, duplicates, errs
-}
-
-// ParseEnv parses the list of environment variables into kubernetes EnvVar
-func ParseEnv(spec []string, defaultReader io.Reader) ([]kapi.EnvVar, []string, error) {
+// parseIntoEnvVar parses the list of key-value pairs into kubernetes EnvVar.
+// envVarType is for making errors more specific to user intentions.
+func parseIntoEnvVar(spec []string, defaultReader io.Reader, envVarType string) ([]kapi.EnvVar, []string, error) {
 	env := []kapi.EnvVar{}
 	exists := sets.NewString()
 	var remove []string
 	for _, envSpec := range spec {
 		switch {
 		case !IsValidEnvironmentArgument(envSpec) && !strings.HasSuffix(envSpec, "-"):
-			return nil, nil, fmt.Errorf("environment variables must be of the form key=value and can only contain letters, numbers, and underscores")
+			return nil, nil, fmt.Errorf("%ss must be of the form key=value and can only contain letters, numbers, and underscores", envVarType)
 		case envSpec == "-":
 			if defaultReader == nil {
 				return nil, nil, fmt.Errorf("when '-' is used, STDIN must be open")
 			}
-			fileEnv, err := readEnv(defaultReader)
+			fileEnv, err := readEnv(defaultReader, envVarType)
 			if err != nil {
 				return nil, nil, err
 			}
 			env = append(env, fileEnv...)
-		case strings.Index(envSpec, "=") != -1:
+		case strings.Contains(envSpec, "="):
 			parts := strings.SplitN(envSpec, "=", 2)
 			if len(parts) != 2 {
-				return nil, nil, fmt.Errorf("invalid environment variable: %v", envSpec)
+				return nil, nil, fmt.Errorf("invalid %s: %v", envVarType, envSpec)
 			}
 			exists.Insert(parts[0])
 			env = append(env, kapi.EnvVar{
@@ -122,18 +102,36 @@ func ParseEnv(spec []string, defaultReader io.Reader) ([]kapi.EnvVar, []string, 
 		case strings.HasSuffix(envSpec, "-"):
 			remove = append(remove, envSpec[:len(envSpec)-1])
 		default:
-			return nil, nil, fmt.Errorf("unknown environment variable: %v", envSpec)
+			return nil, nil, fmt.Errorf("unknown %s: %v", envVarType, envSpec)
 		}
 	}
 	for _, removeLabel := range remove {
 		if _, found := exists[removeLabel]; found {
-			return nil, nil, fmt.Errorf("can not both modify and remove an environment variable in the same command")
+			return nil, nil, fmt.Errorf("can not both modify and remove the same %s in the same command", envVarType)
 		}
 	}
 	return env, remove, nil
 }
 
-func readEnv(r io.Reader) ([]kapi.EnvVar, error) {
+func ParseBuildArg(spec []string, defaultReader io.Reader) ([]kapi.EnvVar, error) {
+	env, _, err := parseIntoEnvVar(spec, defaultReader, "build-arg")
+	return env, err
+}
+
+func ParseEnv(spec []string, defaultReader io.Reader) ([]kapi.EnvVar, []string, error) {
+	return parseIntoEnvVar(spec, defaultReader, "environment variable")
+}
+
+func ParseAnnotation(spec []string, defaultReader io.Reader) (map[string]string, []string, error) {
+	vars, remove, err := parseIntoEnvVar(spec, defaultReader, "annotation")
+	annotations := make(map[string]string)
+	for _, v := range vars {
+		annotations[v.Name] = v.Value
+	}
+	return annotations, remove, err
+}
+
+func readEnv(r io.Reader, envVarType string) ([]kapi.EnvVar, error) {
 	env := []kapi.EnvVar{}
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
@@ -141,10 +139,10 @@ func readEnv(r io.Reader) ([]kapi.EnvVar, error) {
 		if pos := strings.Index(envSpec, "#"); pos != -1 {
 			envSpec = envSpec[:pos]
 		}
-		if strings.Index(envSpec, "=") != -1 {
+		if strings.Contains(envSpec, "=") {
 			parts := strings.SplitN(envSpec, "=", 2)
 			if len(parts) != 2 {
-				return nil, fmt.Errorf("invalid environment variable: %v", envSpec)
+				return nil, fmt.Errorf("invalid %s: %v", envVarType, envSpec)
 			}
 			env = append(env, kapi.EnvVar{
 				Name:  parts[0],

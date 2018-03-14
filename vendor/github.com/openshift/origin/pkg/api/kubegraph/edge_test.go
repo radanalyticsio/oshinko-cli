@@ -6,18 +6,19 @@ import (
 
 	"github.com/gonum/graph"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	_ "k8s.io/kubernetes/pkg/api/install"
-	"k8s.io/kubernetes/pkg/api/unversioned"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	kapps "k8s.io/kubernetes/pkg/apis/apps"
 	"k8s.io/kubernetes/pkg/apis/autoscaling"
-	"k8s.io/kubernetes/pkg/runtime"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	_ "k8s.io/kubernetes/pkg/apis/core/install"
 
 	osgraph "github.com/openshift/origin/pkg/api/graph"
 	kubegraph "github.com/openshift/origin/pkg/api/kubegraph/nodes"
-	deployapi "github.com/openshift/origin/pkg/deploy/api"
-	_ "github.com/openshift/origin/pkg/deploy/api/install"
-	deploygraph "github.com/openshift/origin/pkg/deploy/graph/nodes"
+	appsapi "github.com/openshift/origin/pkg/apps/apis/apps"
+	_ "github.com/openshift/origin/pkg/apps/apis/apps/install"
+	appsgraph "github.com/openshift/origin/pkg/apps/graph/nodes"
 )
 
 type objectifier interface {
@@ -40,13 +41,13 @@ func TestNamespaceEdgeMatching(t *testing.T) {
 		rc.Spec.Selector = map[string]string{"a": "1"}
 		kubegraph.EnsureReplicationControllerNode(g, rc)
 
-		p := &kapps.PetSet{}
+		p := &kapps.StatefulSet{}
 		p.Namespace = namespace
-		p.Name = "the-petset"
-		p.Spec.Selector = &unversioned.LabelSelector{
+		p.Name = "the-statefulset"
+		p.Spec.Selector = &metav1.LabelSelector{
 			MatchLabels: map[string]string{"a": "1"},
 		}
-		kubegraph.EnsurePetSetNode(g, p)
+		kubegraph.EnsureStatefulSetNode(g, p)
 
 		svc := &kapi.Service{}
 		svc.Namespace = namespace
@@ -80,17 +81,17 @@ func namespaceFor(node graph.Node) (string, error) {
 	obj := node.(objectifier).Object()
 	switch t := obj.(type) {
 	case runtime.Object:
-		meta, err := kapi.ObjectMetaFor(t)
+		meta, err := meta.Accessor(t)
 		if err != nil {
 			return "", err
 		}
-		return meta.Namespace, nil
+		return meta.GetNamespace(), nil
 	case *kapi.PodSpec:
 		return node.(*kubegraph.PodSpecNode).Namespace, nil
 	case *kapi.ReplicationControllerSpec:
 		return node.(*kubegraph.ReplicationControllerSpecNode).Namespace, nil
-	case *kapps.PetSetSpec:
-		return node.(*kubegraph.PetSetSpecNode).Namespace, nil
+	case *kapps.StatefulSetSpec:
+		return node.(*kubegraph.StatefulSetSpecNode).Namespace, nil
 	case *kapi.PodTemplateSpec:
 		return node.(*kubegraph.PodTemplateSpecNode).Namespace, nil
 	default:
@@ -179,18 +180,19 @@ func TestHPADCEdges(t *testing.T) {
 	hpa.Name = "test-hpa"
 	hpa.Spec = autoscaling.HorizontalPodAutoscalerSpec{
 		ScaleTargetRef: autoscaling.CrossVersionObjectReference{
-			Name: "test-dc",
-			Kind: "DeploymentConfig",
+			Name:       "test-dc",
+			Kind:       "DeploymentConfig",
+			APIVersion: "apps.openshift.io/v1",
 		},
 	}
 
-	dc := &deployapi.DeploymentConfig{}
+	dc := &appsapi.DeploymentConfig{}
 	dc.Name = "test-dc"
 	dc.Namespace = "test-ns"
 
 	g := osgraph.New()
 	hpaNode := kubegraph.EnsureHorizontalPodAutoscalerNode(g, hpa)
-	dcNode := deploygraph.EnsureDeploymentConfigNode(g, dc)
+	dcNode := appsgraph.EnsureDeploymentConfigNode(g, dc)
 
 	AddHPAScaleRefEdges(g)
 

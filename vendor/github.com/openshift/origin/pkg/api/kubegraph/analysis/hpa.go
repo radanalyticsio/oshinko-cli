@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"k8s.io/kubernetes/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/kubernetes/pkg/apis/autoscaling"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 
 	graphapi "github.com/gonum/graph"
 	"github.com/gonum/graph/path"
@@ -13,8 +15,8 @@ import (
 	"github.com/openshift/origin/pkg/api/kubegraph"
 	kubeedges "github.com/openshift/origin/pkg/api/kubegraph"
 	kubenodes "github.com/openshift/origin/pkg/api/kubegraph/nodes"
-	deploygraph "github.com/openshift/origin/pkg/deploy/graph"
-	deploynodes "github.com/openshift/origin/pkg/deploy/graph/nodes"
+	appsgraph "github.com/openshift/origin/pkg/apps/graph"
+	appsnodes "github.com/openshift/origin/pkg/apps/graph/nodes"
 )
 
 const (
@@ -36,7 +38,15 @@ func FindHPASpecsMissingCPUTargets(graph osgraph.Graph, namer osgraph.Namer) []o
 	for _, uncastNode := range graph.NodesByKind(kubenodes.HorizontalPodAutoscalerNodeKind) {
 		node := uncastNode.(*kubenodes.HorizontalPodAutoscalerNode)
 
-		if node.HorizontalPodAutoscaler.Spec.TargetCPUUtilizationPercentage == nil {
+		cpuFound := false
+		for _, metric := range node.HorizontalPodAutoscaler.Spec.Metrics {
+			if metric.Type == autoscaling.ResourceMetricSourceType && metric.Resource != nil && metric.Resource.Name == kapi.ResourceCPU {
+				cpuFound = true
+				break
+			}
+		}
+
+		if !cpuFound {
 			markers = append(markers, osgraph.Marker{
 				Node:       node,
 				Severity:   osgraph.ErrorSeverity,
@@ -113,11 +123,11 @@ func FindOverlappingHPAs(graph osgraph.Graph, namer osgraph.Namer) []osgraph.Mar
 	nodeFilter := osgraph.NodesOfKind(
 		kubenodes.HorizontalPodAutoscalerNodeKind,
 		kubenodes.ReplicationControllerNodeKind,
-		deploynodes.DeploymentConfigNodeKind,
+		appsnodes.DeploymentConfigNodeKind,
 	)
 	edgeFilter := osgraph.EdgesOfKind(
 		kubegraph.ScalingEdgeKind,
-		deploygraph.DeploymentEdgeKind,
+		appsgraph.DeploymentEdgeKind,
 		kubeedges.ManagedByControllerEdgeKind,
 	)
 

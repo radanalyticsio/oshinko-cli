@@ -17,7 +17,7 @@ os::cmd::expect_success 'oc get deploymentConfigs'
 os::cmd::expect_success 'oc get dc'
 os::cmd::expect_success 'oc create -f test/integration/testdata/test-deployment-config.yaml'
 os::cmd::expect_success 'oc describe deploymentConfigs test-deployment-config'
-os::cmd::expect_success_and_text 'oc get dc -o name' 'deploymentconfig/test-deployment-config'
+os::cmd::expect_success_and_text 'oc get dc -o name' 'deploymentconfigs/test-deployment-config'
 os::cmd::try_until_success 'oc get rc/test-deployment-config-1'
 os::cmd::expect_success_and_text 'oc describe dc test-deployment-config' 'deploymentconfig=test-deployment-config'
 os::cmd::expect_success_and_text 'oc status' 'dc/test-deployment-config deploys docker.io/openshift/origin-pod:latest'
@@ -96,6 +96,11 @@ os::cmd::try_until_success 'oc rollout pause dc/database'
 os::cmd::try_until_text "oc get dc/database --template='{{.spec.paused}}'" "true"
 os::cmd::try_until_success 'oc rollout resume dc/database'
 os::cmd::try_until_text "oc get dc/database --template='{{.spec.paused}}'" "<no value>"
+# create a replication controller and attempt to perform `oc rollout cancel` on it.
+# expect an error about the resource type, rather than a panic or a success.
+os::cmd::expect_success 'oc create -f test/integration/testdata/test-replication-controller.yaml'
+os::cmd::expect_failure_and_text 'oc rollout cancel rc/test-replication-controller' 'expected deployment configuration, got replicationcontrollers'
+
 echo "rollout: ok"
 os::test::junit::declare_suite_end
 
@@ -107,6 +112,14 @@ os::cmd::expect_failure 'oc rollback dc/database --to-version=1 --dry-run'
 os::cmd::expect_failure 'oc rollback database-1 -o=yaml'
 os::cmd::expect_failure 'oc rollback rc/database-1 -o=yaml'
 os::cmd::expect_failure 'oc rollback database -o yaml'
+# trigger a new deployment with 'foo' image
+os::cmd::expect_success 'oc set image dc/database ruby-helloworld-database=foo --source=docker'
+# wait for the new deployment
+os::cmd::try_until_success 'oc rollout history dc/database --revision=2'
+# rolling back to the same revision should fail
+os::cmd::expect_failure 'oc rollback dc/database --to-version=2'
+# undo --dry-run should report the original image
+os::cmd::expect_success_and_text 'oc rollout undo dc/database --dry-run' 'mysql-57-centos7'
 echo "rollback: ok"
 os::test::junit::declare_suite_end
 
@@ -145,7 +158,7 @@ os::test::junit::declare_suite_start "cmd/deployments/setdeploymenthook"
 arg="-f test/integration/testdata/test-deployment-config.yaml"
 os::cmd::expect_failure_and_text "oc set deployment-hook" "error: one or more deployment configs"
 os::cmd::expect_failure_and_text "oc set deployment-hook ${arg}" "error: you must specify one of --pre, --mid, or --post"
-os::cmd::expect_failure_and_text "oc set deployment-hook ${arg} -o yaml --pre -- mycmd" 'Error from server: deploymentconfigs'
+os::cmd::expect_failure_and_text "oc set deployment-hook ${arg} -o yaml --pre -- mycmd" 'deploymentconfigs "test-deployment-config" not found'
 os::cmd::expect_success_and_text "oc set deployment-hook ${arg} --local -o yaml --post -- mycmd" 'mycmd'
 os::cmd::expect_success_and_not_text "oc set deployment-hook ${arg} --local -o yaml --post -- mycmd | oc set deployment-hook -f - --local -o yaml --post --remove" 'mycmd'
 os::cmd::expect_success "oc create ${arg}"

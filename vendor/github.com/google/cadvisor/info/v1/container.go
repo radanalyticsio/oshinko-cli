@@ -307,9 +307,10 @@ type CpuStats struct {
 }
 
 type PerDiskStats struct {
-	Major uint64            `json:"major"`
-	Minor uint64            `json:"minor"`
-	Stats map[string]uint64 `json:"stats"`
+	Device string            `json:"device"`
+	Major  uint64            `json:"major"`
+	Minor  uint64            `json:"minor"`
+	Stats  map[string]uint64 `json:"stats"`
 }
 
 type DiskIoStats struct {
@@ -328,6 +329,10 @@ type MemoryStats struct {
 	// accessed.
 	// Units: Bytes.
 	Usage uint64 `json:"usage"`
+
+	// Maximum memory usage recorded.
+	// Units: Bytes.
+	MaxUsage uint64 `json:"max_usage"`
 
 	// Number of bytes of page cache memory.
 	// Units: Bytes.
@@ -386,31 +391,49 @@ type NetworkStats struct {
 	Tcp TcpStat `json:"tcp"`
 	// TCP6 connection stats (Established, Listen...)
 	Tcp6 TcpStat `json:"tcp6"`
+	// UDP connection stats
+	Udp UdpStat `json:"udp"`
+	// UDP6 connection stats
+	Udp6 UdpStat `json:"udp6"`
 }
 
 type TcpStat struct {
-	//Count of TCP connections in state "Established"
+	// Count of TCP connections in state "Established"
 	Established uint64
-	//Count of TCP connections in state "Syn_Sent"
+	// Count of TCP connections in state "Syn_Sent"
 	SynSent uint64
-	//Count of TCP connections in state "Syn_Recv"
+	// Count of TCP connections in state "Syn_Recv"
 	SynRecv uint64
-	//Count of TCP connections in state "Fin_Wait1"
+	// Count of TCP connections in state "Fin_Wait1"
 	FinWait1 uint64
-	//Count of TCP connections in state "Fin_Wait2"
+	// Count of TCP connections in state "Fin_Wait2"
 	FinWait2 uint64
-	//Count of TCP connections in state "Time_Wait
+	// Count of TCP connections in state "Time_Wait
 	TimeWait uint64
-	//Count of TCP connections in state "Close"
+	// Count of TCP connections in state "Close"
 	Close uint64
-	//Count of TCP connections in state "Close_Wait"
+	// Count of TCP connections in state "Close_Wait"
 	CloseWait uint64
-	//Count of TCP connections in state "Listen_Ack"
+	// Count of TCP connections in state "Listen_Ack"
 	LastAck uint64
-	//Count of TCP connections in state "Listen"
+	// Count of TCP connections in state "Listen"
 	Listen uint64
-	//Count of TCP connections in state "Closing"
+	// Count of TCP connections in state "Closing"
 	Closing uint64
+}
+
+type UdpStat struct {
+	// Count of UDP sockets in state "Listen"
+	Listen uint64
+
+	// Count of UDP packets dropped by the IP stack
+	Dropped uint64
+
+	// Count of packets Queued for Receieve
+	RxQueued uint64
+
+	// Count of packets Queued for Transmit
+	TxQueued uint64
 }
 
 type FsStats struct {
@@ -497,6 +520,29 @@ type FsStats struct {
 	WeightedIoTime uint64 `json:"weighted_io_time"`
 }
 
+type AcceleratorStats struct {
+	// Make of the accelerator (nvidia, amd, google etc.)
+	Make string `json:"make"`
+
+	// Model of the accelerator (tesla-p100, tesla-k80 etc.)
+	Model string `json:"model"`
+
+	// ID of the accelerator.
+	ID string `json:"id"`
+
+	// Total accelerator memory.
+	// unit: bytes
+	MemoryTotal uint64 `json:"memory_total"`
+
+	// Total accelerator memory allocated.
+	// unit: bytes
+	MemoryUsed uint64 `json:"memory_used"`
+
+	// Percent of time over the past sample period during which
+	// the accelerator was actively processing.
+	DutyCycle uint64 `json:"duty_cycle"`
+}
+
 type ContainerStats struct {
 	// The time of this stat point.
 	Timestamp time.Time    `json:"timestamp"`
@@ -511,7 +557,10 @@ type ContainerStats struct {
 	// Task load stats
 	TaskStats LoadStats `json:"task_stats,omitempty"`
 
-	//Custom metrics from all collectors
+	// Metrics for Accelerators. Each Accelerator corresponds to one element in the array.
+	Accelerators []AcceleratorStats `json:"accelerators,omitempty"`
+
+	// Custom metrics from all collectors
 	CustomMetrics map[string][]MetricVal `json:"custom_metrics,omitempty"`
 }
 

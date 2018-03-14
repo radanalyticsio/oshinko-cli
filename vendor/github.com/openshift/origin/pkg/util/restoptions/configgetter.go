@@ -1,126 +1,88 @@
 package restoptions
 
 import (
-	"fmt"
-	"strconv"
-	"strings"
 	"sync"
 
-	apiserveroptions "k8s.io/kubernetes/cmd/kube-apiserver/app/options"
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/rest"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/genericapiserver"
-	genericrest "k8s.io/kubernetes/pkg/registry/generic"
-	"k8s.io/kubernetes/pkg/registry/generic/registry"
-	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/storage"
-	"k8s.io/kubernetes/pkg/storage/storagebackend"
-	"k8s.io/kubernetes/pkg/storage/storagebackend/factory"
-	kerrors "k8s.io/kubernetes/pkg/util/errors"
-
 	"github.com/golang/glog"
-	configapi "github.com/openshift/origin/pkg/cmd/server/api"
-	cmdflags "github.com/openshift/origin/pkg/cmd/util/flags"
-)
 
-// UseConfiguredCacheSize indicates that the configured cache size should be used
-const UseConfiguredCacheSize = -1
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apiserver/pkg/registry/generic"
+	"k8s.io/apiserver/pkg/registry/generic/registry"
+	"k8s.io/apiserver/pkg/server/options"
+	serverstorage "k8s.io/apiserver/pkg/server/storage"
+
+	configapi "github.com/openshift/origin/pkg/cmd/server/api"
+	kubernetes "github.com/openshift/origin/pkg/cmd/server/kubernetes/master"
+)
 
 // configRESTOptionsGetter provides RESTOptions based on a provided config
 type configRESTOptionsGetter struct {
 	masterOptions configapi.MasterConfig
 
 	restOptionsLock sync.Mutex
-	restOptionsMap  map[unversioned.GroupResource]genericrest.RESTOptions
+	restOptionsMap  map[schema.GroupResource]generic.RESTOptions
 
-	storageFactory        genericapiserver.StorageFactory
-	defaultResourceConfig *genericapiserver.ResourceConfig
+	storageFactory        serverstorage.StorageFactory
+	defaultResourceConfig *serverstorage.ResourceConfig
 
-	cacheEnabled            bool
-	defaultCacheSize        int
-	cacheSizes              map[unversioned.GroupResource]int
-	quorumResources         map[unversioned.GroupResource]struct{}
-	defaultResourcePrefixes map[unversioned.GroupResource]string
+	cacheEnabled     bool
+	defaultCacheSize int
+	cacheSizes       map[schema.GroupResource]int
+	quorumResources  map[schema.GroupResource]struct{}
+
+	deleteCollectionWorkers int
+	enableGarbageCollection bool
 }
 
 // NewConfigGetter returns a restoptions.Getter implemented using information from the provided master config.
-// By default, the etcd watch cache is enabled with a size of 1000 per resource type.
 // TODO: this class should either not need to know about configapi.MasterConfig, or not be in pkg/util
-func NewConfigGetter(masterOptions configapi.MasterConfig, defaultResourceConfig *genericapiserver.ResourceConfig, defaultResourcePrefixes map[unversioned.GroupResource]string, quorumResources map[unversioned.GroupResource]struct{}) Getter {
-	getter := &configRESTOptionsGetter{
+func NewConfigGetter(masterOptions configapi.MasterConfig, defaultResourceConfig *serverstorage.ResourceConfig, resourcePrefixOverrides map[schema.GroupResource]string, enforcedStorageVersions map[schema.GroupResource]schema.GroupVersion, quorumResources map[schema.GroupResource]struct{}) (Getter, error) {
+	apiserverOptions, err := kubernetes.BuildKubeAPIserverOptions(masterOptions)
+	if err != nil {
+		return nil, err
+	}
+	storageFactory, err := kubernetes.BuildStorageFactory(apiserverOptions, enforcedStorageVersions)
+	if err != nil {
+		return nil, err
+	}
+	storageFactory.DefaultResourcePrefixes = resourcePrefixOverrides
+	storageFactory.StorageConfig.Prefix = masterOptions.EtcdStorageConfig.OpenShiftStoragePrefix
+
+	// perform watch cache heuristic like upstream
+	if apiserverOptions.Etcd.EnableWatchCache {
+		glog.V(2).Infof("Initializing cache sizes based on %dMB limit", apiserverOptions.GenericServerRunOptions.TargetRAMMB)
+		sizes := newHeuristicWatchCacheSizes(apiserverOptions.GenericServerRunOptions.TargetRAMMB)
+		if userSpecified, err := options.ParseWatchCacheSizes(apiserverOptions.Etcd.WatchCacheSizes); err == nil {
+			for resource, size := range userSpecified {
+				sizes[resource] = size
+			}
+		}
+		apiserverOptions.Etcd.WatchCacheSizes, err = options.WriteWatchCacheSizes(sizes)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	cacheSizes, err := options.ParseWatchCacheSizes(apiserverOptions.Etcd.WatchCacheSizes)
+	if err != nil {
+		return nil, err
+	}
+
+	return &configRESTOptionsGetter{
 		masterOptions:           masterOptions,
-		cacheEnabled:            true,
-		defaultCacheSize:        1000,
-		cacheSizes:              map[unversioned.GroupResource]int{},
-		restOptionsMap:          map[unversioned.GroupResource]genericrest.RESTOptions{},
+		cacheEnabled:            apiserverOptions.Etcd.EnableWatchCache,
+		defaultCacheSize:        apiserverOptions.Etcd.DefaultWatchCacheSize,
+		cacheSizes:              cacheSizes,
+		restOptionsMap:          map[schema.GroupResource]generic.RESTOptions{},
 		defaultResourceConfig:   defaultResourceConfig,
 		quorumResources:         quorumResources,
-		defaultResourcePrefixes: defaultResourcePrefixes,
-	}
-
-	if err := getter.loadSettings(); err != nil {
-		glog.Error(err)
-	}
-
-	return getter
+		storageFactory:          storageFactory,
+		deleteCollectionWorkers: apiserverOptions.Etcd.DeleteCollectionWorkers,
+		enableGarbageCollection: apiserverOptions.Etcd.EnableGarbageCollection,
+	}, nil
 }
 
-func (g *configRESTOptionsGetter) loadSettings() error {
-	server := apiserveroptions.NewAPIServer()
-	if g.masterOptions.KubernetesMasterConfig != nil {
-		if errs := cmdflags.Resolve(g.masterOptions.KubernetesMasterConfig.APIServerArguments, server.AddFlags); len(errs) > 0 {
-			return kerrors.NewAggregate(errs)
-		}
-	}
-
-	storageGroupsToEncodingVersion, err := server.StorageGroupsToEncodingVersion()
-	if err != nil {
-		return err
-	}
-
-	storageConfig := server.StorageConfig
-	storageConfig.Prefix = g.masterOptions.EtcdStorageConfig.OpenShiftStoragePrefix
-	storageConfig.ServerList = g.masterOptions.EtcdClientInfo.URLs
-	storageConfig.KeyFile = g.masterOptions.EtcdClientInfo.ClientCert.KeyFile
-	storageConfig.CertFile = g.masterOptions.EtcdClientInfo.ClientCert.CertFile
-	storageConfig.CAFile = g.masterOptions.EtcdClientInfo.CA
-
-	storageFactory, err := genericapiserver.BuildDefaultStorageFactory(
-		storageConfig, server.DefaultStorageMediaType, kapi.Codecs,
-		genericapiserver.NewDefaultResourceEncodingConfig(), storageGroupsToEncodingVersion,
-		nil,
-		g.defaultResourceConfig, server.RuntimeConfig)
-	if err != nil {
-		return err
-	}
-	storageFactory.DefaultResourcePrefixes = g.defaultResourcePrefixes
-	g.storageFactory = storageFactory
-
-	g.cacheEnabled = server.EnableWatchCache
-
-	errs := []error{}
-	for _, c := range server.WatchCacheSizes {
-		tokens := strings.Split(c, "#")
-		if len(tokens) != 2 {
-			errs = append(errs, fmt.Errorf("invalid watch cache size value '%s', expecting <resource>#<size> format (e.g. builds#100)", c))
-			continue
-		}
-
-		resource := unversioned.ParseGroupResource(tokens[0])
-
-		size, err := strconv.Atoi(tokens[1])
-		if err != nil {
-			errs = append(errs, fmt.Errorf("invalid watch cache size value '%s': %v", c, err))
-			continue
-		}
-
-		g.cacheSizes[resource] = size
-	}
-	return kerrors.NewAggregate(errs)
-}
-
-func (g *configRESTOptionsGetter) GetRESTOptions(resource unversioned.GroupResource) (genericrest.RESTOptions, error) {
+func (g *configRESTOptionsGetter) GetRESTOptions(resource schema.GroupResource) (generic.RESTOptions, error) {
 	g.restOptionsLock.Lock()
 	defer g.restOptionsLock.Unlock()
 	if resourceOptions, ok := g.restOptionsMap[resource]; ok {
@@ -129,40 +91,48 @@ func (g *configRESTOptionsGetter) GetRESTOptions(resource unversioned.GroupResou
 
 	config, err := g.storageFactory.NewConfig(resource)
 	if err != nil {
-		return genericrest.RESTOptions{}, err
+		return generic.RESTOptions{}, err
 	}
 
 	if _, ok := g.quorumResources[resource]; ok {
 		config.Quorum = true
 	}
 
-	configuredCacheSize, specified := g.cacheSizes[resource]
-	if !specified || configuredCacheSize < 0 {
-		configuredCacheSize = g.defaultCacheSize
+	cacheSize, ok := g.cacheSizes[resource]
+	if !ok {
+		cacheSize = g.defaultCacheSize
 	}
 
-	decorator := func(s *storagebackend.Config, requestedSize int, objectType runtime.Object, resourcePrefix string, scopeStrategy rest.NamespaceScopedStrategy, newListFn func() runtime.Object, triggerFn storage.TriggerPublisherFunc) (storage.Interface, factory.DestroyFunc) {
-		capacity := requestedSize
-		if capacity == UseConfiguredCacheSize {
-			capacity = configuredCacheSize
-		}
-
-		if capacity == 0 || !g.cacheEnabled {
-			glog.V(5).Infof("using uncached watch storage for %s", resource.String())
-			return genericrest.UndecoratedStorage(s, capacity, objectType, resourcePrefix, scopeStrategy, newListFn, triggerFn)
-		}
-
-		glog.V(5).Infof("using watch cache storage (capacity=%d) for %s %#v", capacity, resource.String(), s)
-		return registry.StorageWithCacher(s, capacity, objectType, resourcePrefix, scopeStrategy, newListFn, triggerFn)
-	}
-
-	resourceOptions := genericrest.RESTOptions{
+	resourceOptions := generic.RESTOptions{
 		StorageConfig:           config,
-		Decorator:               decorator,
-		DeleteCollectionWorkers: 1,
+		Decorator:               registry.StorageWithCacher(cacheSize),
+		DeleteCollectionWorkers: g.deleteCollectionWorkers,
+		EnableGarbageCollection: g.enableGarbageCollection,
 		ResourcePrefix:          g.storageFactory.ResourcePrefix(resource),
 	}
 	g.restOptionsMap[resource] = resourceOptions
 
 	return resourceOptions, nil
+}
+
+// newHeuristicWatchCacheSizes returns a map of suggested watch cache sizes based on total
+// memory. It reuses the upstream heuristic and adds OpenShift specific resources.
+func newHeuristicWatchCacheSizes(expectedRAMCapacityMB int) map[schema.GroupResource]int {
+	// TODO: Revisit this heuristic, copied from upstream
+	clusterSize := expectedRAMCapacityMB / 60
+
+	// default enable watch caches for resources that will have a high number of clients accessing it
+	// and where the write rate may be significant
+	watchCacheSizes := make(map[schema.GroupResource]int)
+	watchCacheSizes[schema.GroupResource{Group: "network.openshift.io", Resource: "hostsubnets"}] = maxInt(5*clusterSize, 100)
+	watchCacheSizes[schema.GroupResource{Group: "network.openshift.io", Resource: "netnamespaces"}] = maxInt(5*clusterSize, 100)
+	watchCacheSizes[schema.GroupResource{Group: "network.openshift.io", Resource: "egressnetworkpolicies"}] = maxInt(10*clusterSize, 100)
+	return watchCacheSizes
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

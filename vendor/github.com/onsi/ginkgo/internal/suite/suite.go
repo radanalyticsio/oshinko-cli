@@ -2,7 +2,10 @@ package suite
 
 import (
 	"math/rand"
+	"net/http"
 	"time"
+
+	"github.com/onsi/ginkgo/internal/spec_iterator"
 
 	"github.com/onsi/ginkgo/config"
 	"github.com/onsi/ginkgo/internal/containernode"
@@ -52,18 +55,18 @@ func (suite *Suite) Run(t ginkgoTestingT, description string, reporters []report
 
 	r := rand.New(rand.NewSource(config.RandomSeed))
 	suite.topLevelContainer.Shuffle(r)
-	specs := suite.generateSpecs(description, config)
-	suite.runner = specrunner.New(description, suite.beforeSuiteNode, specs, suite.afterSuiteNode, reporters, writer, config)
+	iterator, hasProgrammaticFocus := suite.generateSpecsIterator(description, config)
+	suite.runner = specrunner.New(description, suite.beforeSuiteNode, iterator, suite.afterSuiteNode, reporters, writer, config)
 
 	suite.running = true
 	success := suite.runner.Run()
 	if !success {
 		t.Fail()
 	}
-	return success, specs.HasProgrammaticFocus()
+	return success, hasProgrammaticFocus
 }
 
-func (suite *Suite) generateSpecs(description string, config config.GinkgoConfigType) *spec.Specs {
+func (suite *Suite) generateSpecsIterator(description string, config config.GinkgoConfigType) (spec_iterator.SpecIterator, bool) {
 	specsSlice := []*spec.Spec{}
 	suite.topLevelContainer.BackPropagateProgrammaticFocus()
 	for _, collatedNodes := range suite.topLevelContainer.Collate() {
@@ -83,10 +86,19 @@ func (suite *Suite) generateSpecs(description string, config config.GinkgoConfig
 		specs.SkipMeasurements()
 	}
 
+	var iterator spec_iterator.SpecIterator
+
 	if config.ParallelTotal > 1 {
-		specs.TrimForParallelization(config.ParallelTotal, config.ParallelNode)
+		iterator = spec_iterator.NewParallelIterator(specs.Specs(), config.SyncHost)
+		resp, err := http.Get(config.SyncHost + "/has-counter")
+		if err != nil || resp.StatusCode != http.StatusOK {
+			iterator = spec_iterator.NewShardedParallelIterator(specs.Specs(), config.ParallelTotal, config.ParallelNode)
+		}
+	} else {
+		iterator = spec_iterator.NewSerialIterator(specs.Specs())
 	}
-	return specs
+
+	return iterator, specs.HasProgrammaticFocus()
 }
 
 func (suite *Suite) CurrentRunningSpecSummary() (*types.SpecSummary, bool) {
@@ -168,4 +180,15 @@ func (suite *Suite) PushAfterEachNode(body interface{}, codeLocation types.CodeL
 		suite.failer.Fail("You may only call AfterEach from within a Describe or Context", codeLocation)
 	}
 	suite.currentContainer.PushSetupNode(leafnodes.NewAfterEachNode(body, codeLocation, timeout, suite.failer, suite.containerIndex))
+}
+
+func (suite *Suite) WalkTests(fn func(testName string, test types.TestNode)) {
+	suite.topLevelContainer.BackPropagateProgrammaticFocus()
+	for _, collatedNodes := range suite.topLevelContainer.Collate() {
+		itNode, ok := collatedNodes.Subject.(*leafnodes.ItNode)
+		if !ok {
+			continue
+		}
+		fn(spec.New(collatedNodes.Subject, collatedNodes.Containers, false).ConcatenatedString(), itNode)
+	}
 }

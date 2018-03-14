@@ -2,7 +2,7 @@ package podtemplates
 
 import (
 	"github.com/radanalyticsio/oshinko-cli/core/clusters/containers"
-	kapi "k8s.io/kubernetes/pkg/api"
+	kapi "k8s.io/api/core/v1"
 )
 
 type OPodTemplateSpec struct {

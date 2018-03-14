@@ -3,7 +3,7 @@ package admission
 import (
 	"github.com/golang/glog"
 
-	"k8s.io/kubernetes/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
 	configlatest "github.com/openshift/origin/pkg/cmd/server/api/latest"
@@ -11,11 +11,11 @@ import (
 )
 
 // ReadPluginConfig will read a plugin configuration object from a reader stream
-func ReadPluginConfig(pluginConfig map[string]configapi.AdmissionPluginConfig, name string, config runtime.Object) error {
+func ReadPluginConfig(pluginConfig map[string]*configapi.AdmissionPluginConfig, name string, config runtime.Object) error {
 
 	configFilePath, err := pluginconfig.GetPluginConfigFile(pluginConfig, name, "")
-	if configFilePath == "" {
-		return nil
+	if err != nil || len(configFilePath) == 0 {
+		return err
 	}
 
 	err = configlatest.ReadYAMLFileInto(configFilePath, config)

@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/kubernetes/pkg/util/wait"
+	g "github.com/onsi/ginkgo"
+
+	"k8s.io/apimachinery/pkg/util/wait"
 	e2e "k8s.io/kubernetes/test/e2e/framework"
 )
 
@@ -49,6 +51,7 @@ func WaitForQueryOutputSatisfies(oc *CLI, d Database, timeout time.Duration, adm
 		} else {
 			out, err = d.Query(oc, query)
 		}
+		fmt.Fprintf(g.GinkgoWriter, "Query %s result: %s\n", query, out)
 		if _, ok := err.(*ExitError); ok {
 			// Ignore exit errors
 			return false, nil

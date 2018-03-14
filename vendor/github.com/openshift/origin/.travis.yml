@@ -8,7 +8,6 @@ install:
   - make install-travis
 
 script:
-  - PROTO_OPTIONAL=1 PERMISSIVE_GO=y make verify
   - make verify-commits
 
 notifications:

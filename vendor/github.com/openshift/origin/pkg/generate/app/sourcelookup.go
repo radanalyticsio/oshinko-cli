@@ -4,23 +4,25 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/builder/dockerfile/parser"
 	"github.com/golang/glog"
 
-	buildapi "github.com/openshift/origin/pkg/build/api"
-	"github.com/openshift/origin/pkg/generate/dockerfile"
-	"github.com/openshift/origin/pkg/generate/git"
-	"github.com/openshift/origin/pkg/generate/source"
 	s2iapi "github.com/openshift/source-to-image/pkg/api"
 	s2igit "github.com/openshift/source-to-image/pkg/scm/git"
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/validation"
+
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/apis/core/validation"
+
+	buildapi "github.com/openshift/origin/pkg/build/apis/build"
+	"github.com/openshift/origin/pkg/generate"
+	"github.com/openshift/origin/pkg/generate/git"
+	"github.com/openshift/origin/pkg/generate/source"
 )
 
 type Dockerfile interface {
@@ -47,7 +49,7 @@ func NewDockerfile(contents string) (Dockerfile, error) {
 	if err != nil {
 		return nil, err
 	}
-	return dockerfileContents{node, contents}, nil
+	return dockerfileContents{node.AST, contents}, nil
 }
 
 type dockerfileContents struct {
@@ -63,34 +65,40 @@ func (d dockerfileContents) Contents() string {
 	return d.contents
 }
 
-// IsPossibleSourceRepository checks whether the provided string is a source repository or not
-func IsPossibleSourceRepository(s string) bool {
-	return IsRemoteRepository(s) || isDirectory(s)
-}
-
 // IsRemoteRepository checks whether the provided string is a remote repository or not
-func IsRemoteRepository(s string) bool {
-	if !s2igit.New().ValidCloneSpecRemoteOnly(s) {
-		return false
-	}
-	url, err := url.Parse(s)
+func IsRemoteRepository(s string) (bool, error) {
+	url, err := s2igit.Parse(s)
 	if err != nil {
-		return false
+		glog.V(5).Infof("%s is not a valid url: %v", s, err)
+		return false, err
 	}
-	url.Fragment = ""
+	if url.IsLocal() {
+		glog.V(5).Infof("%s is not a valid remote git clone spec", s)
+		return false, nil
+	}
 	gitRepo := git.NewRepository()
-	if _, _, err := gitRepo.ListRemote(url.String()); err != nil {
-		return false
+
+	// try up to 3 times to reach the remote git repo
+	for i := 0; i < 3; i++ {
+		_, _, err = gitRepo.ListRemote(url.StringNoFragment())
+		if err == nil {
+			break
+		}
 	}
-	return true
+	if err != nil {
+		glog.V(5).Infof("could not list git remotes for %s: %v", s, err)
+		return false, err
+	}
+	glog.V(5).Infof("%s is a valid remote git repository", s)
+	return true, nil
 }
 
 // SourceRepository represents a code repository that may be the target of a build.
 type SourceRepository struct {
 	location        string
-	url             url.URL
+	url             s2igit.URL
 	localDir        string
-	remoteURL       *url.URL
+	remoteURL       *s2igit.URL
 	contextDir      string
 	secrets         []buildapi.SecretBuildSource
 	info            *SourceRepositoryInfo
@@ -99,7 +107,7 @@ type SourceRepository struct {
 	sourceImageTo   string
 
 	usedBy           []ComponentReference
-	buildWithDocker  bool
+	strategy         generate.Strategy
 	ignoreRepository bool
 	binary           bool
 
@@ -110,8 +118,8 @@ type SourceRepository struct {
 
 // NewSourceRepository creates a reference to a local or remote source code repository from
 // a URL or path.
-func NewSourceRepository(s string) (*SourceRepository, error) {
-	location, err := git.ParseRepository(s)
+func NewSourceRepository(s string, strategy generate.Strategy) (*SourceRepository, error) {
+	location, err := s2igit.Parse(s)
 	if err != nil {
 		return nil, err
 	}
@@ -119,13 +127,14 @@ func NewSourceRepository(s string) (*SourceRepository, error) {
 	return &SourceRepository{
 		location: s,
 		url:      *location,
+		strategy: strategy,
 	}, nil
 }
 
 // NewSourceRepositoryWithDockerfile creates a reference to a local source code repository with
 // the provided relative Dockerfile path (defaults to "Dockerfile").
 func NewSourceRepositoryWithDockerfile(s, dockerfilePath string) (*SourceRepository, error) {
-	r, err := NewSourceRepository(s)
+	r, err := NewSourceRepository(s, generate.StrategyDocker)
 	if err != nil {
 		return nil, err
 	}
@@ -148,6 +157,7 @@ func NewSourceRepositoryWithDockerfile(s, dockerfilePath string) (*SourceReposit
 func NewSourceRepositoryForDockerfile(contents string) (*SourceRepository, error) {
 	s := &SourceRepository{
 		ignoreRepository: true,
+		strategy:         generate.StrategyDocker,
 	}
 	err := s.AddDockerfile(contents)
 	return s, err
@@ -155,10 +165,11 @@ func NewSourceRepositoryForDockerfile(contents string) (*SourceRepository, error
 
 // NewBinarySourceRepository creates a source repository that is configured for binary
 // input.
-func NewBinarySourceRepository() *SourceRepository {
+func NewBinarySourceRepository(strategy generate.Strategy) *SourceRepository {
 	return &SourceRepository{
 		binary:           true,
 		ignoreRepository: true,
+		strategy:         strategy,
 	}
 }
 
@@ -171,6 +182,7 @@ func NewImageSourceRepository(compRef ComponentReference, from, to string) *Sour
 		sourceImageTo:    to,
 		ignoreRepository: true,
 		location:         compRef.Input().From,
+		strategy:         generate.StrategySource,
 	}
 }
 
@@ -181,7 +193,7 @@ func (r *SourceRepository) UsedBy(ref ComponentReference) {
 
 // Remote checks whether the source repository is remote
 func (r *SourceRepository) Remote() bool {
-	return r.url.Scheme != "file"
+	return !r.url.IsLocal()
 }
 
 // InUse checks if the source repository is in use
@@ -189,14 +201,14 @@ func (r *SourceRepository) InUse() bool {
 	return len(r.usedBy) > 0
 }
 
-// BuildWithDocker specifies that the source repository was built with Docker
-func (r *SourceRepository) BuildWithDocker() {
-	r.buildWithDocker = true
+// SetStrategy sets the source repository strategy
+func (r *SourceRepository) SetStrategy(strategy generate.Strategy) {
+	r.strategy = strategy
 }
 
-// IsDockerBuild checks if the source repository was built with Docker
-func (r *SourceRepository) IsDockerBuild() bool {
-	return r.buildWithDocker
+// GetStrategy returns the source repository strategy
+func (r *SourceRepository) GetStrategy() generate.Strategy {
+	return r.strategy
 }
 
 func (r *SourceRepository) String() string {
@@ -238,29 +250,23 @@ func (r *SourceRepository) LocalPath() (string, error) {
 	if len(r.localDir) > 0 {
 		return r.localDir, nil
 	}
-	switch {
-	case r.url.Scheme == "file":
-		r.localDir = filepath.Join(r.url.Path, r.contextDir)
-	default:
+	if r.url.IsLocal() {
+		r.localDir = filepath.Join(r.url.LocalPath(), r.contextDir)
+	} else {
 		gitRepo := git.NewRepository()
 		var err error
 		if r.localDir, err = ioutil.TempDir("", "gen"); err != nil {
 			return "", err
 		}
-		localURL, ref := cloneURLAndRef(&r.url)
-		r.localDir, err = CloneAndCheckoutSources(gitRepo, localURL.String(), ref, r.localDir, r.contextDir)
+		r.localDir, err = CloneAndCheckoutSources(gitRepo, r.url.StringNoFragment(), r.url.URL.Fragment, r.localDir, r.contextDir)
 		if err != nil {
 			return "", err
 		}
 	}
+	if _, err := os.Stat(r.localDir); os.IsNotExist(err) {
+		return "", fmt.Errorf("supplied context directory '%s' does not exist in '%s'", r.contextDir, r.url.String())
+	}
 	return r.localDir, nil
-}
-
-func cloneURLAndRef(url *url.URL) (*url.URL, string) {
-	localURL := *url
-	ref := localURL.Fragment
-	localURL.Fragment = ""
-	return &localURL, ref
 }
 
 // DetectAuth returns an error if the source repository cannot be cloned
@@ -272,6 +278,7 @@ func cloneURLAndRef(url *url.URL) (*url.URL, string) {
 // 3) GIT_CONFIG_NOSYSTEM prevents git from loading system-wide config
 // 4) GIT_ASKPASS to prevent git from prompting for a user/password
 func (r *SourceRepository) DetectAuth() error {
+
 	url, ok, err := r.RemoteURL()
 	if err != nil {
 		return err
@@ -301,39 +308,40 @@ func (r *SourceRepository) DetectAuth() error {
 			fmt.Sprintf("SystemRoot=%s", os.Getenv("SystemRoot")),
 		)
 	}
+
 	gitRepo := git.NewRepositoryWithEnv(env)
-	localURL, ref := cloneURLAndRef(url)
-	_, err = CloneAndCheckoutSources(gitRepo, localURL.String(), ref, tempSrc, "")
+	glog.V(4).Infof("Checking if %v requires authentication", url.StringNoFragment())
+	_, _, err = gitRepo.TimedListRemote(10*time.Second, url.StringNoFragment(), "--heads")
 	if err != nil {
 		r.requiresAuth = true
+		fmt.Print("warning: Cannot check if git requires authentication.\n")
 	}
 	return nil
 }
 
 // RemoteURL returns the remote URL of the source repository
-func (r *SourceRepository) RemoteURL() (*url.URL, bool, error) {
+func (r *SourceRepository) RemoteURL() (*s2igit.URL, bool, error) {
 	if r.remoteURL != nil {
 		return r.remoteURL, true, nil
 	}
-	switch r.url.Scheme {
-	case "file":
+	if r.url.IsLocal() {
 		gitRepo := git.NewRepository()
-		remote, ok, err := gitRepo.GetOriginURL(r.url.Path)
+		remote, ok, err := gitRepo.GetOriginURL(r.url.LocalPath())
 		if err != nil && err != git.ErrGitNotAvailable {
 			return nil, false, err
 		}
 		if !ok {
 			return nil, ok, nil
 		}
-		ref := gitRepo.GetRef(r.url.Path)
+		ref := gitRepo.GetRef(r.url.LocalPath())
 		if len(ref) > 0 {
 			remote = fmt.Sprintf("%s#%s", remote, ref)
 		}
 
-		if r.remoteURL, err = git.ParseRepository(remote); err != nil {
+		if r.remoteURL, err = s2igit.Parse(remote); err != nil {
 			return nil, false, err
 		}
-	default:
+	} else {
 		r.remoteURL = &r.url
 	}
 	return r.remoteURL, true, nil
@@ -377,7 +385,7 @@ func (r *SourceRepository) AddDockerfile(contents string) error {
 		r.info = &SourceRepositoryInfo{}
 	}
 	r.info.Dockerfile = dockerfile
-	r.buildWithDocker = true
+	r.SetStrategy(generate.StrategyDocker)
 	r.forceAddDockerfile = true
 	return nil
 }
@@ -385,7 +393,7 @@ func (r *SourceRepository) AddDockerfile(contents string) error {
 // AddBuildSecrets adds the defined secrets into a build. The input format for
 // the secrets is "<secretName>:<destinationDir>". The destinationDir is
 // optional and when not specified the default is the current working directory.
-func (r *SourceRepository) AddBuildSecrets(secrets []string, isDockerBuild bool) error {
+func (r *SourceRepository) AddBuildSecrets(secrets []string) error {
 	injections := s2iapi.VolumeList{}
 	r.secrets = []buildapi.SecretBuildSource{}
 	for _, in := range secrets {
@@ -402,7 +410,7 @@ func (r *SourceRepository) AddBuildSecrets(secrets []string, isDockerBuild bool)
 		return false
 	}
 	for _, in := range injections {
-		if isDockerBuild && filepath.IsAbs(in.Destination) {
+		if r.GetStrategy() == generate.StrategyDocker && filepath.IsAbs(in.Destination) {
 			return fmt.Errorf("for the docker strategy, the secret destination directory %q must be a relative path", in.Destination)
 		}
 		if len(validation.ValidateSecretName(in.Source, false)) != 0 {
@@ -443,9 +451,10 @@ func (rr SourceRepositories) NotUsed() SourceRepositories {
 
 // SourceRepositoryInfo contains info about a source repository
 type SourceRepositoryInfo struct {
-	Path       string
-	Types      []SourceLanguageType
-	Dockerfile Dockerfile
+	Path        string
+	Types       []SourceLanguageType
+	Dockerfile  Dockerfile
+	Jenkinsfile bool
 }
 
 // Terms returns which languages the source repository was
@@ -482,25 +491,22 @@ type Detector interface {
 
 // SourceRepositoryEnumerator implements the Detector interface
 type SourceRepositoryEnumerator struct {
-	Detectors source.Detectors
-	Tester    dockerfile.Tester
+	Detectors         source.Detectors
+	DockerfileTester  generate.Tester
+	JenkinsfileTester generate.Tester
 }
 
-// ErrNoLanguageDetected is the error returned when no language can be detected by all
-// source code detectors.
-var ErrNoLanguageDetected = errors.New("No language matched the source repository")
-
 // Detect extracts source code information about the provided source repository
-func (e SourceRepositoryEnumerator) Detect(dir string, dockerStrategy bool) (*SourceRepositoryInfo, error) {
+func (e SourceRepositoryEnumerator) Detect(dir string, noSourceDetection bool) (*SourceRepositoryInfo, error) {
 	info := &SourceRepositoryInfo{
 		Path: dir,
 	}
 
 	// no point in doing source-type detection if the requested build strategy
-	// is docker
-	if !dockerStrategy {
+	// is docker or pipeline
+	if !noSourceDetection {
 		for _, d := range e.Detectors {
-			if detected, ok := d(dir); ok {
+			if detected := d(dir); detected != nil {
 				info.Types = append(info.Types, SourceLanguageType{
 					Platform: detected.Platform,
 					Version:  detected.Version,
@@ -508,17 +514,17 @@ func (e SourceRepositoryEnumerator) Detect(dir string, dockerStrategy bool) (*So
 			}
 		}
 	}
-	if path, ok, err := e.Tester.Has(dir); err == nil && ok {
+	if path, ok, err := e.DockerfileTester.Has(dir); err == nil && ok {
 		dockerfile, err := NewDockerfileFromFile(path)
 		if err != nil {
 			return nil, err
 		}
 		info.Dockerfile = dockerfile
 	}
-
-	if info.Dockerfile == nil && len(info.Types) == 0 {
-		return nil, ErrNoLanguageDetected
+	if _, ok, err := e.JenkinsfileTester.Has(dir); err == nil && ok {
+		info.Jenkinsfile = true
 	}
+
 	return info, nil
 }
 
@@ -528,8 +534,8 @@ func (e SourceRepositoryEnumerator) Detect(dir string, dockerStrategy bool) (*So
 // more info
 func StrategyAndSourceForRepository(repo *SourceRepository, image *ImageRef) (*BuildStrategyRef, *SourceRef, error) {
 	strategy := &BuildStrategyRef{
-		Base:          image,
-		IsDockerBuild: repo.IsDockerBuild(),
+		Base:     image,
+		Strategy: repo.strategy,
 	}
 	source := &SourceRef{
 		Binary:       repo.binary,
@@ -557,7 +563,6 @@ func StrategyAndSourceForRepository(repo *SourceRepository, image *ImageRef) (*B
 		}
 		if ok {
 			source.URL = remoteURL
-			source.Ref = remoteURL.Fragment
 		} else {
 			source.Binary = true
 		}
@@ -586,7 +591,10 @@ func CloneAndCheckoutSources(repo git.Repository, remote, ref, localDir, context
 	}
 	if len(ref) > 0 {
 		if err := repo.Checkout(localDir, ref); err != nil {
-			return "", fmt.Errorf("unable to checkout ref %q in %q repository: %v", ref, remote, err)
+			err = repo.PotentialPRRetryAsFetch(localDir, remote, ref, err)
+			if err != nil {
+				return "", fmt.Errorf("unable to checkout ref %q in %q repository: %v", ref, remote, err)
+			}
 		}
 	}
 	if len(contextDir) > 0 {

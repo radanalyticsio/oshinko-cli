@@ -4,9 +4,11 @@ import (
 	"github.com/spf13/cobra"
 	"io"
 
-	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	//"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	"github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"os"
 	"path/filepath"
 	"fmt"
@@ -33,9 +35,9 @@ func CmdConfigMap(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.
 		Hidden: true,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Complete(f, cmd, args); err != nil {
-				kcmdutil.CheckErr(kcmdutil.UsageError(cmd, err.Error()))
+				kcmdutil.CheckErr(kcmdutil.UsageErrorf(cmd, err.Error()))
 			}
-			if err := options.RunCmdConfigMap(out, cmd, args); err != nil {
+			if err := options.RunCmdConfigMap(f, out, cmd, args); err != nil {
 				kcmdutil.CheckErr(err)
 			}
 		},
@@ -46,9 +48,9 @@ func CmdConfigMap(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.
 	return cmd
 }
 
-func (o *CmdOptions) RunCmdConfigMap(out io.Writer, cmd *cobra.Command, args []string) error {
-
-	cmap, err := o.KClient.ConfigMaps(o.Project).Get(o.Name)
+func (o *CmdOptions) RunCmdConfigMap(f *clientcmd.Factory, out io.Writer, cmd *cobra.Command, args []string) error {
+	kubeClient, err := f.ClientSet()
+	cmap, err := kubeClient.Core().ConfigMaps(o.Project).Get(o.Name, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}

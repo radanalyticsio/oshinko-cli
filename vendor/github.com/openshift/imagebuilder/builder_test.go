@@ -2,22 +2,76 @@ package imagebuilder
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
-	"github.com/docker/docker/builder/dockerfile/parser"
 	docker "github.com/fsouza/go-dockerclient"
 )
+
+func TestVolumeSet(t *testing.T) {
+	testCases := []struct {
+		inputs    []string
+		changed   []bool
+		result    []string
+		covered   []string
+		uncovered []string
+	}{
+		{
+			inputs:  []string{"/var/lib", "/var"},
+			changed: []bool{true, true},
+			result:  []string{"/var"},
+
+			covered:   []string{"/var/lib", "/var/", "/var"},
+			uncovered: []string{"/var1", "/", "/va"},
+		},
+		{
+			inputs:  []string{"/var", "/", "/"},
+			changed: []bool{true, true, false},
+			result:  []string{""},
+
+			covered: []string{"/var/lib", "/var/", "/var", "/"},
+		},
+		{
+			inputs:  []string{"/var", "/var/lib"},
+			changed: []bool{true, false},
+			result:  []string{"/var"},
+		},
+	}
+	for i, testCase := range testCases {
+		s := VolumeSet{}
+		for j, path := range testCase.inputs {
+			if s.Add(path) != testCase.changed[j] {
+				t.Errorf("%d: adding %d %s should have resulted in change %t", i, j, path, testCase.changed[j])
+			}
+		}
+		if !reflect.DeepEqual(testCase.result, []string(s)) {
+			t.Errorf("%d: got %v", i, s)
+		}
+		for _, path := range testCase.covered {
+			if !s.Covers(path) {
+				t.Errorf("%d: not covered %s", i, path)
+			}
+		}
+		for _, path := range testCase.uncovered {
+			if s.Covers(path) {
+				t.Errorf("%d: covered %s", i, path)
+			}
+		}
+	}
+}
 
 func TestRun(t *testing.T) {
 	f, err := os.Open("dockerclient/testdata/Dockerfile.add")
 	if err != nil {
 		t.Fatal(err)
 	}
-	node, err := parser.Parse(f)
+	node, err := ParseDockerfile(f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +88,7 @@ func TestRun(t *testing.T) {
 		if err := step.Resolve(child); err != nil {
 			t.Fatal(err)
 		}
-		if err := b.Run(step, LogExecutor); err != nil {
+		if err := b.Run(step, LogExecutor, false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -43,6 +97,7 @@ func TestRun(t *testing.T) {
 }
 
 type testExecutor struct {
+	Preserved    []string
 	Copies       []Copy
 	Runs         []Run
 	Configs      []docker.Config
@@ -50,7 +105,12 @@ type testExecutor struct {
 	Err          error
 }
 
-func (e *testExecutor) Copy(copies ...Copy) error {
+func (e *testExecutor) Preserve(path string) error {
+	e.Preserved = append(e.Preserved, path)
+	return e.Err
+}
+
+func (e *testExecutor) Copy(excludes []string, copies ...Copy) error {
 	e.Copies = append(e.Copies, copies...)
 	return e.Err
 }
@@ -66,21 +126,23 @@ func (e *testExecutor) UnrecognizedInstruction(step *Step) error {
 
 func TestBuilder(t *testing.T) {
 	testCases := []struct {
+		Args         map[string]string
 		Dockerfile   string
 		From         string
 		Copies       []Copy
 		Runs         []Run
 		Unrecognized []Step
 		Config       docker.Config
+		Image        *docker.Image
 		ErrFn        func(err error) bool
 	}{
 		{
 			Dockerfile: "dockerclient/testdata/dir/Dockerfile",
 			From:       "busybox",
 			Copies: []Copy{
-				{Src: ".", Dest: []string{"/"}, Download: false},
-				{Src: ".", Dest: []string{"/dir"}},
-				{Src: "subdir/", Dest: []string{"/test/"}, Download: false},
+				{Src: []string{"."}, Dest: "/", Download: false},
+				{Src: []string{"."}, Dest: "/dir"},
+				{Src: []string{"subdir/"}, Dest: "/test/", Download: false},
 			},
 			Config: docker.Config{
 				Image: "busybox",
@@ -90,7 +152,7 @@ func TestBuilder(t *testing.T) {
 			Dockerfile: "dockerclient/testdata/ignore/Dockerfile",
 			From:       "busybox",
 			Copies: []Copy{
-				{Src: ".", Dest: []string{"/"}},
+				{Src: []string{"."}, Dest: "/"},
 			},
 			Config: docker.Config{
 				Image: "busybox",
@@ -108,8 +170,8 @@ func TestBuilder(t *testing.T) {
 			Dockerfile: "dockerclient/testdata/Dockerfile.edgecases",
 			From:       "busybox",
 			Copies: []Copy{
-				{Src: ".", Dest: []string{"/"}, Download: true},
-				{Src: ".", Dest: []string{"/test/copy"}},
+				{Src: []string{"."}, Dest: "/", Download: true},
+				{Src: []string{"."}, Dest: "/test/copy"},
 			},
 			Runs: []Run{
 				{Shell: false, Args: []string{"ls", "-la"}},
@@ -136,7 +198,7 @@ func TestBuilder(t *testing.T) {
 			From:       "busybox",
 			Unrecognized: []Step{
 				Step{Command: "health", Message: "HEALTH ", Original: "HEALTH NONE", Args: []string{""}, Flags: []string{}, Env: []string{}},
-				Step{Command: "shell", Message: "SHELL ", Original: "SHELL [\"/bin/sh\", \"-c\"]", Args: []string{""}, Flags: []string{}, Env: []string{}},
+				Step{Command: "shell", Message: "SHELL /bin/sh -c", Original: "SHELL [\"/bin/sh\", \"-c\"]", Args: []string{"/bin/sh", "-c"}, Flags: []string{}, Env: []string{}, Attrs: map[string]bool{"json": true}},
 				Step{Command: "unrecognized", Message: "UNRECOGNIZED ", Original: "UNRECOGNIZED", Args: []string{""}, Env: []string{}},
 			},
 			Config: docker.Config{
@@ -155,13 +217,13 @@ func TestBuilder(t *testing.T) {
 			Dockerfile: "dockerclient/testdata/Dockerfile.add",
 			From:       "busybox",
 			Copies: []Copy{
-				{Src: "https://github.com/openshift/origin/raw/master/README.md", Dest: []string{"/README.md"}, Download: true},
-				{Src: "https://github.com/openshift/origin/raw/master/LICENSE", Dest: []string{"/"}, Download: true},
-				{Src: "https://github.com/openshift/origin/raw/master/LICENSE", Dest: []string{"/A"}, Download: true},
-				{Src: "https://github.com/openshift/origin/raw/master/LICENSE", Dest: []string{"/a"}, Download: true},
-				{Src: "https://github.com/openshift/origin/raw/master/LICENSE", Dest: []string{"/b/a"}, Download: true},
-				{Src: "https://github.com/openshift/origin/raw/master/LICENSE", Dest: []string{"/b/"}, Download: true},
-				{Src: "https://github.com/openshift/ruby-hello-world/archive/master.zip", Dest: []string{"/tmp/"}, Download: true},
+				{Src: []string{"https://github.com/openshift/origin/raw/master/README.md"}, Dest: "/README.md", Download: true},
+				{Src: []string{"https://github.com/openshift/origin/raw/master/LICENSE"}, Dest: "/", Download: true},
+				{Src: []string{"https://github.com/openshift/origin/raw/master/LICENSE"}, Dest: "/A", Download: true},
+				{Src: []string{"https://github.com/openshift/origin/raw/master/LICENSE"}, Dest: "/a", Download: true},
+				{Src: []string{"https://github.com/openshift/origin/raw/master/LICENSE"}, Dest: "/b/a", Download: true},
+				{Src: []string{"https://github.com/openshift/origin/raw/master/LICENSE"}, Dest: "/b/", Download: true},
+				{Src: []string{"https://github.com/openshift/ruby-hello-world/archive/master.zip"}, Dest: "/tmp/", Download: true},
 			},
 			Runs: []Run{
 				{Shell: true, Args: []string{"mkdir ./b"}},
@@ -171,6 +233,95 @@ func TestBuilder(t *testing.T) {
 				User:  "root",
 			},
 		},
+		{
+			Dockerfile: "dockerclient/testdata/Dockerfile.badhealthcheck",
+			From:       "debian",
+			Config: docker.Config{
+				Image: "busybox",
+			},
+			ErrFn: func(err error) bool {
+				return err != nil && strings.Contains(err.Error(), "HEALTHCHECK requires at least one argument")
+			},
+		},
+		{
+			Dockerfile: "dockerclient/testdata/Dockerfile.healthcheck",
+			From:       "debian",
+			Config: docker.Config{
+				Image: "debian",
+				Cmd:   []string{"/bin/sh", "-c", "/app/main.sh"},
+				Healthcheck: &docker.HealthConfig{
+					Interval: 5 * time.Second,
+					Timeout:  3 * time.Second,
+					Retries:  3,
+					Test:     []string{"CMD-SHELL", "/app/check.sh --quiet"},
+				},
+			},
+		},
+		{
+			Dockerfile: "dockerclient/testdata/Dockerfile.envsubst",
+			From:       "busybox",
+			Image: &docker.Image{
+				ID: "busybox2",
+				Config: &docker.Config{
+					Env: []string{"FOO=another", "BAR=original"},
+				},
+			},
+			Config: docker.Config{
+				Env:    []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "FOO=value"},
+				Labels: map[string]string{"test": "value"},
+			},
+		},
+		{
+			Dockerfile: "dockerclient/testdata/Dockerfile.args",
+			Args:       map[string]string{"BAR": "first"},
+			From:       "busybox",
+			Config: docker.Config{
+				Image:  "busybox",
+				Env:    []string{"FOO=value", "TEST=", "BAZ=first"},
+				Labels: map[string]string{"test": "value"},
+			},
+			Runs: []Run{
+				{Shell: true, Args: []string{"echo $BAR"}},
+			},
+		},
+		{
+			Dockerfile: "dockerclient/testdata/volume/Dockerfile",
+			From:       "busybox",
+			Image: &docker.Image{
+				ID:     "busybox2",
+				Config: &docker.Config{},
+			},
+			Config: docker.Config{
+				Env: []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},
+				Volumes: map[string]struct{}{
+					"/var":     struct{}{},
+					"/var/www": struct{}{},
+				},
+			},
+			Copies: []Copy{
+				{Src: []string{"file"}, Dest: "/var/www/", Download: true},
+				{Src: []string{"file"}, Dest: "/var/", Download: true},
+				{Src: []string{"file2"}, Dest: "/var/", Download: true},
+			},
+		},
+		{
+			Dockerfile: "dockerclient/testdata/volumerun/Dockerfile",
+			From:       "busybox",
+			Config: docker.Config{
+				Image: "busybox",
+				Volumes: map[string]struct{}{
+					"/var/www": struct{}{},
+				},
+			},
+			Runs: []Run{
+				{Shell: true, Args: []string{"touch /var/www/file3"}},
+			},
+			Copies: []Copy{
+				{Src: []string{"file"}, Dest: "/var/www/", Download: true},
+				{Src: []string{"file2"}, Dest: "/var/www/", Download: true},
+				{Src: []string{"file4"}, Dest: "/var/www/", Download: true},
+			},
+		},
 	}
 	for i, test := range testCases {
 		data, err := ioutil.ReadFile(test.Dockerfile)
@@ -178,12 +329,13 @@ func TestBuilder(t *testing.T) {
 			t.Errorf("%d: %v", i, err)
 			continue
 		}
-		node, err := parser.Parse(bytes.NewBuffer(data))
+		node, err := ParseDockerfile(bytes.NewBuffer(data))
 		if err != nil {
 			t.Errorf("%d: %v", i, err)
 			continue
 		}
 		b := NewBuilder()
+		b.Args = test.Args
 		from, err := b.From(node)
 		if err != nil {
 			t.Errorf("%d: %v", i, err)
@@ -192,6 +344,12 @@ func TestBuilder(t *testing.T) {
 		if from != test.From {
 			t.Errorf("%d: unexpected FROM: %s", i, from)
 		}
+		if test.Image != nil {
+			if err := b.FromImage(test.Image, node); err != nil {
+				t.Errorf("%d: unexpected error: %v", i, err)
+			}
+		}
+
 		e := &testExecutor{}
 		var lastErr error
 		for j, child := range node.Children {
@@ -200,7 +358,7 @@ func TestBuilder(t *testing.T) {
 				lastErr = fmt.Errorf("%d: %d: %s: resolve: %v", i, j, step.Original, err)
 				break
 			}
-			if err := b.Run(step, e); err != nil {
+			if err := b.Run(step, e, false); err != nil {
 				lastErr = fmt.Errorf("%d: %d: %s: run: %v", i, j, step.Original, err)
 				break
 			}
@@ -222,7 +380,8 @@ func TestBuilder(t *testing.T) {
 		}
 		lastConfig := b.RunConfig
 		if !reflect.DeepEqual(test.Config, lastConfig) {
-			t.Errorf("%d: unexpected config: %#v", i, lastConfig)
+			data, _ := json.Marshal(lastConfig)
+			t.Errorf("%d: unexpected config: %s", i, string(data))
 		}
 	}
 }

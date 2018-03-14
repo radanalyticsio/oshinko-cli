@@ -5,14 +5,17 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/kubernetes/pkg/labels"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+
+	g "github.com/onsi/ginkgo"
 
 	exutil "github.com/openshift/origin/test/extended/util"
 )
 
 // RunInPodContainer will run provided command in the specified pod container.
 func RunInPodContainer(oc *exutil.CLI, selector labels.Selector, cmd []string) error {
-	pods, err := exutil.WaitForPods(oc.KubeREST().Pods(oc.Namespace()), selector, exutil.CheckPodIsRunningFn, 1, 2*time.Minute)
+	pods, err := exutil.WaitForPods(oc.KubeClient().CoreV1().Pods(oc.Namespace()), selector, exutil.CheckPodIsRunningFn, 1, 4*time.Minute)
 	if err != nil {
 		return err
 	}
@@ -20,13 +23,17 @@ func RunInPodContainer(oc *exutil.CLI, selector labels.Selector, cmd []string) e
 		return fmt.Errorf("Got %d pods for selector %v, expected 1", len(pods), selector)
 	}
 
-	pod, err := oc.KubeREST().Pods(oc.Namespace()).Get(pods[0])
+	pod, err := oc.KubeClient().CoreV1().Pods(oc.Namespace()).Get(pods[0], metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
 	args := []string{pod.Name, "-c", pod.Spec.Containers[0].Name, "--"}
 	args = append(args, cmd...)
-	return oc.Run("exec").Args(args...).Execute()
+	output, err := oc.Run("exec").Args(args...).Output()
+	if err == nil {
+		fmt.Fprintf(g.GinkgoWriter, "RunInPodContainer exec output: %s\n", output)
+	}
+	return err
 }
 
 // CheckPageContains makes a http request for an example application and checks
@@ -41,5 +48,15 @@ func CheckPageContains(oc *exutil.CLI, endpoint, path, contents string) (bool, e
 	if err != nil {
 		return false, err
 	}
-	return strings.Contains(response, contents), nil
+	success := strings.Contains(response, contents)
+	if !success {
+		fmt.Fprintf(g.GinkgoWriter, "CheckPageContains was looking for %s but got %s\n", contents, response)
+	}
+	return success, nil
+}
+
+func cleanup(oc *exutil.CLI) {
+	if err := exutil.CleanupHostPathVolumes(oc.AdminKubeClient().Core().PersistentVolumes(), oc.Namespace()); err != nil {
+		ginkgolog("WARNING: couldn't cleanup persistent volumes: %v", err)
+	}
 }

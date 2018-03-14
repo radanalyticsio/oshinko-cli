@@ -2,11 +2,12 @@ package simple
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/golang/glog"
-	kvalidation "k8s.io/kubernetes/pkg/util/validation"
+	kvalidation "k8s.io/apimachinery/pkg/util/validation"
 
-	routeapi "github.com/openshift/origin/pkg/route/api"
+	routeapi "github.com/openshift/origin/pkg/route/apis/route"
 )
 
 // Default DNS suffix to use if no configuration is passed to this plugin.
@@ -50,5 +51,5 @@ func (p *SimpleAllocationPlugin) GenerateHostname(route *routeapi.Route, shard *
 	if len(route.Name) == 0 || len(route.Namespace) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%s-%s.%s", route.Name, route.Namespace, shard.DNSSuffix)
+	return fmt.Sprintf("%s-%s.%s", strings.Replace(route.Name, ".", "-", -1), route.Namespace, shard.DNSSuffix)
 }

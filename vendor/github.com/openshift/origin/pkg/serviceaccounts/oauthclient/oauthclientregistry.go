@@ -7,18 +7,25 @@ import (
 	"strconv"
 	"strings"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	kclient "k8s.io/kubernetes/pkg/client/unversioned"
-	"k8s.io/kubernetes/pkg/runtime"
+	clientv1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
+	apiserverserviceaccount "k8s.io/apiserver/pkg/authentication/serviceaccount"
+	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/tools/record"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	kcoreclient "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/typed/core/internalversion"
 	"k8s.io/kubernetes/pkg/serviceaccount"
 
 	scopeauthorizer "github.com/openshift/origin/pkg/authorization/authorizer/scope"
-	osclient "github.com/openshift/origin/pkg/client"
-	oauthapi "github.com/openshift/origin/pkg/oauth/api"
+	oauthapi "github.com/openshift/origin/pkg/oauth/apis/oauth"
 	"github.com/openshift/origin/pkg/oauth/registry/oauthclient"
-	routeapi "github.com/openshift/origin/pkg/route/api"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/util/sets"
+	routeapi "github.com/openshift/origin/pkg/route/apis/route"
+	routeclient "github.com/openshift/origin/pkg/route/generated/internalclientset/typed/route/internalversion"
 )
 
 const (
@@ -44,19 +51,21 @@ var modelPrefixes = []string{
 // namesToObjMapperFunc is linked to a given GroupKind.
 // Based on the namespace and names provided, it builds a map of resource name to redirect URIs.
 // The redirect URIs represent the default values as specified by the resource.
-// These values can be overridden by user specified data.
-type namesToObjMapperFunc func(namespace string, names sets.String) map[string]redirectURIList
+// These values can be overridden by user specified data. Errors returned are informative and non-fatal.
+type namesToObjMapperFunc func(namespace string, names sets.String) (map[string]redirectURIList, []error)
 
-var emptyGroupKind = unversioned.GroupKind{} // Used with static redirect URIs
+var emptyGroupKind = schema.GroupKind{} // Used with static redirect URIs
 var routeGroupKind = routeapi.SchemeGroupVersion.WithKind(routeKind).GroupKind()
+var legacyRouteGroupKind = routeapi.LegacySchemeGroupVersion.WithKind(routeKind).GroupKind() // to support redirect reference with old group
 
 // TODO add ingress support
 // var ingressGroupKind = routeapi.SchemeGroupVersion.WithKind(IngressKind).GroupKind()
 
 type saOAuthClientAdapter struct {
-	saClient     kclient.ServiceAccountsNamespacer
-	secretClient kclient.SecretsNamespacer
-	routeClient  osclient.RoutesNamespacer
+	saClient      kcoreclient.ServiceAccountsGetter
+	secretClient  kcoreclient.SecretsGetter
+	eventRecorder record.EventRecorder
+	routeClient   routeclient.RoutesGetter
 	// TODO add ingress support
 	//ingressClient ??
 
@@ -82,8 +91,8 @@ type model struct {
 }
 
 // getGroupKind is used to determine if a group and kind combination is supported.
-func (m *model) getGroupKind() unversioned.GroupKind {
-	return unversioned.GroupKind{Group: m.group, Kind: m.kind}
+func (m *model) getGroupKind() schema.GroupKind {
+	return schema.GroupKind{Group: m.group, Kind: m.kind}
 }
 
 // updateFromURI updates the data in the model with the user provided URL data.
@@ -182,32 +191,71 @@ func (uri *redirectURI) merge(m *model) {
 
 var _ oauthclient.Getter = &saOAuthClientAdapter{}
 
-func NewServiceAccountOAuthClientGetter(saClient kclient.ServiceAccountsNamespacer, secretClient kclient.SecretsNamespacer, routeClient osclient.RoutesNamespacer, delegate oauthclient.Getter, grantMethod oauthapi.GrantHandlerType) oauthclient.Getter {
-	return &saOAuthClientAdapter{saClient: saClient, secretClient: secretClient, routeClient: routeClient, delegate: delegate, grantMethod: grantMethod, decoder: kapi.Codecs.UniversalDecoder()}
+func NewServiceAccountOAuthClientGetter(
+	saClient kcoreclient.ServiceAccountsGetter,
+	secretClient kcoreclient.SecretsGetter,
+	eventClient corev1.EventInterface,
+	routeClient routeclient.RoutesGetter,
+	delegate oauthclient.Getter,
+	grantMethod oauthapi.GrantHandlerType,
+) oauthclient.Getter {
+	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster.StartRecordingToSink(&corev1.EventSinkImpl{Interface: eventClient})
+	recorder := eventBroadcaster.NewRecorder(legacyscheme.Scheme, clientv1.EventSource{Component: "service-account-oauth-client-getter"})
+	return &saOAuthClientAdapter{
+		saClient:      saClient,
+		secretClient:  secretClient,
+		eventRecorder: recorder,
+		routeClient:   routeClient,
+		delegate:      delegate,
+		grantMethod:   grantMethod,
+		decoder:       legacyscheme.Codecs.UniversalDecoder(),
+	}
 }
 
-func (a *saOAuthClientAdapter) GetClient(ctx kapi.Context, name string) (*oauthapi.OAuthClient, error) {
-	saNamespace, saName, err := serviceaccount.SplitUsername(name)
+func (a *saOAuthClientAdapter) Get(name string, options metav1.GetOptions) (*oauthapi.OAuthClient, error) {
+	var err error
+	saNamespace, saName, err := apiserverserviceaccount.SplitUsername(name)
 	if err != nil {
-		return a.delegate.GetClient(ctx, name)
+		return a.delegate.Get(name, options)
 	}
 
-	sa, err := a.saClient.ServiceAccounts(saNamespace).Get(saName)
+	sa, err := a.saClient.ServiceAccounts(saNamespace).Get(saName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
 
+	var saErrors []error
+	var failReason string
+	// Create a warning event combining the collected annotation errors upon failure.
+	defer func() {
+		if err != nil && len(saErrors) > 0 && len(failReason) > 0 {
+			a.eventRecorder.Event(sa, kapi.EventTypeWarning, failReason, utilerrors.NewAggregate(saErrors).Error())
+		}
+	}()
+
 	redirectURIs := []string{}
-	if modelsMap := parseModelsMap(sa.Annotations, a.decoder); len(modelsMap) > 0 {
-		if uris := a.extractRedirectURIs(modelsMap, saNamespace); len(uris) > 0 {
+	modelsMap, errs := parseModelsMap(sa.Annotations, a.decoder)
+	if len(errs) > 0 {
+		saErrors = append(saErrors, errs...)
+	}
+
+	if len(modelsMap) > 0 {
+		uris, extractErrors := a.extractRedirectURIs(modelsMap, saNamespace)
+		if len(uris) > 0 {
 			redirectURIs = append(redirectURIs, uris.extractValidRedirectURIStrings()...)
+		}
+		if len(extractErrors) > 0 {
+			saErrors = append(saErrors, extractErrors...)
 		}
 	}
 	if len(redirectURIs) == 0 {
-		return nil, fmt.Errorf(
-			"%v has no redirectURIs; set %v<some-value>=<redirect> or create a dynamic URI using %v<some-value>=<reference>",
+		err = fmt.Errorf("%v has no redirectURIs; set %v<some-value>=<redirect> or create a dynamic URI using %v<some-value>=<reference>",
 			name, OAuthRedirectModelAnnotationURIPrefix, OAuthRedirectModelAnnotationReferencePrefix,
 		)
+		failReason = "NoSAOAuthRedirectURIs"
+		saErrors = append(saErrors, err)
+		return nil, err
 	}
 
 	tokens, err := a.getServiceAccountTokens(sa)
@@ -215,13 +263,16 @@ func (a *saOAuthClientAdapter) GetClient(ctx kapi.Context, name string) (*oautha
 		return nil, err
 	}
 	if len(tokens) == 0 {
-		return nil, fmt.Errorf("%v has no tokens", name)
+		err = fmt.Errorf("%v has no tokens", name)
+		failReason = "NoSAOAuthTokens"
+		saErrors = append(saErrors, err)
+		return nil, err
 	}
 
 	saWantsChallenges, _ := strconv.ParseBool(sa.Annotations[OAuthWantChallengesAnnotationPrefix])
 
 	saClient := &oauthapi.OAuthClient{
-		ObjectMeta:            kapi.ObjectMeta{Name: name},
+		ObjectMeta:            metav1.ObjectMeta{Name: name},
 		ScopeRestrictions:     getScopeRestrictionsFor(saNamespace, saName),
 		AdditionalSecrets:     tokens,
 		RespondWithChallenges: saWantsChallenges,
@@ -238,9 +289,10 @@ func (a *saOAuthClientAdapter) GetClient(ctx kapi.Context, name string) (*oautha
 
 // parseModelsMap builds a map of model name to model using a service account's annotations.
 // The model name is only used for building the map (it ties together the uri and reference annotations)
-// and serves no functional purpose other than making testing easier.
-func parseModelsMap(annotations map[string]string, decoder runtime.Decoder) map[string]model {
+// and serves no functional purpose other than making testing easier. Errors returned are informative and non-fatal.
+func parseModelsMap(annotations map[string]string, decoder runtime.Decoder) (map[string]model, []error) {
 	models := map[string]model{}
+	parseErrors := []error{}
 	for key, value := range annotations {
 		prefix, name, ok := parseModelPrefixName(key)
 		if !ok {
@@ -251,16 +303,20 @@ func parseModelsMap(annotations map[string]string, decoder runtime.Decoder) map[
 		case OAuthRedirectModelAnnotationURIPrefix:
 			if u, err := url.Parse(value); err == nil {
 				m.updateFromURI(u)
+			} else {
+				parseErrors = append(parseErrors, err)
 			}
 		case OAuthRedirectModelAnnotationReferencePrefix:
 			r := &oauthapi.OAuthRedirectReference{}
 			if err := runtime.DecodeInto(decoder, []byte(value), r); err == nil {
 				m.updateFromReference(&r.Reference)
+			} else {
+				parseErrors = append(parseErrors, err)
 			}
 		}
 		models[name] = m
 	}
-	return models
+	return models, parseErrors
 }
 
 // parseModelPrefixName determines if the given key is a model prefix.
@@ -275,11 +331,12 @@ func parseModelPrefixName(key string) (string, string, bool) {
 }
 
 // extractRedirectURIs builds redirect URIs using the given models and namespace.
-// The returned redirect URIs may contain duplicates and invalid entries.
-func (a *saOAuthClientAdapter) extractRedirectURIs(modelsMap map[string]model, namespace string) redirectURIList {
+// The returned redirect URIs may contain duplicates and invalid entries. Errors returned are informative and non-fatal.
+func (a *saOAuthClientAdapter) extractRedirectURIs(modelsMap map[string]model, namespace string) (redirectURIList, []error) {
 	var data redirectURIList
-	groupKindModelListMapper := map[unversioned.GroupKind]modelList{} // map of GroupKind to all models belonging to it
-	groupKindModelToURI := map[unversioned.GroupKind]namesToObjMapperFunc{
+	routeErrors := []error{}
+	groupKindModelListMapper := map[schema.GroupKind]modelList{} // map of GroupKind to all models belonging to it
+	groupKindModelToURI := map[schema.GroupKind]namesToObjMapperFunc{
 		routeGroupKind: a.redirectURIsFromRoutes,
 		// TODO add support for ingresses by creating the appropriate GroupKind and namesToObjMapperFunc
 		// ingressGroupKind: a.redirectURIsFromIngresses,
@@ -287,6 +344,9 @@ func (a *saOAuthClientAdapter) extractRedirectURIs(modelsMap map[string]model, n
 
 	for _, m := range modelsMap {
 		gk := m.getGroupKind()
+		if gk == legacyRouteGroupKind {
+			gk = routeGroupKind // support legacy route group without doing extra API calls
+		}
 		if len(m.name) == 0 && gk == emptyGroupKind { // Is this a static redirect URI?
 			uri := redirectURI{} // No defaults wanted
 			uri.merge(&m)
@@ -298,27 +358,37 @@ func (a *saOAuthClientAdapter) extractRedirectURIs(modelsMap map[string]model, n
 
 	for gk, models := range groupKindModelListMapper {
 		if names := models.getNames(); names.Len() > 0 {
-			if objMapper := groupKindModelToURI[gk](namespace, names); len(objMapper) > 0 {
+			objMapper, errs := groupKindModelToURI[gk](namespace, names)
+			if len(objMapper) > 0 {
 				data = append(data, models.getRedirectURIs(objMapper)...)
+			}
+			if len(errs) > 0 {
+				routeErrors = append(routeErrors, errs...)
 			}
 		}
 	}
 
-	return data
+	return data, routeErrors
 }
 
 // redirectURIsFromRoutes is the namesToObjMapperFunc specific to Routes.
 // Returns a map of route name to redirect URIs that contain the default data as specified by the route's ingresses.
-func (a *saOAuthClientAdapter) redirectURIsFromRoutes(namespace string, osRouteNames sets.String) map[string]redirectURIList {
+// Errors returned are informative and non-fatal.
+func (a *saOAuthClientAdapter) redirectURIsFromRoutes(namespace string, osRouteNames sets.String) (map[string]redirectURIList, []error) {
 	var routes []routeapi.Route
+	routeErrors := []error{}
 	routeInterface := a.routeClient.Routes(namespace)
 	if osRouteNames.Len() > 1 {
-		if r, err := routeInterface.List(kapi.ListOptions{}); err == nil {
+		if r, err := routeInterface.List(metav1.ListOptions{}); err == nil {
 			routes = r.Items
+		} else {
+			routeErrors = append(routeErrors, err)
 		}
 	} else {
-		if r, err := routeInterface.Get(osRouteNames.List()[0]); err == nil {
+		if r, err := routeInterface.Get(osRouteNames.List()[0], metav1.GetOptions{}); err == nil {
 			routes = append(routes, *r)
+		} else {
+			routeErrors = append(routeErrors, err)
 		}
 	}
 	routeMap := map[string]redirectURIList{}
@@ -327,7 +397,7 @@ func (a *saOAuthClientAdapter) redirectURIsFromRoutes(namespace string, osRouteN
 			routeMap[route.Name] = redirectURIsFromRoute(&route)
 		}
 	}
-	return routeMap
+	return routeMap, routeErrors
 }
 
 // redirectURIsFromRoute returns a list of redirect URIs that contain the default data as specified by the given route's ingresses.
@@ -382,15 +452,14 @@ func getScopeRestrictionsFor(namespace, name string) []oauthapi.ScopeRestriction
 
 // getServiceAccountTokens returns all ServiceAccountToken secrets for the given ServiceAccount
 func (a *saOAuthClientAdapter) getServiceAccountTokens(sa *kapi.ServiceAccount) ([]string, error) {
-	allSecrets, err := a.secretClient.Secrets(sa.Namespace).List(kapi.ListOptions{})
+	allSecrets, err := a.secretClient.Secrets(sa.Namespace).List(metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
-
 	tokens := []string{}
 	for i := range allSecrets.Items {
-		secret := allSecrets.Items[i]
-		if serviceaccount.IsServiceAccountToken(&secret, sa) {
+		secret := &allSecrets.Items[i]
+		if serviceaccount.InternalIsServiceAccountToken(secret, sa) {
 			tokens = append(tokens, string(secret.Data[kapi.ServiceAccountTokenKey]))
 		}
 	}

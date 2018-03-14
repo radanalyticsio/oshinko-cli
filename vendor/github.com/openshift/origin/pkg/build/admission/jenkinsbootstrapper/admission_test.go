@@ -5,16 +5,17 @@ import (
 	"strings"
 	"testing"
 
-	"k8s.io/kubernetes/pkg/admission"
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/auth/user"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apiserver/pkg/admission"
+	"k8s.io/apiserver/pkg/authentication/user"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
-	"k8s.io/kubernetes/pkg/runtime"
 
-	buildapi "github.com/openshift/origin/pkg/build/api"
-	"github.com/openshift/origin/pkg/client/testclient"
+	buildapi "github.com/openshift/origin/pkg/build/apis/build"
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
+	templatefake "github.com/openshift/origin/pkg/template/generated/internalclientset/fake"
 )
 
 func TestAdmission(t *testing.T) {
@@ -27,60 +28,60 @@ func TestAdmission(t *testing.T) {
 		attributes  admission.Attributes
 		expectedErr string
 
-		validateClients func(kubeClient *fake.Clientset, originClient *testclient.Fake) string
+		validateClients func(kubeClient *fake.Clientset, templateClient *templatefake.Clientset) string
 	}{
 		{
 			name:            "disabled",
-			attributes:      admission.NewAttributesRecord(enableBuild, nil, unversioned.GroupVersionKind{}, "namespace", "name", buildapi.SchemeGroupVersion.WithResource("builds"), "", admission.Create, &user.DefaultInfo{}),
+			attributes:      admission.NewAttributesRecord(enableBuild, nil, schema.GroupVersionKind{}, "namespace", "name", buildapi.LegacySchemeGroupVersion.WithResource("builds"), "", admission.Create, &user.DefaultInfo{}),
 			jenkinsEnabled:  boolptr(false),
 			validateClients: noAction,
 		},
 		{
 			name:            "not a jenkins build",
-			attributes:      admission.NewAttributesRecord(&buildapi.Build{Spec: buildapi.BuildSpec{CommonSpec: buildapi.CommonSpec{Strategy: buildapi.BuildStrategy{}}}}, nil, unversioned.GroupVersionKind{}, "namespace", "name", buildapi.SchemeGroupVersion.WithResource("builds"), "", admission.Create, &user.DefaultInfo{}),
+			attributes:      admission.NewAttributesRecord(&buildapi.Build{Spec: buildapi.BuildSpec{CommonSpec: buildapi.CommonSpec{Strategy: buildapi.BuildStrategy{}}}}, nil, schema.GroupVersionKind{}, "namespace", "name", buildapi.LegacySchemeGroupVersion.WithResource("builds"), "", admission.Create, &user.DefaultInfo{}),
 			jenkinsEnabled:  boolptr(true),
 			validateClients: noAction,
 		},
 		{
 			name:            "not a build kind",
-			attributes:      admission.NewAttributesRecord(&kapi.Service{}, nil, unversioned.GroupVersionKind{}, "namespace", "name", buildapi.SchemeGroupVersion.WithResource("builds"), "", admission.Create, &user.DefaultInfo{}),
+			attributes:      admission.NewAttributesRecord(&kapi.Service{}, nil, schema.GroupVersionKind{}, "namespace", "name", buildapi.LegacySchemeGroupVersion.WithResource("builds"), "", admission.Create, &user.DefaultInfo{}),
 			jenkinsEnabled:  boolptr(true),
 			validateClients: noAction,
 		},
 		{
 			name:            "not a build resource",
-			attributes:      admission.NewAttributesRecord(enableBuild, nil, unversioned.GroupVersionKind{}, "namespace", "name", buildapi.SchemeGroupVersion.WithResource("notbuilds"), "", admission.Create, &user.DefaultInfo{}),
+			attributes:      admission.NewAttributesRecord(enableBuild, nil, schema.GroupVersionKind{}, "namespace", "name", buildapi.LegacySchemeGroupVersion.WithResource("notbuilds"), "", admission.Create, &user.DefaultInfo{}),
 			jenkinsEnabled:  boolptr(true),
 			validateClients: noAction,
 		},
 		{
 			name:            "subresource",
-			attributes:      admission.NewAttributesRecord(enableBuild, nil, unversioned.GroupVersionKind{}, "namespace", "name", buildapi.SchemeGroupVersion.WithResource("builds"), "subresource", admission.Create, &user.DefaultInfo{}),
+			attributes:      admission.NewAttributesRecord(enableBuild, nil, schema.GroupVersionKind{}, "namespace", "name", buildapi.LegacySchemeGroupVersion.WithResource("builds"), "subresource", admission.Create, &user.DefaultInfo{}),
 			jenkinsEnabled:  boolptr(true),
 			validateClients: noAction,
 		},
 		{
 			name:           "service present",
-			attributes:     admission.NewAttributesRecord(enableBuild, nil, unversioned.GroupVersionKind{}, "namespace", "name", buildapi.SchemeGroupVersion.WithResource("builds"), "", admission.Create, &user.DefaultInfo{}),
+			attributes:     admission.NewAttributesRecord(enableBuild, nil, schema.GroupVersionKind{}, "namespace", "name", buildapi.LegacySchemeGroupVersion.WithResource("builds"), "", admission.Create, &user.DefaultInfo{}),
 			jenkinsEnabled: boolptr(true),
 			objects: []runtime.Object{
-				&kapi.Service{ObjectMeta: kapi.ObjectMeta{Namespace: "namespace", Name: "jenkins"}},
+				&kapi.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "namespace", Name: "jenkins"}},
 			},
-			validateClients: func(kubeClient *fake.Clientset, originClient *testclient.Fake) string {
+			validateClients: func(kubeClient *fake.Clientset, templateClient *templatefake.Clientset) string {
 				if len(kubeClient.Actions()) == 1 && kubeClient.Actions()[0].Matches("get", "services") {
 					return ""
 				}
-				return fmt.Sprintf("missing get service in: %v", kubeClient.Actions())
+				return fmt.Sprintf("missing get service in: %#v", kubeClient.Actions())
 			},
 		},
 		{
 			name:       "works on true",
-			attributes: admission.NewAttributesRecord(enableBuild, nil, unversioned.GroupVersionKind{}, "namespace", "name", buildapi.SchemeGroupVersion.WithResource("builds"), "", admission.Create, &user.DefaultInfo{}),
+			attributes: admission.NewAttributesRecord(enableBuild, nil, schema.GroupVersionKind{}, "namespace", "name", buildapi.LegacySchemeGroupVersion.WithResource("builds"), "", admission.Create, &user.DefaultInfo{}),
 			objects: []runtime.Object{
-				&kapi.Service{ObjectMeta: kapi.ObjectMeta{Namespace: "namespace", Name: "jenkins"}},
+				&kapi.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "namespace", Name: "jenkins"}},
 			},
 			jenkinsEnabled: boolptr(true),
-			validateClients: func(kubeClient *fake.Clientset, originClient *testclient.Fake) string {
+			validateClients: func(kubeClient *fake.Clientset, templateClient *templatefake.Clientset) string {
 				if len(kubeClient.Actions()) == 1 && kubeClient.Actions()[0].Matches("get", "services") {
 					return ""
 				}
@@ -89,11 +90,11 @@ func TestAdmission(t *testing.T) {
 		},
 		{
 			name:       "enabled default",
-			attributes: admission.NewAttributesRecord(enableBuild, nil, unversioned.GroupVersionKind{}, "namespace", "name", buildapi.SchemeGroupVersion.WithResource("builds"), "", admission.Create, &user.DefaultInfo{}),
+			attributes: admission.NewAttributesRecord(enableBuild, nil, schema.GroupVersionKind{}, "namespace", "name", buildapi.LegacySchemeGroupVersion.WithResource("builds"), "", admission.Create, &user.DefaultInfo{}),
 			objects: []runtime.Object{
-				&kapi.Service{ObjectMeta: kapi.ObjectMeta{Namespace: "namespace", Name: "jenkins"}},
+				&kapi.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "namespace", Name: "jenkins"}},
 			},
-			validateClients: func(kubeClient *fake.Clientset, originClient *testclient.Fake) string {
+			validateClients: func(kubeClient *fake.Clientset, templateClient *templatefake.Clientset) string {
 				if len(kubeClient.Actions()) == 1 && kubeClient.Actions()[0].Matches("get", "services") {
 					return ""
 				}
@@ -102,38 +103,40 @@ func TestAdmission(t *testing.T) {
 		},
 		{
 			name:           "service missing",
-			attributes:     admission.NewAttributesRecord(enableBuild, nil, unversioned.GroupVersionKind{}, "namespace", "name", buildapi.SchemeGroupVersion.WithResource("builds"), "", admission.Create, &user.DefaultInfo{}),
+			attributes:     admission.NewAttributesRecord(enableBuild, nil, schema.GroupVersionKind{}, "namespace", "name", buildapi.LegacySchemeGroupVersion.WithResource("builds"), "", admission.Create, &user.DefaultInfo{}),
 			jenkinsEnabled: boolptr(true),
 			objects:        []runtime.Object{},
-			validateClients: func(kubeClient *fake.Clientset, originClient *testclient.Fake) string {
+			validateClients: func(kubeClient *fake.Clientset, templateClient *templatefake.Clientset) string {
 				if len(kubeClient.Actions()) == 0 {
 					return fmt.Sprintf("missing get service in: %v", kubeClient.Actions())
 				}
 				if !kubeClient.Actions()[0].Matches("get", "services") {
 					return fmt.Sprintf("missing get service in: %v", kubeClient.Actions())
 				}
-				if len(originClient.Actions()) == 0 {
-					return fmt.Sprintf("missing get template in: %v", originClient.Actions())
+				if len(templateClient.Actions()) == 0 {
+					return fmt.Sprintf("missing get template in: %v", templateClient.Actions())
 				}
-				if !originClient.Actions()[0].Matches("get", "templates") {
-					return fmt.Sprintf("missing get template in: %v", originClient.Actions())
+				if !templateClient.Actions()[0].Matches("get", "templates") {
+					return fmt.Sprintf("missing get template in: %v", templateClient.Actions())
 				}
 				return ""
 			},
-			expectedErr: "Jenkins pipeline template / not found",
+			expectedErr: "Jenkins pipeline template namespace/ not found",
 		},
 	}
 
 	for _, tc := range testCases {
 		kubeClient := fake.NewSimpleClientset(tc.objects...)
-		originClient := testclient.NewSimpleFake(tc.objects...)
+		templateClient := templatefake.NewSimpleClientset()
 
-		admission := NewJenkinsBootstrapper(kubeClient.Core()).(*jenkinsBootstrapper)
-		admission.openshiftClient = originClient
+		admission := NewJenkinsBootstrapper().(*jenkinsBootstrapper)
+		admission.templateClient = templateClient
 		admission.jenkinsConfig = configapi.JenkinsPipelineConfig{
 			AutoProvisionEnabled: tc.jenkinsEnabled,
 			ServiceName:          "jenkins",
+			TemplateNamespace:    "namespace",
 		}
+		admission.SetInternalKubeClientSet(kubeClient)
 
 		err := admission.Admit(tc.attributes)
 		switch {
@@ -147,18 +150,18 @@ func TestAdmission(t *testing.T) {
 		}
 
 		if tc.validateClients != nil {
-			if err := tc.validateClients(kubeClient, originClient); len(err) != 0 {
+			if err := tc.validateClients(kubeClient, templateClient); len(err) != 0 {
 				t.Errorf("%s: unexpected error: %v", tc.name, err)
 			}
 		}
 	}
 }
-func noAction(kubeClient *fake.Clientset, originClient *testclient.Fake) string {
+func noAction(kubeClient *fake.Clientset, templateClient *templatefake.Clientset) string {
 	if len(kubeClient.Actions()) != 0 {
-		return fmt.Sprintf("unexpected actions: %v", kubeClient.Actions())
+		return fmt.Sprintf("unexpected kubernetes client actions: %v", kubeClient.Actions())
 	}
-	if len(originClient.Actions()) != 0 {
-		return fmt.Sprintf("unexpected actions: %v", originClient.Actions())
+	if len(templateClient.Actions()) != 0 {
+		return fmt.Sprintf("unexpected openshift template client actions: %v", templateClient.Actions())
 	}
 	return ""
 }

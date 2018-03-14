@@ -1,14 +1,17 @@
 package policy
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
-	"errors"
-
-	buildapi "github.com/openshift/origin/pkg/build/api"
-	kapi "k8s.io/kubernetes/pkg/api"
-	kerrors "k8s.io/kubernetes/pkg/api/errors"
+	buildapi "github.com/openshift/origin/pkg/build/apis/build"
+	buildlister "github.com/openshift/origin/pkg/build/generated/listers/build/internalversion"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 )
 
 type fakeBuildClient struct {
@@ -20,7 +23,7 @@ func newTestClient(builds []buildapi.Build) *fakeBuildClient {
 	return &fakeBuildClient{builds: &buildapi.BuildList{Items: builds}}
 }
 
-func (f *fakeBuildClient) List(namespace string, opts kapi.ListOptions) (*buildapi.BuildList, error) {
+func (f *fakeBuildClient) List(namespace string, opts metav1.ListOptions) (*buildapi.BuildList, error) {
 	return f.builds, nil
 }
 
@@ -41,11 +44,40 @@ func (f *fakeBuildClient) Update(namespace string, build *buildapi.Build) error 
 	return nil
 }
 
+func (f *fakeBuildClient) Lister() buildlister.BuildLister {
+	return &fakeBuildLister{f: f}
+}
+
+type fakeBuildLister struct {
+	f *fakeBuildClient
+}
+
+func (f *fakeBuildLister) List(label labels.Selector) ([]*buildapi.Build, error) {
+	var items []*buildapi.Build
+	for i := range f.f.builds.Items {
+		items = append(items, &f.f.builds.Items[i])
+	}
+	return items, nil
+}
+
+func (f *fakeBuildLister) Get(name string) (*buildapi.Build, error) {
+	for i := range f.f.builds.Items {
+		if f.f.builds.Items[i].Name == name {
+			return &f.f.builds.Items[i], nil
+		}
+	}
+	return nil, kerrors.NewNotFound(schema.GroupResource{Resource: "builds"}, name)
+}
+
+func (f *fakeBuildLister) Builds(ns string) buildlister.BuildNamespaceLister {
+	return f
+}
+
 func addBuild(name, bcName string, phase buildapi.BuildPhase, policy buildapi.BuildRunPolicy) buildapi.Build {
 	parts := strings.Split(name, "-")
 	return buildapi.Build{
 		Spec: buildapi.BuildSpec{},
-		ObjectMeta: kapi.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "test",
 			Labels: map[string]string{
@@ -67,7 +99,7 @@ func TestForBuild(t *testing.T) {
 		addBuild("build-3", "sample-bc", buildapi.BuildPhaseNew, buildapi.BuildRunPolicySerialLatestOnly),
 	}
 	client := newTestClient(builds)
-	policies := GetAllRunPolicies(client, client)
+	policies := GetAllRunPolicies(client.Lister(), client)
 
 	if policy := ForBuild(&builds[0], policies); policy != nil {
 		if _, ok := policy.(*ParallelPolicy); !ok {
@@ -94,7 +126,7 @@ func TestForBuild(t *testing.T) {
 	}
 }
 
-func TestHandleCompleteSerial(t *testing.T) {
+func TestGetNextConfigBuildSerial(t *testing.T) {
 	builds := []buildapi.Build{
 		addBuild("build-1", "sample-bc", buildapi.BuildPhaseComplete, buildapi.BuildRunPolicySerial),
 		addBuild("build-2", "sample-bc", buildapi.BuildPhaseNew, buildapi.BuildRunPolicySerial),
@@ -103,25 +135,26 @@ func TestHandleCompleteSerial(t *testing.T) {
 
 	client := newTestClient(builds)
 
-	if err := handleComplete(client, client, &builds[0]); err != nil {
+	resultBuilds, isRunning, err := GetNextConfigBuild(client.Lister(), "namespace", "bc")
+	if err != nil {
 		t.Errorf("unexpected error %v", err)
 	}
 
-	resultBuilds, err := client.List("test", kapi.ListOptions{})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+	if isRunning {
+		t.Errorf("expected no running builds")
 	}
 
-	if resultBuilds.Items[1].Status.StartTimestamp == nil {
-		t.Errorf("build-2 should have Status.StartTimestamp set to trigger it")
+	if len(resultBuilds) != 1 {
+		t.Errorf("expecting single result build, got %d", len(resultBuilds))
+		return
 	}
 
-	if resultBuilds.Items[2].Status.StartTimestamp != nil {
-		t.Errorf("build-3 should not have Status.StartTimestamp set")
+	if resultBuilds[0].Name != "build-2" {
+		t.Errorf("expected result build to be build-2, got %s", resultBuilds[0].Name)
 	}
 }
 
-func TestHandleCompleteParallel(t *testing.T) {
+func TestGetNextConfigBuildParallel(t *testing.T) {
 	builds := []buildapi.Build{
 		addBuild("build-1", "sample-bc", buildapi.BuildPhaseComplete, buildapi.BuildRunPolicyParallel),
 		addBuild("build-2", "sample-bc", buildapi.BuildPhaseNew, buildapi.BuildRunPolicyParallel),
@@ -130,20 +163,33 @@ func TestHandleCompleteParallel(t *testing.T) {
 
 	client := newTestClient(builds)
 
-	if err := handleComplete(client, client, &builds[0]); err != nil {
+	resultBuilds, running, err := GetNextConfigBuild(client.Lister(), "namespace", "bc")
+	if err != nil {
 		t.Errorf("unexpected error %v", err)
 	}
 
-	resultBuilds, err := client.List("test", kapi.ListOptions{})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+	if running {
+		t.Errorf("expected no running builds")
 	}
 
-	if resultBuilds.Items[1].Status.StartTimestamp == nil {
-		t.Errorf("build-2 should have Status.StartTimestamp set to trigger it")
+	if len(resultBuilds) != 2 {
+		t.Errorf("expecting 2 result builds, got %d", len(resultBuilds))
+		return
 	}
 
-	if resultBuilds.Items[2].Status.StartTimestamp == nil {
-		t.Errorf("build-3 should have Status.StartTimestamp set to trigger it")
+	includesBuild2 := false
+	includesBuild3 := false
+
+	for _, build := range resultBuilds {
+		if build.Name == "build-2" {
+			includesBuild2 = true
+		}
+		if build.Name == "build-3" {
+			includesBuild3 = true
+		}
+	}
+
+	if !includesBuild2 || !includesBuild3 {
+		t.Errorf("build-2 and build-3 should be included in the result, got %#v", resultBuilds)
 	}
 }

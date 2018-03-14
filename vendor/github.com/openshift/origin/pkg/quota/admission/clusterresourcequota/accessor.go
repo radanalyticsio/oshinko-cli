@@ -5,24 +5,24 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	kapierrors "k8s.io/kubernetes/pkg/api/errors"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/client/cache"
+	"k8s.io/apimachinery/pkg/api/equality"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
+	etcd "k8s.io/apiserver/pkg/storage/etcd"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	kcorelisters "k8s.io/kubernetes/pkg/client/listers/core/internalversion"
 	utilquota "k8s.io/kubernetes/pkg/quota"
-	"k8s.io/kubernetes/pkg/storage/etcd"
-	utilwait "k8s.io/kubernetes/pkg/util/wait"
 
-	oclient "github.com/openshift/origin/pkg/client"
-	ocache "github.com/openshift/origin/pkg/client/cache"
-	quotaapi "github.com/openshift/origin/pkg/quota/api"
+	quotaapi "github.com/openshift/origin/pkg/quota/apis/quota"
 	"github.com/openshift/origin/pkg/quota/controller/clusterquotamapping"
+	quotatypedclient "github.com/openshift/origin/pkg/quota/generated/internalclientset/typed/quota/internalversion"
+	quotalister "github.com/openshift/origin/pkg/quota/generated/listers/quota/internalversion"
 )
 
 type clusterQuotaAccessor struct {
-	clusterQuotaLister *ocache.IndexerToClusterResourceQuotaLister
-	namespaceLister    *cache.IndexerToNamespaceLister
-	clusterQuotaClient oclient.ClusterResourceQuotasInterface
+	clusterQuotaLister quotalister.ClusterResourceQuotaLister
+	namespaceLister    kcorelisters.NamespaceLister
+	clusterQuotaClient quotatypedclient.ClusterResourceQuotasGetter
 
 	clusterQuotaMapper clusterquotamapping.ClusterQuotaMapper
 
@@ -33,7 +33,12 @@ type clusterQuotaAccessor struct {
 }
 
 // newQuotaAccessor creates an object that conforms to the QuotaAccessor interface to be used to retrieve quota objects.
-func newQuotaAccessor(clusterQuotaLister *ocache.IndexerToClusterResourceQuotaLister, namespaceLister *cache.IndexerToNamespaceLister, clusterQuotaClient oclient.ClusterResourceQuotasInterface, clusterQuotaMapper clusterquotamapping.ClusterQuotaMapper) *clusterQuotaAccessor {
+func newQuotaAccessor(
+	clusterQuotaLister quotalister.ClusterResourceQuotaLister,
+	namespaceLister kcorelisters.NamespaceLister,
+	clusterQuotaClient quotatypedclient.ClusterResourceQuotasGetter,
+	clusterQuotaMapper clusterquotamapping.ClusterQuotaMapper,
+) *clusterQuotaAccessor {
 	updatedCache, err := lru.New(100)
 	if err != nil {
 		// this should never happen
@@ -58,13 +63,9 @@ func (e *clusterQuotaAccessor) UpdateQuotaStatus(newQuota *kapi.ResourceQuota) e
 	}
 	clusterQuota = e.checkCache(clusterQuota)
 
-	// make a copy
-	obj, err := kapi.Scheme.Copy(clusterQuota)
-	if err != nil {
-		return err
-	}
 	// re-assign objectmeta
-	clusterQuota = obj.(*quotaapi.ClusterResourceQuota)
+	// make a copy
+	clusterQuota = clusterQuota.DeepCopy()
 	clusterQuota.ObjectMeta = newQuota.ObjectMeta
 	clusterQuota.Namespace = ""
 
@@ -76,11 +77,8 @@ func (e *clusterQuotaAccessor) UpdateQuotaStatus(newQuota *kapi.ResourceQuota) e
 
 	// update per namespace totals
 	oldNamespaceTotals, _ := clusterQuota.Status.Namespaces.Get(newQuota.Namespace)
-	namespaceTotalCopy, err := kapi.Scheme.DeepCopy(oldNamespaceTotals)
-	if err != nil {
-		return err
-	}
-	newNamespaceTotals := namespaceTotalCopy.(kapi.ResourceQuotaStatus)
+	namespaceTotalCopy := oldNamespaceTotals.DeepCopy()
+	newNamespaceTotals := *namespaceTotalCopy
 	newNamespaceTotals.Used = utilquota.Add(oldNamespaceTotals.Used, usageDiff)
 	clusterQuota.Status.Namespaces.Insert(newQuota.Namespace, newNamespaceTotals)
 
@@ -149,15 +147,16 @@ func (e *clusterQuotaAccessor) waitForReadyClusterQuotaNames(namespaceName strin
 	err := utilwait.PollImmediate(100*time.Millisecond, 8*time.Second, func() (done bool, err error) {
 		var namespaceSelectionFields clusterquotamapping.SelectionFields
 		clusterQuotaNames, namespaceSelectionFields = e.clusterQuotaMapper.GetClusterQuotasFor(namespaceName)
-		obj, ok, err := e.namespaceLister.Get(&kapi.Namespace{ObjectMeta: kapi.ObjectMeta{Name: namespaceName}})
+		namespace, err := e.namespaceLister.Get(namespaceName)
+		// if we can't find the namespace yet, just wait for the cache to update.  Requests to non-existent namespaces
+		// may hang, but those people are doing something wrong and namespacelifecycle should reject them.
+		if kapierrors.IsNotFound(err) {
+			return false, nil
+		}
 		if err != nil {
 			return false, err
 		}
-		if !ok {
-			return false, kapierrors.NewNotFound(unversioned.GroupResource{Resource: "namespace"}, namespaceName)
-		}
-		namespace := obj.(*kapi.Namespace)
-		if kapi.Semantic.DeepEqual(namespaceSelectionFields, clusterquotamapping.GetSelectionFields(namespace)) {
+		if equality.Semantic.DeepEqual(namespaceSelectionFields, clusterquotamapping.GetSelectionFields(namespace)) {
 			return true, nil
 		}
 		return false, nil

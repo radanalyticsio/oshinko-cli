@@ -18,7 +18,7 @@ import (
 	"github.com/radanalyticsio/oshinko-cli/rest/restapi/operations/clusters"
 	"github.com/radanalyticsio/oshinko-cli/rest/restapi/operations/server"
 	"github.com/radanalyticsio/oshinko-cli/rest/version"
-	"k8s.io/kubernetes/pkg/util/logs"
+	"k8s.io/apiserver/pkg/util/logs"
 )
 
 // This file is safe to edit. Once it exists it will not be overwritten

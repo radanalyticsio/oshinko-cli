@@ -1,6 +1,8 @@
 package builder
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -13,11 +15,16 @@ import (
 	docker "github.com/fsouza/go-dockerclient"
 
 	s2igit "github.com/openshift/source-to-image/pkg/scm/git"
+	s2ifs "github.com/openshift/source-to-image/pkg/util/fs"
 
-	"github.com/openshift/origin/pkg/build/api"
+	buildapiv1 "github.com/openshift/api/build/v1"
 	"github.com/openshift/origin/pkg/build/builder/cmd/dockercfg"
+	"github.com/openshift/origin/pkg/build/builder/timing"
+	buildutil "github.com/openshift/origin/pkg/build/util"
 	"github.com/openshift/origin/pkg/generate/git"
 	"github.com/openshift/source-to-image/pkg/tar"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -43,18 +50,18 @@ func (e gitNotFoundError) Error() string {
 	return fmt.Sprintf("requested repository %q not found", string(e))
 }
 
-// fetchSource retrieves the inputs defined by the build source into the
-// provided directory, or returns an error if retrieval is not possible.
-func fetchSource(dockerClient DockerClient, dir string, build *api.Build, urlTimeout time.Duration, in io.Reader, gitClient GitClient) (*git.SourceInfo, error) {
-	hasGitSource := false
+// GitClone clones the source associated with a build(if any) into the specified directory
+func GitClone(ctx context.Context, gitClient GitClient, gitSource *buildapiv1.GitBuildSource, revision *buildapiv1.SourceRevision, dir string) (*git.SourceInfo, error) {
 
-	// expect to receive input from STDIN
-	if err := extractInputBinary(in, build.Spec.Source.Binary, dir); err != nil {
+	// It is possible for the initcontainer to get restarted, thus we must wipe out the directory if it already exists.
+	err := os.RemoveAll(dir)
+	if err != nil {
 		return nil, err
 	}
+	os.MkdirAll(dir, 0777)
 
-	// may retrieve source from Git
-	hasGitSource, err := extractGitSource(gitClient, build.Spec.Source.Git, build.Spec.Revision, dir, urlTimeout)
+	hasGitSource, err := extractGitSource(ctx, gitClient, gitSource, revision, dir, initialURLCheckTimeout)
+
 	if err != nil {
 		return nil, err
 	}
@@ -68,8 +75,57 @@ func fetchSource(dockerClient DockerClient, dir string, build *api.Build, urlTim
 				glog.V(0).Infof("error: Unable to retrieve Git info: %v", e)
 			}
 		}
+		if sourceInfo != nil {
+			sourceInfoJson, err := json.Marshal(*sourceInfo)
+			if err != nil {
+				glog.V(0).Infof("error: Unable to serialized git source info: %v", err)
+				return sourceInfo, nil
+			}
+			err = ioutil.WriteFile(filepath.Join(buildutil.BuildWorkDirMount, "sourceinfo.json"), sourceInfoJson, 0644)
+			if err != nil {
+				glog.V(0).Infof("error: Unable to serialized git source info: %v", err)
+				return sourceInfo, nil
+			}
+		}
+	}
+	return sourceInfo, nil
+}
+
+// ManageDockerfile manipulates the dockerfile for docker builds.
+// It will write the inline dockerfile to the working directory (possibly
+// overwriting an existing dockerfile) and then update the dockerfile
+// in the working directory (accounting for contextdir+dockerfilepath)
+// with new FROM image information based on the imagestream/imagetrigger
+// and also adds some env and label values to the dockerfile based on
+// the build information.
+func ManageDockerfile(dir string, build *buildapiv1.Build) error {
+	os.MkdirAll(dir, 0777)
+	glog.V(5).Infof("Checking for presence of a Dockerfile")
+	// a Dockerfile has been specified, create or overwrite into the destination
+	if dockerfileSource := build.Spec.Source.Dockerfile; dockerfileSource != nil {
+		baseDir := dir
+		if len(build.Spec.Source.ContextDir) != 0 {
+			baseDir = filepath.Join(baseDir, build.Spec.Source.ContextDir)
+		}
+		if err := ioutil.WriteFile(filepath.Join(baseDir, "Dockerfile"), []byte(*dockerfileSource), 0660); err != nil {
+			return err
+		}
 	}
 
+	// We only mutate the dockerfile if this is a docker strategy build, otherwise
+	// we leave it as it was provided.
+	if build.Spec.Strategy.DockerStrategy != nil {
+		sourceInfo, err := readSourceInfo()
+		if err != nil {
+			return fmt.Errorf("error reading git source info: %v", err)
+		}
+		return addBuildParameters(dir, build, sourceInfo)
+	}
+	return nil
+}
+
+func ExtractImageContent(ctx context.Context, dockerClient DockerClient, dir string, build *buildapiv1.Build) error {
+	os.MkdirAll(dir, 0777)
 	forcePull := false
 	switch {
 	case build.Spec.Strategy.SourceStrategy != nil:
@@ -85,23 +141,12 @@ func fetchSource(dockerClient DockerClient, dir string, build *api.Build, urlTim
 		if image.PullSecret == nil {
 			imageSecretIndex = -1
 		}
-		err := extractSourceFromImage(dockerClient, image.From.Name, dir, imageSecretIndex, image.Paths, forcePull)
+		err := extractSourceFromImage(ctx, dockerClient, image.From.Name, dir, imageSecretIndex, image.Paths, forcePull)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
-
-	// a Dockerfile has been specified, create or overwrite into the destination
-	if dockerfileSource := build.Spec.Source.Dockerfile; dockerfileSource != nil {
-		baseDir := dir
-		// if a context dir has been defined and we cloned source, overwrite the destination
-		if hasGitSource && len(build.Spec.Source.ContextDir) != 0 {
-			baseDir = filepath.Join(baseDir, build.Spec.Source.ContextDir)
-		}
-		return sourceInfo, ioutil.WriteFile(filepath.Join(baseDir, "Dockerfile"), []byte(*dockerfileSource), 0660)
-	}
-
-	return sourceInfo, nil
+	return nil
 }
 
 // checkRemoteGit validates the specified Git URL. It returns GitNotFoundError
@@ -151,19 +196,17 @@ func checkRemoteGit(gitClient GitClient, url string, initialTimeout time.Duratio
 // checkSourceURI performs a check on the URI associated with the build
 // to make sure that it is valid.
 func checkSourceURI(gitClient GitClient, rawurl string, timeout time.Duration) error {
-	ok, err := s2igit.New().ValidCloneSpec(rawurl)
+	_, err := s2igit.Parse(rawurl)
 	if err != nil {
 		return fmt.Errorf("Invalid git source url %q: %v", rawurl, err)
-	}
-	if !ok {
-		return fmt.Errorf("Invalid git source url: %s", rawurl)
 	}
 	return checkRemoteGit(gitClient, rawurl, timeout)
 }
 
-// extractInputBinary processes the provided input stream as directed by BinaryBuildSource
+// ExtractInputBinary processes the provided input stream as directed by BinaryBuildSource
 // into dir.
-func extractInputBinary(in io.Reader, source *api.BinaryBuildSource, dir string) error {
+func ExtractInputBinary(in io.Reader, source *buildapiv1.BinaryBuildSource, dir string) error {
+	os.MkdirAll(dir, 0777)
 	if source == nil {
 		return nil
 	}
@@ -195,10 +238,11 @@ func extractInputBinary(in io.Reader, source *api.BinaryBuildSource, dir string)
 		glog.V(0).Infof("Extracting...\n%s", string(out))
 		return fmt.Errorf("unable to extract binary build input, must be a zip, tar, or gzipped tar, or specified as a file: %v", err)
 	}
+
 	return nil
 }
 
-func extractGitSource(gitClient GitClient, gitSource *api.GitBuildSource, revision *api.SourceRevision, dir string, timeout time.Duration) (bool, error) {
+func extractGitSource(ctx context.Context, gitClient GitClient, gitSource *buildapiv1.GitBuildSource, revision *buildapiv1.SourceRevision, dir string, timeout time.Duration) (bool, error) {
 	if gitSource == nil {
 		return false, nil
 	}
@@ -227,9 +271,12 @@ func extractGitSource(gitClient GitClient, gitSource *api.GitBuildSource, revisi
 	if !glog.Is(5) {
 		cloneOptions = append(cloneOptions, "--quiet")
 	}
+	startTime := metav1.Now()
 	if err := gitClient.CloneWithOptions(dir, gitSource.URI, cloneOptions...); err != nil {
 		return true, err
 	}
+
+	timing.RecordNewStep(ctx, buildapiv1.StageFetchInputs, buildapiv1.StepFetchGitSource, startTime, metav1.Now())
 
 	// if we specify a commit, ref, or branch to checkout, do so, and update submodules
 	if usingRef {
@@ -240,7 +287,10 @@ func extractGitSource(gitClient GitClient, gitSource *api.GitBuildSource, revisi
 		}
 
 		if err := gitClient.Checkout(dir, commit); err != nil {
-			return true, err
+			err = gitClient.PotentialPRRetryAsFetch(dir, gitSource.URI, commit, err)
+			if err != nil {
+				return true, err
+			}
 		}
 
 		// Recursively update --init
@@ -268,7 +318,7 @@ func copyImageSource(dockerClient DockerClient, containerID, sourceDir, destDir 
 			return err
 		}
 		glog.V(4).Infof("Creating image destination directory: %s", destDir)
-		err := os.MkdirAll(destDir, 0644)
+		err := os.MkdirAll(destDir, 0755)
 		if err != nil {
 			return err
 		}
@@ -310,9 +360,8 @@ func copyImageSource(dockerClient DockerClient, containerID, sourceDir, destDir 
 	return tarHelper.ExtractTarStreamWithLogging(destDir, file, tarOutput)
 }
 
-func extractSourceFromImage(dockerClient DockerClient, image, buildDir string, imageSecretIndex int, paths []api.ImageSourcePath, forcePull bool) error {
+func extractSourceFromImage(ctx context.Context, dockerClient DockerClient, image, buildDir string, imageSecretIndex int, paths []buildapiv1.ImageSourcePath, forcePull bool) error {
 	glog.V(4).Infof("Extracting image source from %s", image)
-
 	dockerAuth := docker.AuthConfiguration{}
 	if imageSecretIndex != -1 {
 		pullSecret := os.Getenv(fmt.Sprintf("%s%d", dockercfg.PullSourceAuthType, imageSecretIndex))
@@ -344,9 +393,13 @@ func extractSourceFromImage(dockerClient DockerClient, image, buildDir string, i
 
 	if !exists || forcePull {
 		glog.V(0).Infof("Pulling image %q ...", image)
+		startTime := metav1.Now()
 		if err := dockerClient.PullImage(docker.PullImageOptions{Repository: image}, dockerAuth); err != nil {
 			return fmt.Errorf("error pulling image %v: %v", image, err)
 		}
+
+		timing.RecordNewStep(ctx, buildapiv1.StagePullImages, buildapiv1.StepPullInputImage, startTime, metav1.Now())
+
 	}
 
 	containerConfig := &docker.Config{Image: image}
@@ -366,7 +419,7 @@ func extractSourceFromImage(dockerClient DockerClient, image, buildDir string, i
 	}
 	defer dockerClient.RemoveContainer(docker.RemoveContainerOptions{ID: container.ID})
 
-	tarHelper := tar.New()
+	tarHelper := tar.New(s2ifs.NewFileSystem())
 	tarHelper.SetExclusionPattern(nil)
 
 	for _, path := range paths {

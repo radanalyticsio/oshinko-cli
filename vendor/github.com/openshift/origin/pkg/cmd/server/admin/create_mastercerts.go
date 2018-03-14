@@ -12,12 +12,13 @@ import (
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
 
-	kapi "k8s.io/kubernetes/pkg/api"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/client-go/util/cert"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/kubernetes/pkg/util/crypto"
-	utilerrors "k8s.io/kubernetes/pkg/util/errors"
 
-	"github.com/openshift/origin/pkg/cmd/templates"
+	"github.com/openshift/origin/pkg/cmd/server/crypto"
 	"github.com/openshift/origin/pkg/util/parallel"
 )
 
@@ -36,7 +37,6 @@ var masterCertLong = templates.LongDesc(`
 	    openshift.local.config/master/
 		    ca.{crt,key,serial.txt}
 		    master.server.{crt,key}
-			openshift-router.{crt,key,kubeconfig}
 			admin.{crt,key,kubeconfig}
 			...
 
@@ -72,8 +72,10 @@ type CreateMasterCertsOptions struct {
 	CertDir    string
 	SignerName string
 
+	ExpireDays       int
+	SignerExpireDays int
+
 	APIServerCAFiles []string
-	CABundleFile     string
 
 	Hostnames []string
 
@@ -85,7 +87,11 @@ type CreateMasterCertsOptions struct {
 }
 
 func NewCommandCreateMasterCerts(commandName string, fullName string, out io.Writer) *cobra.Command {
-	options := &CreateMasterCertsOptions{Output: out}
+	options := &CreateMasterCertsOptions{
+		ExpireDays:       crypto.DefaultCertificateLifetimeInDays,
+		SignerExpireDays: crypto.DefaultCACertificateLifetimeInDays,
+		Output:           out,
+	}
 
 	cmd := &cobra.Command{
 		Use:   commandName,
@@ -93,7 +99,7 @@ func NewCommandCreateMasterCerts(commandName string, fullName string, out io.Wri
 		Long:  fmt.Sprintf(masterCertLong, fullName),
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Validate(args); err != nil {
-				kcmdutil.CheckErr(kcmdutil.UsageError(cmd, err.Error()))
+				kcmdutil.CheckErr(kcmdutil.UsageErrorf(cmd, err.Error()))
 			}
 
 			if err := options.CreateMasterCerts(); err != nil {
@@ -112,6 +118,9 @@ func NewCommandCreateMasterCerts(commandName string, fullName string, out io.Wri
 	flags.StringVar(&options.PublicAPIServerURL, "public-master", "", "The API public facing server's URL (if applicable).")
 	flags.StringSliceVar(&options.Hostnames, "hostnames", options.Hostnames, "Every hostname or IP that server certs should be valid for (comma-delimited list)")
 	flags.BoolVar(&options.Overwrite, "overwrite", false, "Overwrite all existing cert/key/config files (WARNING: includes signer/CA)")
+
+	flags.IntVar(&options.ExpireDays, "expire-days", options.ExpireDays, "Validity of the certificates in days (defaults to 2 years). WARNING: extending this above default value is highly discouraged.")
+	flags.IntVar(&options.SignerExpireDays, "signer-expire-days", options.SignerExpireDays, "Validity of the CA certificate in days (defaults to 5 years). WARNING: extending this above default value is highly discouraged.")
 
 	// set dynamic value annotation - allows man pages  to be generated and verified
 	flags.SetAnnotation("signer-name", "manpage-def-value", []string{"openshift-signer@<current_timestamp>"})
@@ -136,6 +145,12 @@ func (o CreateMasterCertsOptions) Validate(args []string) error {
 	if len(o.SignerName) == 0 {
 		return errors.New("signer-name must be provided")
 	}
+	if o.ExpireDays <= 0 {
+		return errors.New("expire-days must be valid number of days")
+	}
+	if o.SignerExpireDays <= 0 {
+		return errors.New("signer-expire-days must be valid number of days")
+	}
 	if len(o.APIServerURL) == 0 {
 		return errors.New("master must be provided")
 	} else if u, err := url.Parse(o.APIServerURL); err != nil {
@@ -153,7 +168,7 @@ func (o CreateMasterCertsOptions) Validate(args []string) error {
 	}
 
 	for _, caFile := range o.APIServerCAFiles {
-		if _, err := crypto.CertPoolFromFile(caFile); err != nil {
+		if _, err := cert.NewPool(caFile); err != nil {
 			return fmt.Errorf("certificate authority must be a valid certificate file: %v", err)
 		}
 	}
@@ -164,38 +179,52 @@ func (o CreateMasterCertsOptions) Validate(args []string) error {
 func (o CreateMasterCertsOptions) CreateMasterCerts() error {
 	glog.V(4).Infof("Creating all certs with: %#v", o)
 
+	getSignerCertOptions, err := o.createNewSigner(CAFilePrefix)
+	if err != nil {
+		return err
+	}
+	getFrontProxySignerCertOptions, err := o.createNewSigner(FrontProxyCAFilePrefix)
+	if err != nil {
+		return err
+	}
+
+	errs := parallel.Run(
+		func() error { return o.createCABundle(getSignerCertOptions) },
+		func() error { return o.createServerCerts(getSignerCertOptions) },
+		func() error { return o.createAPIClients(getSignerCertOptions) },
+		func() error { return o.createEtcdClientCerts(getSignerCertOptions) },
+		func() error { return o.createKubeletClientCerts(getSignerCertOptions) },
+		func() error { return o.createProxyClientCerts(getSignerCertOptions) },
+		func() error { return o.createServiceAccountKeys() },
+		func() error { return o.createServiceSigningCA(getSignerCertOptions) },
+		func() error { return o.createAggregatorClientCerts(getFrontProxySignerCertOptions) },
+	)
+	return utilerrors.NewAggregate(errs)
+}
+
+func (o CreateMasterCertsOptions) createNewSigner(prefix string) (*SignerCertOptions, error) {
 	signerCertOptions := CreateSignerCertOptions{
-		CertFile:   DefaultCertFilename(o.CertDir, CAFilePrefix),
-		KeyFile:    DefaultKeyFilename(o.CertDir, CAFilePrefix),
-		SerialFile: DefaultSerialFilename(o.CertDir, CAFilePrefix),
+		CertFile:   DefaultCertFilename(o.CertDir, prefix),
+		KeyFile:    DefaultKeyFilename(o.CertDir, prefix),
+		SerialFile: DefaultSerialFilename(o.CertDir, prefix),
+		ExpireDays: o.SignerExpireDays,
 		Name:       o.SignerName,
 		Overwrite:  o.Overwrite,
 		Output:     o.Output,
 	}
 	if err := signerCertOptions.Validate(nil); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := signerCertOptions.CreateSignerCert(); err != nil {
-		return err
+		return nil, err
 	}
 	// once we've minted the signer, don't overwrite it
-	getSignerCertOptions := SignerCertOptions{
-		CertFile:   DefaultCertFilename(o.CertDir, CAFilePrefix),
-		KeyFile:    DefaultKeyFilename(o.CertDir, CAFilePrefix),
-		SerialFile: DefaultSerialFilename(o.CertDir, CAFilePrefix),
-	}
+	return &SignerCertOptions{
+		CertFile:   DefaultCertFilename(o.CertDir, prefix),
+		KeyFile:    DefaultKeyFilename(o.CertDir, prefix),
+		SerialFile: DefaultSerialFilename(o.CertDir, prefix),
+	}, nil
 
-	errs := parallel.Run(
-		func() error { return o.createCABundle(&getSignerCertOptions) },
-		func() error { return o.createServerCerts(&getSignerCertOptions) },
-		func() error { return o.createAPIClients(&getSignerCertOptions) },
-		func() error { return o.createEtcdClientCerts(&getSignerCertOptions) },
-		func() error { return o.createKubeletClientCerts(&getSignerCertOptions) },
-		func() error { return o.createProxyClientCerts(&getSignerCertOptions) },
-		func() error { return o.createServiceAccountKeys() },
-		func() error { return o.createServiceSigningCA(&getSignerCertOptions) },
-	)
-	return utilerrors.NewAggregate(errs)
 }
 
 func (o CreateMasterCertsOptions) createAPIClients(getSignerCertOptions *SignerCertOptions) error {
@@ -212,7 +241,7 @@ func (o CreateMasterCertsOptions) createAPIClients(getSignerCertOptions *SignerC
 			CertFile: clientCertInfo.CertLocation.CertFile,
 			KeyFile:  clientCertInfo.CertLocation.KeyFile,
 
-			ContextNamespace: kapi.NamespaceDefault,
+			ContextNamespace: metav1.NamespaceDefault,
 
 			KubeConfigFile: DefaultKubeConfigFilename(filepath.Dir(clientCertInfo.CertLocation.CertFile), clientCertInfo.UnqualifiedUser),
 			Output:         o.Output,
@@ -223,6 +252,13 @@ func (o CreateMasterCertsOptions) createAPIClients(getSignerCertOptions *SignerC
 		if _, err := createKubeConfigOptions.CreateKubeConfig(); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (o CreateMasterCertsOptions) createAggregatorClientCerts(getSignerCertOptions *SignerCertOptions) error {
+	if err := o.createClientCert(DefaultAggregatorClientCertInfo(o.CertDir), getSignerCertOptions); err != nil {
+		return err
 	}
 	return nil
 }
@@ -261,10 +297,15 @@ func (o CreateMasterCertsOptions) createClientCert(clientCertInfo ClientCertInfo
 		CertFile: clientCertInfo.CertLocation.CertFile,
 		KeyFile:  clientCertInfo.CertLocation.KeyFile,
 
+		ExpireDays: o.ExpireDays,
+
 		User:      clientCertInfo.User,
 		Groups:    clientCertInfo.Groups.List(),
 		Overwrite: o.Overwrite,
 		Output:    o.Output,
+	}
+	if err := clientCertOptions.Validate(nil); err != nil {
+		return err
 	}
 	if _, err := clientCertOptions.CreateClientCert(); err != nil {
 		return err
@@ -294,6 +335,8 @@ func (o CreateMasterCertsOptions) createServerCerts(getSignerCertOptions *Signer
 
 			CertFile: serverCertInfo.CertFile,
 			KeyFile:  serverCertInfo.KeyFile,
+
+			ExpireDays: o.ExpireDays,
 
 			Hostnames: o.Hostnames,
 			Overwrite: o.Overwrite,
@@ -333,6 +376,7 @@ func (o CreateMasterCertsOptions) createServiceSigningCA(getSignerCertOptions *S
 		CertFile:   caInfo.CertFile,
 		KeyFile:    caInfo.KeyFile,
 		SerialFile: "", // we want the random cert serial for this one
+		ExpireDays: o.SignerExpireDays,
 		Name:       DefaultServiceServingCertSignerName(),
 		Output:     o.Output,
 

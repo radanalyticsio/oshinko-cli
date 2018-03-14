@@ -6,16 +6,11 @@ set -o pipefail
 
 source /usr/local/bin/openshift-dind-lib.sh
 # Should set OPENSHIFT_NETWORK_PLUGIN
-source /data/network-plugin
+source /data/dind-env
 
 function ensure-node-config() {
   local deployed_config_path="/var/lib/origin/openshift.local.config/node"
   local deployed_config_file="${deployed_config_path}/node-config.yaml"
-
-  if [[ -f "${deployed_config_file}" ]]; then
-    # Config has already been deployed
-    return
-  fi
 
   local config_path="/data/openshift.local.config"
   local host
@@ -25,6 +20,11 @@ function ensure-node-config() {
   fi
   local node_config_path="${config_path}/node-${host}"
   local node_config_file="${node_config_path}/node-config.yaml"
+
+  if [[ -f "${deployed_config_file}" && -f "${node_config_file}" ]]; then
+    # Config has already been deployed and they have not removed the node config to indicate a regen is needed
+    return
+  fi
 
   # If the node config has not been generated
   if [[ ! -f "${node_config_file}" ]]; then
@@ -46,7 +46,7 @@ function ensure-node-config() {
     # concurrent execution since the file passed to --signer-serial
     # needs to be incremented by each invocation.
     (flock 200;
-     /usr/local/bin/openshift admin create-node-config \
+     /usr/local/bin/oc adm create-node-config \
        --node-dir="${node_config_path}" \
        --node="${host}" \
        --master="${master_host}" \
@@ -58,10 +58,31 @@ function ensure-node-config() {
        --signer-key="${master_config_path}/ca.key" \
        --signer-serial="${master_config_path}/ca.serial.txt"
     ) 200>"${config_path}"/.openshift-generate-node-config.lock
+
+    cat >> "${node_config_file}" <<EOF
+kubeletArguments:
+  cgroups-per-qos: ["false"]
+  enforce-node-allocatable: [""]
+  fail-swap-on: ["false"]
+EOF
+
+    if [[ "${OPENSHIFT_CONTAINER_RUNTIME}" != "dockershim" ]]; then
+      cat >> "${node_config_file}" <<EOF
+  container-runtime: ["remote"]
+  container-runtime-endpoint: ["${OPENSHIFT_REMOTE_RUNTIME_ENDPOINT}"]
+  image-service-endpoint: ["${OPENSHIFT_REMOTE_RUNTIME_ENDPOINT}"]
+EOF
+    fi
+
   fi
 
-  # ensure the configuration is readable outside of the container
+  # Ensure the configuration is readable outside of the container
   chmod -R ga+rX "${node_config_path}"
+
+  # Remove any old config in case we are reloading
+  if [[ -d "${deployed_config_path}" ]]; then
+      rm -rf "${deployed_config_path}"
+  fi
 
   # Deploy the node config
   mkdir -p "${deployed_config_path}"

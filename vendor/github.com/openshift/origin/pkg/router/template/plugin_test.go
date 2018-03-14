@@ -1,18 +1,16 @@
 package templaterouter
 
 import (
-	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/util/sets"
-	"k8s.io/kubernetes/pkg/watch"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/watch"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 
-	routeapi "github.com/openshift/origin/pkg/route/api"
+	routeapi "github.com/openshift/origin/pkg/route/apis/route"
 	"github.com/openshift/origin/pkg/router/controller"
 )
 
@@ -123,8 +121,6 @@ bGvtpjWA4r9WASIDPFsxk/cDEEEO6iPxgMOf5MdpQC2y2MU0rzF/Gg==
 type TestRouter struct {
 	State        map[string]ServiceAliasConfig
 	ServiceUnits map[string]ServiceUnit
-
-	Committed bool
 }
 
 // NewTestRouter creates a new TestRouter and registers the initial state.
@@ -132,7 +128,6 @@ func newTestRouter(state map[string]ServiceAliasConfig) *TestRouter {
 	return &TestRouter{
 		State:        state,
 		ServiceUnits: make(map[string]ServiceUnit),
-		Committed:    false,
 	}
 }
 
@@ -153,22 +148,19 @@ func (r *TestRouter) FindServiceUnit(id string) (v ServiceUnit, ok bool) {
 }
 
 // AddEndpoints adds the endpoints to the service unit identified by id
-func (r *TestRouter) AddEndpoints(id string, endpoints []Endpoint) bool {
-	r.Committed = false //expect any call to this method to subsequently call commit
+func (r *TestRouter) AddEndpoints(id string, endpoints []Endpoint) {
 	su, _ := r.FindServiceUnit(id)
 
 	// simulate the logic that compares endpoints
 	if reflect.DeepEqual(su.EndpointTable, endpoints) {
-		return false
+		return
 	}
 	su.EndpointTable = endpoints
 	r.ServiceUnits[id] = su
-	return true
 }
 
 // DeleteEndpoints removes all endpoints from the service unit
 func (r *TestRouter) DeleteEndpoints(id string) {
-	r.Committed = false //expect any call to this method to subsequently call commit
 	if su, ok := r.FindServiceUnit(id); !ok {
 		return
 	} else {
@@ -177,33 +169,51 @@ func (r *TestRouter) DeleteEndpoints(id string) {
 	}
 }
 
-// AddRoute adds a ServiceAliasConfig for the route with the ServiceUnit identified by id
-func (r *TestRouter) AddRoute(id string, weight int32, route *routeapi.Route, host string) bool {
-	r.Committed = false //expect any call to this method to subsequently call commit
-	su, _ := r.FindServiceUnit(id)
-	routeKey := r.routeKey(route)
+func (r *TestRouter) calculateServiceWeights(serviceUnits map[string]int32) map[string]int32 {
+	var serviceWeights = make(map[string]int32)
+	for key := range serviceUnits {
+		serviceWeights[key] = serviceUnits[key]
+	}
+	return serviceWeights
+}
+
+// AddRoute adds a ServiceAliasConfig and associated ServiceUnits for the route
+func (r *TestRouter) AddRoute(route *routeapi.Route) {
+	routeKey := getKey(route)
 
 	config := ServiceAliasConfig{
-		Host:             host,
-		Path:             route.Spec.Path,
-		ServiceUnitNames: make(map[string]int32),
+		Host:         route.Spec.Host,
+		Path:         route.Spec.Path,
+		ServiceUnits: getServiceUnits(route),
+	}
+	config.ServiceUnitNames = r.calculateServiceWeights(config.ServiceUnits)
+
+	for key := range config.ServiceUnits {
+		r.CreateServiceUnit(key)
 	}
 
-	config.ServiceUnitNames[su.Name] = weight
 	r.State[routeKey] = config
-	return true
 }
 
 // RemoveRoute removes the service alias config for Route
 func (r *TestRouter) RemoveRoute(route *routeapi.Route) {
-	r.Committed = false //expect any call to this method to subsequently call commit
-	routeKey := r.routeKey(route)
+	routeKey := getKey(route)
 	_, ok := r.State[routeKey]
 	if !ok {
 		return
 	} else {
 		delete(r.State, routeKey)
 	}
+}
+
+func (r *TestRouter) HasRoute(route *routeapi.Route) bool {
+	// Not used
+	return false
+}
+
+func (r *TestRouter) SyncedAtLeastOnce() bool {
+	// Not used
+	return false
 }
 
 func (r *TestRouter) FilterNamespaces(namespaces sets.String) {
@@ -214,7 +224,7 @@ func (r *TestRouter) FilterNamespaces(namespaces sets.String) {
 	for k := range r.ServiceUnits {
 		// TODO: the id of a service unit should be defined inside this class, not passed in from the outside
 		//   remove the leak of the abstraction when we refactor this code
-		ns := strings.SplitN(k, "/", 2)[0]
+		ns, _ := getPartsFromEndpointsKey(k)
 		if namespaces.Has(ns) {
 			continue
 		}
@@ -222,7 +232,7 @@ func (r *TestRouter) FilterNamespaces(namespaces sets.String) {
 	}
 
 	for k := range r.State {
-		ns := strings.SplitN(k, "-", 2)[0]
+		ns, _ := getPartsFromRouteKey(k)
 		if namespaces.Has(ns) {
 			continue
 		}
@@ -230,21 +240,13 @@ func (r *TestRouter) FilterNamespaces(namespaces sets.String) {
 	}
 }
 
-// routeKey create an identifier for the route consisting of host-path
-func (r *TestRouter) routeKey(route *routeapi.Route) string {
-	return route.Spec.Host + "-" + route.Spec.Path
+// getKey create an identifier for the route consisting of host-path
+func getKey(route *routeapi.Route) string {
+	return routeKeyFromParts(route.Spec.Host, route.Spec.Path)
 }
 
-// Commit saves router state
 func (r *TestRouter) Commit() {
-	r.Committed = true
-}
-
-func (r *TestRouter) SetSkipCommit(skipCommit bool) {
-}
-
-func (r *TestRouter) HasServiceUnit(key string) bool {
-	return false
+	// No op
 }
 
 // TestHandleEndpoints test endpoint watch events
@@ -260,7 +262,7 @@ func TestHandleEndpoints(t *testing.T) {
 			name:      "Endpoint add",
 			eventType: watch.Added,
 			endpoints: &kapi.Endpoints{
-				ObjectMeta: kapi.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "foo",
 					Name:      "test", //kapi.endpoints inherits the name of the service
 				},
@@ -273,7 +275,7 @@ func TestHandleEndpoints(t *testing.T) {
 				Name: "foo/test", //service name from kapi.endpoints object
 				EndpointTable: []Endpoint{
 					{
-						ID:   "1.1.1.1:345",
+						ID:   "ept:test:1.1.1.1:345",
 						IP:   "1.1.1.1",
 						Port: "345",
 					},
@@ -284,12 +286,12 @@ func TestHandleEndpoints(t *testing.T) {
 			name:      "Endpoint mod",
 			eventType: watch.Modified,
 			endpoints: &kapi.Endpoints{
-				ObjectMeta: kapi.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "foo",
 					Name:      "test",
 				},
 				Subsets: []kapi.EndpointSubset{{
-					Addresses: []kapi.EndpointAddress{{IP: "2.2.2.2"}},
+					Addresses: []kapi.EndpointAddress{{IP: "2.2.2.2", TargetRef: &kapi.ObjectReference{Kind: "Pod", Name: "pod-1"}}},
 					Ports:     []kapi.EndpointPort{{Port: 8080}},
 				}},
 			},
@@ -297,7 +299,7 @@ func TestHandleEndpoints(t *testing.T) {
 				Name: "foo/test",
 				EndpointTable: []Endpoint{
 					{
-						ID:   "2.2.2.2:8080",
+						ID:   "pod:pod-1:test:2.2.2.2:8080",
 						IP:   "2.2.2.2",
 						Port: "8080",
 					},
@@ -308,7 +310,7 @@ func TestHandleEndpoints(t *testing.T) {
 			name:      "Endpoint delete",
 			eventType: watch.Deleted,
 			endpoints: &kapi.Endpoints{
-				ObjectMeta: kapi.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "foo",
 					Name:      "test",
 				},
@@ -328,14 +330,10 @@ func TestHandleEndpoints(t *testing.T) {
 	templatePlugin := newDefaultTemplatePlugin(router, true, nil)
 	// TODO: move tests that rely on unique hosts to pkg/router/controller and remove them from
 	// here
-	plugin := controller.NewUniqueHost(templatePlugin, controller.HostForRoute, controller.LogRejections)
+	plugin := controller.NewUniqueHost(templatePlugin, controller.HostForRoute, false, controller.LogRejections)
 
 	for _, tc := range testCases {
 		plugin.HandleEndpoints(tc.eventType, tc.endpoints)
-
-		if !router.Committed {
-			t.Errorf("Expected router to be committed after HandleEndpoints call")
-		}
 
 		su, ok := router.FindServiceUnit(tc.expectedServiceUnit.Name)
 
@@ -368,12 +366,12 @@ func TestHandleTCPEndpoints(t *testing.T) {
 			name:      "Endpoint add",
 			eventType: watch.Added,
 			endpoints: &kapi.Endpoints{
-				ObjectMeta: kapi.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "foo",
 					Name:      "test", //kapi.endpoints inherits the name of the service
 				},
 				Subsets: []kapi.EndpointSubset{{
-					Addresses: []kapi.EndpointAddress{{IP: "1.1.1.1"}},
+					Addresses: []kapi.EndpointAddress{{IP: "1.1.1.1", TargetRef: &kapi.ObjectReference{Kind: "Pod", Name: "pod-1"}}},
 					Ports: []kapi.EndpointPort{
 						{Port: 345},
 						{Port: 346, Protocol: kapi.ProtocolUDP},
@@ -384,7 +382,7 @@ func TestHandleTCPEndpoints(t *testing.T) {
 				Name: "foo/test", //service name from kapi.endpoints object
 				EndpointTable: []Endpoint{
 					{
-						ID:   "1.1.1.1:345",
+						ID:   "pod:pod-1:test:1.1.1.1:345",
 						IP:   "1.1.1.1",
 						Port: "345",
 					},
@@ -395,7 +393,7 @@ func TestHandleTCPEndpoints(t *testing.T) {
 			name:      "Endpoint mod",
 			eventType: watch.Modified,
 			endpoints: &kapi.Endpoints{
-				ObjectMeta: kapi.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "foo",
 					Name:      "test",
 				},
@@ -411,7 +409,7 @@ func TestHandleTCPEndpoints(t *testing.T) {
 				Name: "foo/test",
 				EndpointTable: []Endpoint{
 					{
-						ID:   "2.2.2.2:8080",
+						ID:   "ept:test:2.2.2.2:8080",
 						IP:   "2.2.2.2",
 						Port: "8080",
 					},
@@ -422,7 +420,7 @@ func TestHandleTCPEndpoints(t *testing.T) {
 			name:      "Endpoint delete",
 			eventType: watch.Deleted,
 			endpoints: &kapi.Endpoints{
-				ObjectMeta: kapi.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "foo",
 					Name:      "test",
 				},
@@ -442,14 +440,10 @@ func TestHandleTCPEndpoints(t *testing.T) {
 	templatePlugin := newDefaultTemplatePlugin(router, false, nil)
 	// TODO: move tests that rely on unique hosts to pkg/router/controller and remove them from
 	// here
-	plugin := controller.NewUniqueHost(templatePlugin, controller.HostForRoute, controller.LogRejections)
+	plugin := controller.NewUniqueHost(templatePlugin, controller.HostForRoute, false, controller.LogRejections)
 
 	for _, tc := range testCases {
 		plugin.HandleEndpoints(tc.eventType, tc.endpoints)
-
-		if !router.Committed {
-			t.Errorf("Expected router to be committed after HandleEndpoints call")
-		}
 
 		su, ok := router.FindServiceUnit(tc.expectedServiceUnit.Name)
 
@@ -488,13 +482,13 @@ func TestHandleRoute(t *testing.T) {
 	templatePlugin := newDefaultTemplatePlugin(router, true, nil)
 	// TODO: move tests that rely on unique hosts to pkg/router/controller and remove them from
 	// here
-	plugin := controller.NewUniqueHost(templatePlugin, controller.HostForRoute, rejections)
+	plugin := controller.NewUniqueHost(templatePlugin, controller.HostForRoute, false, rejections)
 
-	original := unversioned.Time{Time: time.Now()}
+	original := metav1.Time{Time: time.Now()}
 
 	//add
 	route := &routeapi.Route{
-		ObjectMeta: kapi.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			CreationTimestamp: original,
 			Namespace:         "foo",
 			Name:              "test",
@@ -507,23 +501,19 @@ func TestHandleRoute(t *testing.T) {
 			},
 		},
 	}
-	serviceUnitKey := fmt.Sprintf("%s/%s", route.Namespace, route.Spec.To.Name)
+	serviceUnitKey := endpointsKeyFromParts(route.Namespace, route.Spec.To.Name)
 
 	plugin.HandleRoute(watch.Added, route)
-
-	if !router.Committed {
-		t.Errorf("Expected router to be committed after HandleRoute call")
-	}
 
 	_, ok := router.FindServiceUnit(serviceUnitKey)
 
 	if !ok {
 		t.Errorf("TestHandleRoute was unable to find the service unit %s after HandleRoute was called", route.Spec.To.Name)
 	} else {
-		serviceAliasCfg, ok := router.State[router.routeKey(route)]
+		serviceAliasCfg, ok := router.State[getKey(route)]
 
 		if !ok {
-			t.Errorf("TestHandleRoute expected route key %s", router.routeKey(route))
+			t.Errorf("TestHandleRoute expected route key %s", getKey(route))
 		} else {
 			if serviceAliasCfg.Host != route.Spec.Host || serviceAliasCfg.Path != route.Spec.Path {
 				t.Errorf("Expected route did not match service alias config %v : %v", route, serviceAliasCfg)
@@ -537,8 +527,8 @@ func TestHandleRoute(t *testing.T) {
 
 	// attempt to add a second route with a newer time, verify it is ignored
 	duplicateRoute := &routeapi.Route{
-		ObjectMeta: kapi.ObjectMeta{
-			CreationTimestamp: unversioned.Time{Time: original.Add(time.Hour)},
+		ObjectMeta: metav1.ObjectMeta{
+			CreationTimestamp: metav1.Time{Time: original.Add(time.Hour)},
 			Namespace:         "foo",
 			Name:              "dupe",
 		},
@@ -553,7 +543,7 @@ func TestHandleRoute(t *testing.T) {
 	if err := plugin.HandleRoute(watch.Added, duplicateRoute); err == nil {
 		t.Fatal("unexpected non-error")
 	}
-	if _, ok := router.FindServiceUnit("foo/TestService2"); ok {
+	if _, ok := router.FindServiceUnit(endpointsKeyFromParts("foo", "TestService2")); ok {
 		t.Fatalf("unexpected second unit: %#v", router)
 	}
 	if r, ok := plugin.RoutesForHost("www.example.com"); !ok || r[0].Name != "test" {
@@ -571,10 +561,10 @@ func TestHandleRoute(t *testing.T) {
 	if err := plugin.HandleRoute(watch.Deleted, duplicateRoute); err == nil {
 		t.Fatal("unexpected non-error")
 	}
-	if _, ok := router.FindServiceUnit("foo/TestService2"); ok {
+	if _, ok := router.FindServiceUnit(endpointsKeyFromParts("foo", "TestService2")); ok {
 		t.Fatalf("unexpected second unit: %#v", router)
 	}
-	if _, ok := router.FindServiceUnit("foo/TestService"); !ok {
+	if _, ok := router.FindServiceUnit(endpointsKeyFromParts("foo", "TestService")); !ok {
 		t.Fatalf("unexpected first unit: %#v", router)
 	}
 	if r, ok := plugin.RoutesForHost("www.example.com"); !ok || r[0].Name != "test" {
@@ -589,11 +579,11 @@ func TestHandleRoute(t *testing.T) {
 	rejections.rejections = nil
 
 	// add a second route with an older time, verify it takes effect
-	duplicateRoute.CreationTimestamp = unversioned.Time{Time: original.Add(-time.Hour)}
+	duplicateRoute.CreationTimestamp = metav1.Time{Time: original.Add(-time.Hour)}
 	if err := plugin.HandleRoute(watch.Added, duplicateRoute); err != nil {
 		t.Fatal("unexpected error")
 	}
-	_, ok = router.FindServiceUnit("foo/TestService2")
+	_, ok = router.FindServiceUnit(endpointsKeyFromParts("foo", "TestService2"))
 	if !ok {
 		t.Fatalf("missing second unit: %#v", router)
 	}
@@ -610,17 +600,14 @@ func TestHandleRoute(t *testing.T) {
 	if err := plugin.HandleRoute(watch.Modified, route); err != nil {
 		t.Fatal("unexpected error")
 	}
-	if !router.Committed {
-		t.Errorf("Expected router to be committed after HandleRoute call")
-	}
 	_, ok = router.FindServiceUnit(serviceUnitKey)
 	if !ok {
 		t.Errorf("TestHandleRoute was unable to find the service unit %s after HandleRoute was called", route.Spec.To.Name)
 	} else {
-		serviceAliasCfg, ok := router.State[router.routeKey(route)]
+		serviceAliasCfg, ok := router.State[getKey(route)]
 
 		if !ok {
-			t.Errorf("TestHandleRoute expected route key %s", router.routeKey(route))
+			t.Errorf("TestHandleRoute expected route key %s", getKey(route))
 		} else {
 			if serviceAliasCfg.Host != route.Spec.Host || serviceAliasCfg.Path != route.Spec.Path {
 				t.Errorf("Expected route did not match service alias config %v : %v", route, serviceAliasCfg)
@@ -638,17 +625,14 @@ func TestHandleRoute(t *testing.T) {
 	if err := plugin.HandleRoute(watch.Deleted, route); err != nil {
 		t.Fatal("unexpected error")
 	}
-	if !router.Committed {
-		t.Errorf("Expected router to be committed after HandleRoute call")
-	}
 	_, ok = router.FindServiceUnit(serviceUnitKey)
 	if !ok {
 		t.Errorf("TestHandleRoute was unable to find the service unit %s after HandleRoute was called", route.Spec.To.Name)
 	} else {
-		_, ok := router.State[router.routeKey(route)]
+		_, ok := router.State[getKey(route)]
 
 		if ok {
-			t.Errorf("TestHandleRoute did not expect route key %s", router.routeKey(route))
+			t.Errorf("TestHandleRoute did not expect route key %s", getKey(route))
 		}
 	}
 	if plugin.HostLen() != 0 {
@@ -667,13 +651,13 @@ func TestHandleRouteExtendedValidation(t *testing.T) {
 	// TODO: move tests that rely on unique hosts to pkg/router/controller and remove them from
 	// here
 	extendedValidatorPlugin := controller.NewExtendedValidator(templatePlugin, rejections)
-	plugin := controller.NewUniqueHost(extendedValidatorPlugin, controller.HostForRoute, rejections)
+	plugin := controller.NewUniqueHost(extendedValidatorPlugin, controller.HostForRoute, false, rejections)
 
-	original := unversioned.Time{Time: time.Now()}
+	original := metav1.Time{Time: time.Now()}
 
 	//add
 	route := &routeapi.Route{
-		ObjectMeta: kapi.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			CreationTimestamp: original,
 			Namespace:         "foo",
 			Name:              "test",
@@ -686,23 +670,19 @@ func TestHandleRouteExtendedValidation(t *testing.T) {
 			},
 		},
 	}
-	serviceUnitKey := fmt.Sprintf("%s/%s", route.Namespace, route.Spec.To.Name)
+	serviceUnitKey := endpointsKeyFromParts(route.Namespace, route.Spec.To.Name)
 
 	plugin.HandleRoute(watch.Added, route)
-
-	if !router.Committed {
-		t.Errorf("Expected router to be committed after HandleRoute call")
-	}
 
 	_, ok := router.FindServiceUnit(serviceUnitKey)
 
 	if !ok {
 		t.Errorf("TestHandleRoute was unable to find the service unit %s after HandleRoute was called", route.Spec.To.Name)
 	} else {
-		serviceAliasCfg, ok := router.State[router.routeKey(route)]
+		serviceAliasCfg, ok := router.State[getKey(route)]
 
 		if !ok {
-			t.Errorf("TestHandleRoute expected route key %s", router.routeKey(route))
+			t.Errorf("TestHandleRoute expected route key %s", getKey(route))
 		} else {
 			if serviceAliasCfg.Host != route.Spec.Host || serviceAliasCfg.Path != route.Spec.Path {
 				t.Errorf("Expected route did not match service alias config %v : %v", route, serviceAliasCfg)
@@ -815,7 +795,7 @@ func TestHandleRouteExtendedValidation(t *testing.T) {
 					},
 				},
 			},
-			errorExpected: true,
+			errorExpected: false,
 		},
 		{
 			name: "Edge termination OK with certs without host",
@@ -1019,14 +999,14 @@ func TestNamespaceScopingFromEmpty(t *testing.T) {
 	templatePlugin := newDefaultTemplatePlugin(router, true, nil)
 	// TODO: move tests that rely on unique hosts to pkg/router/controller and remove them from
 	// here
-	plugin := controller.NewUniqueHost(templatePlugin, controller.HostForRoute, controller.LogRejections)
+	plugin := controller.NewUniqueHost(templatePlugin, controller.HostForRoute, false, controller.LogRejections)
 
 	// no namespaces allowed
 	plugin.HandleNamespaces(sets.String{})
 
 	//add
 	route := &routeapi.Route{
-		ObjectMeta: kapi.ObjectMeta{Namespace: "foo", Name: "test"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: "foo", Name: "test"},
 		Spec: routeapi.RouteSpec{
 			Host: "www.example.com",
 			To: routeapi.RouteTargetReference{
@@ -1039,7 +1019,7 @@ func TestNamespaceScopingFromEmpty(t *testing.T) {
 	// ignores all events for namespace that doesn't match
 	for _, s := range []watch.EventType{watch.Added, watch.Modified, watch.Deleted} {
 		plugin.HandleRoute(s, route)
-		if _, ok := router.FindServiceUnit("foo/TestService"); ok || plugin.HostLen() != 0 {
+		if _, ok := router.FindServiceUnit(endpointsKeyFromParts("foo", "TestService")); ok || plugin.HostLen() != 0 {
 			t.Errorf("unexpected router state %#v", router)
 		}
 	}
@@ -1048,7 +1028,7 @@ func TestNamespaceScopingFromEmpty(t *testing.T) {
 	plugin.HandleNamespaces(sets.NewString("bar"))
 	for _, s := range []watch.EventType{watch.Added, watch.Modified, watch.Deleted} {
 		plugin.HandleRoute(s, route)
-		if _, ok := router.FindServiceUnit("foo/TestService"); ok || plugin.HostLen() != 0 {
+		if _, ok := router.FindServiceUnit(endpointsKeyFromParts("foo", "TestService")); ok || plugin.HostLen() != 0 {
 			t.Errorf("unexpected router state %#v", router)
 		}
 	}
@@ -1056,89 +1036,21 @@ func TestNamespaceScopingFromEmpty(t *testing.T) {
 	// allow foo
 	plugin.HandleNamespaces(sets.NewString("foo", "bar"))
 	plugin.HandleRoute(watch.Added, route)
-	if _, ok := router.FindServiceUnit("foo/TestService"); !ok || plugin.HostLen() != 1 {
+	if _, ok := router.FindServiceUnit(endpointsKeyFromParts("foo", "TestService")); !ok || plugin.HostLen() != 1 {
 		t.Errorf("unexpected router state %#v", router)
 	}
 
 	// forbid foo, and make sure it's cleared
 	plugin.HandleNamespaces(sets.NewString("bar"))
-	if _, ok := router.FindServiceUnit("foo/TestService"); ok || plugin.HostLen() != 0 {
+	if _, ok := router.FindServiceUnit(endpointsKeyFromParts("foo", "TestService")); ok || plugin.HostLen() != 0 {
 		t.Errorf("unexpected router state %#v", router)
 	}
 	plugin.HandleRoute(watch.Modified, route)
-	if _, ok := router.FindServiceUnit("foo/TestService"); ok || plugin.HostLen() != 0 {
+	if _, ok := router.FindServiceUnit(endpointsKeyFromParts("foo", "TestService")); ok || plugin.HostLen() != 0 {
 		t.Errorf("unexpected router state %#v", router)
 	}
 	plugin.HandleRoute(watch.Added, route)
-	if _, ok := router.FindServiceUnit("foo/TestService"); ok || plugin.HostLen() != 0 {
+	if _, ok := router.FindServiceUnit(endpointsKeyFromParts("foo", "TestService")); ok || plugin.HostLen() != 0 {
 		t.Errorf("unexpected router state %#v", router)
-	}
-}
-
-func TestUnchangingEndpointsDoesNotCommit(t *testing.T) {
-	router := newTestRouter(make(map[string]ServiceAliasConfig))
-	plugin := newDefaultTemplatePlugin(router, true, nil)
-	endpoints := &kapi.Endpoints{
-		ObjectMeta: kapi.ObjectMeta{
-			Namespace: "foo",
-			Name:      "test",
-		},
-		Subsets: []kapi.EndpointSubset{{
-			Addresses: []kapi.EndpointAddress{{IP: "1.1.1.1"}, {IP: "2.2.2.2"}},
-			Ports:     []kapi.EndpointPort{{Port: 0}},
-		}},
-	}
-	changedEndpoints := &kapi.Endpoints{
-		ObjectMeta: kapi.ObjectMeta{
-			Namespace: "foo",
-			Name:      "test",
-		},
-		Subsets: []kapi.EndpointSubset{{
-			Addresses: []kapi.EndpointAddress{{IP: "3.3.3.3"}, {IP: "2.2.2.2"}},
-			Ports:     []kapi.EndpointPort{{Port: 0}},
-		}},
-	}
-
-	testCases := []struct {
-		name         string
-		event        watch.EventType
-		endpoints    *kapi.Endpoints
-		expectCommit bool
-	}{
-		{
-			name:         "initial add",
-			event:        watch.Added,
-			endpoints:    endpoints,
-			expectCommit: true,
-		},
-		{
-			name:         "mod with no change",
-			event:        watch.Modified,
-			endpoints:    endpoints,
-			expectCommit: false,
-		},
-		{
-			name:         "add with change",
-			event:        watch.Added,
-			endpoints:    changedEndpoints,
-			expectCommit: true,
-		},
-		{
-			name:         "add with no change",
-			event:        watch.Added,
-			endpoints:    changedEndpoints,
-			expectCommit: false,
-		},
-	}
-
-	for _, v := range testCases {
-		err := plugin.HandleEndpoints(v.event, v.endpoints)
-		if err != nil {
-			t.Errorf("%s had unexpected error in handle endpoints %v", v.name, err)
-			continue
-		}
-		if router.Committed != v.expectCommit {
-			t.Errorf("%s expected router commit to be %v but found %v", v.name, v.expectCommit, router.Committed)
-		}
 	}
 }

@@ -5,76 +5,68 @@ import (
 	"strings"
 	"testing"
 
-	"k8s.io/kubernetes/pkg/admission"
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/auth/user"
-	//kcache "k8s.io/kubernetes/pkg/client/cache"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apiserver/pkg/admission"
+	"k8s.io/apiserver/pkg/authentication/user"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/apis/rbac"
 	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
-	"k8s.io/kubernetes/pkg/runtime"
+	kadmission "k8s.io/kubernetes/pkg/kubeapiserver/admission"
 
-	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
-	otestclient "github.com/openshift/origin/pkg/client/testclient"
+	authorizationapi "github.com/openshift/api/authorization/v1"
+	userapi "github.com/openshift/api/user/v1"
+	fakeauthorizationclient "github.com/openshift/client-go/authorization/clientset/versioned/fake"
+	fakeuserclient "github.com/openshift/client-go/user/clientset/versioned/fake"
 	oadmission "github.com/openshift/origin/pkg/cmd/server/admission"
-	//"github.com/openshift/origin/pkg/project/cache"
-	userapi "github.com/openshift/origin/pkg/user/api"
-	usercache "github.com/openshift/origin/pkg/user/cache"
 )
 
 func TestAdmission(t *testing.T) {
 	var (
 		userAlice = userapi.User{
-			ObjectMeta: kapi.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name:   "Alice",
 				Labels: map[string]string{"foo": "bar"},
 			},
 		}
-		userAliceRef = kapi.ObjectReference{
-			Kind: authorizationapi.UserKind,
+		userAliceSubj = rbac.Subject{
+			Kind: rbac.UserKind,
 			Name: "Alice",
 		}
 
 		userBob = userapi.User{
-			ObjectMeta: kapi.ObjectMeta{Name: "Bob"},
+			ObjectMeta: metav1.ObjectMeta{Name: "Bob"},
 			Groups:     []string{"group"},
 		}
-		userBobRef = kapi.ObjectReference{
-			Kind: authorizationapi.UserKind,
+		userBobSubj = rbac.Subject{
+			Kind: rbac.UserKind,
 			Name: "Bob",
 		}
 
 		group = userapi.Group{
-			ObjectMeta: kapi.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name:   "group",
 				Labels: map[string]string{"baz": "quux"},
 			},
-			Users: []string{userBobRef.Name},
+			Users: []string{userBobSubj.Name},
 		}
-		groupRef = kapi.ObjectReference{
-			Kind: authorizationapi.GroupKind,
+		groupSubj = rbac.Subject{
+			Kind: rbac.GroupKind,
 			Name: "group",
 		}
 
 		serviceaccount = kapi.ServiceAccount{
-			ObjectMeta: kapi.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "namespace",
 				Name:      "serviceaccount",
 				Labels:    map[string]string{"xyzzy": "thud"},
 			},
 		}
-		serviceaccountRef = kapi.ObjectReference{
-			Kind:      authorizationapi.ServiceAccountKind,
+		serviceaccountSubj = rbac.Subject{
+			Kind:      rbac.ServiceAccountKind,
 			Namespace: "namespace",
 			Name:      "serviceaccount",
-		}
-
-		systemuserRef = kapi.ObjectReference{
-			Kind: authorizationapi.SystemUserKind,
-			Name: "system user",
-		}
-		systemgroupRef = kapi.ObjectReference{
-			Kind: authorizationapi.SystemGroupKind,
-			Name: "system group",
 		}
 	)
 
@@ -82,37 +74,39 @@ func TestAdmission(t *testing.T) {
 		name        string
 		expectedErr string
 
-		object      runtime.Object
-		oldObject   runtime.Object
-		kind        unversioned.GroupVersionKind
-		resource    unversioned.GroupVersionResource
-		namespace   string
-		subresource string
-		objects     []runtime.Object
+		object               runtime.Object
+		oldObject            runtime.Object
+		kind                 schema.GroupVersionKind
+		resource             schema.GroupVersionResource
+		namespace            string
+		subresource          string
+		kubeObjects          []runtime.Object
+		authorizationObjects []runtime.Object
+		userObjects          []runtime.Object
 	}{
 		{
 			name: "ignore (allow) if subresource is nonempty",
-			object: &authorizationapi.RoleBinding{
-				ObjectMeta: kapi.ObjectMeta{
+			object: &rbac.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "namespace",
 					Name:      "rolebinding",
 				},
-				Subjects: []kapi.ObjectReference{userAliceRef},
+				Subjects: []rbac.Subject{userAliceSubj},
 			},
-			oldObject: &authorizationapi.RoleBinding{
-				ObjectMeta: kapi.ObjectMeta{
+			oldObject: &rbac.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "namespace",
 					Name:      "rolebinding",
 				},
-				Subjects: []kapi.ObjectReference{},
+				Subjects: []rbac.Subject{},
 			},
-			kind:        authorizationapi.Kind("RoleBinding").WithVersion("version"),
-			resource:    authorizationapi.Resource("rolebindings").WithVersion("version"),
+			kind:        rbac.Kind("RoleBinding").WithVersion("version"),
+			resource:    rbac.Resource("rolebindings").WithVersion("version"),
 			namespace:   "namespace",
 			subresource: "subresource",
-			objects: []runtime.Object{
+			kubeObjects: []runtime.Object{
 				&kapi.Namespace{
-					ObjectMeta: kapi.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name: "namespace",
 					},
 				},
@@ -120,28 +114,28 @@ func TestAdmission(t *testing.T) {
 		},
 		{
 			name: "ignore (allow) cluster-scoped rolebinding",
-			object: &authorizationapi.RoleBinding{
-				ObjectMeta: kapi.ObjectMeta{
+			object: &rbac.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "namespace",
 					Name:      "rolebinding",
 				},
-				Subjects: []kapi.ObjectReference{userAliceRef},
-				RoleRef:  kapi.ObjectReference{Namespace: authorizationapi.PolicyName},
+				Subjects: []rbac.Subject{userAliceSubj},
+				RoleRef:  rbac.RoleRef{Name: "name"},
 			},
-			oldObject: &authorizationapi.RoleBinding{
-				ObjectMeta: kapi.ObjectMeta{
+			oldObject: &rbac.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "namespace",
 					Name:      "rolebinding",
 				},
-				Subjects: []kapi.ObjectReference{},
+				Subjects: []rbac.Subject{},
 			},
-			kind:        authorizationapi.Kind("RoleBinding").WithVersion("version"),
-			resource:    authorizationapi.Resource("rolebindings").WithVersion("version"),
+			kind:        rbac.Kind("RoleBinding").WithVersion("version"),
+			resource:    rbac.Resource("rolebindings").WithVersion("version"),
 			namespace:   "",
 			subresource: "",
-			objects: []runtime.Object{
+			kubeObjects: []runtime.Object{
 				&kapi.Namespace{
-					ObjectMeta: kapi.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name: "namespace",
 					},
 				},
@@ -149,36 +143,34 @@ func TestAdmission(t *testing.T) {
 		},
 		{
 			name: "allow if the namespace has no rolebinding restrictions",
-			object: &authorizationapi.RoleBinding{
-				ObjectMeta: kapi.ObjectMeta{
+			object: &rbac.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "namespace",
 					Name:      "rolebinding",
 				},
-				Subjects: []kapi.ObjectReference{
-					userAliceRef,
-					userBobRef,
-					groupRef,
-					serviceaccountRef,
-					systemgroupRef,
-					systemuserRef,
+				Subjects: []rbac.Subject{
+					userAliceSubj,
+					userBobSubj,
+					groupSubj,
+					serviceaccountSubj,
 				},
-				RoleRef: kapi.ObjectReference{Namespace: authorizationapi.PolicyName},
+				RoleRef: rbac.RoleRef{Name: "name"},
 			},
-			oldObject: &authorizationapi.RoleBinding{
-				ObjectMeta: kapi.ObjectMeta{
+			oldObject: &rbac.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "namespace",
 					Name:      "rolebinding",
 				},
-				Subjects: []kapi.ObjectReference{},
-				RoleRef:  kapi.ObjectReference{Namespace: authorizationapi.PolicyName},
+				Subjects: []rbac.Subject{},
+				RoleRef:  rbac.RoleRef{Name: "name"},
 			},
-			kind:        authorizationapi.Kind("RoleBinding").WithVersion("version"),
-			resource:    authorizationapi.Resource("rolebindings").WithVersion("version"),
+			kind:        rbac.Kind("RoleBinding").WithVersion("version"),
+			resource:    rbac.Resource("rolebindings").WithVersion("version"),
 			namespace:   "namespace",
 			subresource: "",
-			objects: []runtime.Object{
+			kubeObjects: []runtime.Object{
 				&kapi.Namespace{
-					ObjectMeta: kapi.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name: "namespace",
 					},
 				},
@@ -186,42 +178,44 @@ func TestAdmission(t *testing.T) {
 		},
 		{
 			name: "allow if any rolebinding with the subject already exists",
-			object: &authorizationapi.RoleBinding{
-				ObjectMeta: kapi.ObjectMeta{
+			object: &rbac.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "namespace",
 					Name:      "rolebinding",
 				},
-				Subjects: []kapi.ObjectReference{
-					userAliceRef,
-					groupRef,
-					serviceaccountRef,
+				Subjects: []rbac.Subject{
+					userAliceSubj,
+					groupSubj,
+					serviceaccountSubj,
 				},
-				RoleRef: kapi.ObjectReference{Namespace: authorizationapi.PolicyName},
+				RoleRef: rbac.RoleRef{Name: "name"},
 			},
-			oldObject: &authorizationapi.RoleBinding{
-				ObjectMeta: kapi.ObjectMeta{
+			oldObject: &rbac.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "namespace",
 					Name:      "rolebinding",
 				},
-				Subjects: []kapi.ObjectReference{
-					userAliceRef,
-					groupRef,
-					serviceaccountRef,
+				Subjects: []rbac.Subject{
+					userAliceSubj,
+					groupSubj,
+					serviceaccountSubj,
 				},
-				RoleRef: kapi.ObjectReference{Namespace: authorizationapi.PolicyName},
+				RoleRef: rbac.RoleRef{Name: "name"},
 			},
-			kind:        authorizationapi.Kind("RoleBinding").WithVersion("version"),
-			resource:    authorizationapi.Resource("rolebindings").WithVersion("version"),
+			kind:        rbac.Kind("RoleBinding").WithVersion("version"),
+			resource:    rbac.Resource("rolebindings").WithVersion("version"),
 			namespace:   "namespace",
 			subresource: "",
-			objects: []runtime.Object{
+			kubeObjects: []runtime.Object{
 				&kapi.Namespace{
-					ObjectMeta: kapi.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name: "namespace",
 					},
 				},
+			},
+			authorizationObjects: []runtime.Object{
 				&authorizationapi.RoleBindingRestriction{
-					ObjectMeta: kapi.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name:      "bogus-matcher",
 						Namespace: "namespace",
 					},
@@ -232,63 +226,41 @@ func TestAdmission(t *testing.T) {
 			},
 		},
 		{
-			name: "allow a system user, system group, user, group, or service account in a rolebinding if a literal matches",
-			object: &authorizationapi.RoleBinding{
-				ObjectMeta: kapi.ObjectMeta{
+			name: "allow a user, group, or service account in a rolebinding if a literal matches",
+			object: &rbac.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "namespace",
 					Name:      "rolebinding",
 				},
-				Subjects: []kapi.ObjectReference{
-					systemuserRef,
-					systemgroupRef,
-					userAliceRef,
-					serviceaccountRef,
-					groupRef,
+				Subjects: []rbac.Subject{
+					userAliceSubj,
+					serviceaccountSubj,
+					groupSubj,
 				},
-				RoleRef: kapi.ObjectReference{Namespace: authorizationapi.PolicyName},
+				RoleRef: rbac.RoleRef{Name: "name"},
 			},
-			oldObject: &authorizationapi.RoleBinding{
-				ObjectMeta: kapi.ObjectMeta{
+			oldObject: &rbac.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "namespace",
 					Name:      "rolebinding",
 				},
-				Subjects: []kapi.ObjectReference{},
-				RoleRef:  kapi.ObjectReference{Namespace: authorizationapi.PolicyName},
+				Subjects: []rbac.Subject{},
+				RoleRef:  rbac.RoleRef{Name: "name"},
 			},
-			kind:        authorizationapi.Kind("RoleBinding").WithVersion("version"),
-			resource:    authorizationapi.Resource("rolebindings").WithVersion("version"),
+			kind:        rbac.Kind("RoleBinding").WithVersion("version"),
+			resource:    rbac.Resource("rolebindings").WithVersion("version"),
 			namespace:   "namespace",
 			subresource: "",
-			objects: []runtime.Object{
+			kubeObjects: []runtime.Object{
 				&kapi.Namespace{
-					ObjectMeta: kapi.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name: "namespace",
 					},
 				},
+			},
+			authorizationObjects: []runtime.Object{
 				&authorizationapi.RoleBindingRestriction{
-					ObjectMeta: kapi.ObjectMeta{
-						Name:      "match-system-users",
-						Namespace: "namespace",
-					},
-					Spec: authorizationapi.RoleBindingRestrictionSpec{
-						UserRestriction: &authorizationapi.UserRestriction{
-							Users: []string{systemuserRef.Name},
-						},
-					},
-				},
-				&authorizationapi.RoleBindingRestriction{
-					ObjectMeta: kapi.ObjectMeta{
-						Name:      "match-system-groups",
-						Namespace: "namespace",
-					},
-					Spec: authorizationapi.RoleBindingRestrictionSpec{
-						GroupRestriction: &authorizationapi.GroupRestriction{
-							Groups: []string{systemgroupRef.Name},
-						},
-					},
-				},
-				&authorizationapi.RoleBindingRestriction{
-					ObjectMeta: kapi.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name:      "match-users",
 						Namespace: "namespace",
 					},
@@ -299,7 +271,7 @@ func TestAdmission(t *testing.T) {
 					},
 				},
 				&authorizationapi.RoleBindingRestriction{
-					ObjectMeta: kapi.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name:      "match-groups",
 						Namespace: "namespace",
 					},
@@ -310,7 +282,7 @@ func TestAdmission(t *testing.T) {
 					},
 				},
 				&authorizationapi.RoleBindingRestriction{
-					ObjectMeta: kapi.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name:      "match-serviceaccounts",
 						Namespace: "namespace",
 					},
@@ -330,259 +302,75 @@ func TestAdmission(t *testing.T) {
 		{
 			name: "prohibit user without a matching user literal",
 			expectedErr: fmt.Sprintf("rolebindings to %s %q are not allowed",
-				userAliceRef.Kind, userAliceRef.Name),
-			object: &authorizationapi.RoleBinding{
-				ObjectMeta: kapi.ObjectMeta{
+				userAliceSubj.Kind, userAliceSubj.Name),
+			object: &rbac.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "namespace",
 					Name:      "rolebinding",
 				},
-				Subjects: []kapi.ObjectReference{
-					userAliceRef,
+				Subjects: []rbac.Subject{
+					userAliceSubj,
 				},
-				RoleRef: kapi.ObjectReference{Namespace: authorizationapi.PolicyName},
+				RoleRef: rbac.RoleRef{Name: "name"},
 			},
-			oldObject: &authorizationapi.RoleBinding{
-				ObjectMeta: kapi.ObjectMeta{
+			oldObject: &rbac.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "namespace",
 					Name:      "rolebinding",
 				},
-				Subjects: []kapi.ObjectReference{},
-				RoleRef:  kapi.ObjectReference{Namespace: authorizationapi.PolicyName},
+				Subjects: []rbac.Subject{},
+				RoleRef:  rbac.RoleRef{Name: "name"},
 			},
-			kind:        authorizationapi.Kind("RoleBinding").WithVersion("version"),
-			resource:    authorizationapi.Resource("rolebindings").WithVersion("version"),
+			kind:        rbac.Kind("RoleBinding").WithVersion("version"),
+			resource:    rbac.Resource("rolebindings").WithVersion("version"),
 			namespace:   "namespace",
 			subresource: "",
-			objects: []runtime.Object{
+			kubeObjects: []runtime.Object{
 				&kapi.Namespace{
-					ObjectMeta: kapi.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name: "namespace",
 					},
 				},
-				&userAlice,
-				&userBob,
+			},
+			authorizationObjects: []runtime.Object{
 				&authorizationapi.RoleBindingRestriction{
-					ObjectMeta: kapi.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name:      "match-users-bob",
 						Namespace: "namespace",
 					},
 					Spec: authorizationapi.RoleBindingRestrictionSpec{
 						UserRestriction: &authorizationapi.UserRestriction{
-							Users: []string{userBobRef.Name},
+							Users: []string{userBobSubj.Name},
 						},
 					},
 				},
 			},
-		},
-		{
-			name: "allow users in a policybinding if a selector matches",
-			object: &authorizationapi.PolicyBinding{
-				ObjectMeta: kapi.ObjectMeta{
-					Namespace: "namespace",
-					Name:      "policybinding",
-				},
-				RoleBindings: map[string]*authorizationapi.RoleBinding{
-					"rolebinding": {
-						ObjectMeta: kapi.ObjectMeta{
-							Namespace: "namespace",
-							Name:      "rolebinding",
-						},
-						Subjects: []kapi.ObjectReference{
-							userAliceRef,
-							userBobRef,
-						},
-						RoleRef: kapi.ObjectReference{
-							Namespace: authorizationapi.PolicyName,
-						},
-					},
-				},
-				PolicyRef: kapi.ObjectReference{
-					Namespace: authorizationapi.PolicyName,
-				},
-			},
-			oldObject: &authorizationapi.PolicyBinding{
-				ObjectMeta: kapi.ObjectMeta{
-					Namespace: "namespace",
-					Name:      "policybinding",
-				},
-				RoleBindings: map[string]*authorizationapi.RoleBinding{
-					"rolebinding": {
-						ObjectMeta: kapi.ObjectMeta{
-							Namespace: "namespace",
-							Name:      "rolebinding",
-						},
-						Subjects: []kapi.ObjectReference{},
-						RoleRef: kapi.ObjectReference{
-							Namespace: authorizationapi.PolicyName,
-						},
-					},
-				},
-				PolicyRef: kapi.ObjectReference{
-					Namespace: authorizationapi.PolicyName,
-				},
-			},
-			kind:        authorizationapi.Kind("PolicyBinding").WithVersion("version"),
-			resource:    authorizationapi.Resource("policybindings").WithVersion("version"),
-			namespace:   "namespace",
-			subresource: "",
-			objects: []runtime.Object{
-				&kapi.Namespace{
-					ObjectMeta: kapi.ObjectMeta{
-						Name: "namespace",
-					},
-				},
-				&authorizationapi.Policy{
-					ObjectMeta: kapi.ObjectMeta{
-						Namespace: "namespace",
-						Name:      authorizationapi.PolicyName,
-					},
-					Roles: map[string]*authorizationapi.Role{
-						"any": {
-							ObjectMeta: kapi.ObjectMeta{
-								Namespace: kapi.NamespaceDefault,
-								Name:      "any",
-							},
-						},
-					},
-				},
+			userObjects: []runtime.Object{
 				&userAlice,
 				&userBob,
-				&authorizationapi.RoleBindingRestriction{
-					ObjectMeta: kapi.ObjectMeta{
-						Name:      "match-users-alice",
-						Namespace: "namespace",
-					},
-					Spec: authorizationapi.RoleBindingRestrictionSpec{
-						UserRestriction: &authorizationapi.UserRestriction{
-							Selectors: []unversioned.LabelSelector{
-								{MatchLabels: map[string]string{"foo": "bar"}},
-							},
-						},
-					},
-				},
-				&authorizationapi.RoleBindingRestriction{
-					ObjectMeta: kapi.ObjectMeta{
-						Name:      "match-users-bob",
-						Namespace: "namespace",
-					},
-					Spec: authorizationapi.RoleBindingRestrictionSpec{
-						UserRestriction: &authorizationapi.UserRestriction{
-							Users: []string{userBob.Name},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "prohibit a user in a policybinding without a matching selector",
-			expectedErr: fmt.Sprintf("rolebindings to %s %q are not allowed",
-				userBobRef.Kind, userBobRef.Name),
-			object: &authorizationapi.PolicyBinding{
-				ObjectMeta: kapi.ObjectMeta{
-					Namespace: "namespace",
-					Name:      "policybinding",
-				},
-				RoleBindings: map[string]*authorizationapi.RoleBinding{
-					"rolebinding": {
-						ObjectMeta: kapi.ObjectMeta{
-							Namespace: "namespace",
-							Name:      "rolebinding",
-						},
-						Subjects: []kapi.ObjectReference{
-							userAliceRef,
-							userBobRef,
-						},
-						RoleRef: kapi.ObjectReference{
-							Namespace: authorizationapi.PolicyName,
-						},
-					},
-				},
-				PolicyRef: kapi.ObjectReference{
-					Namespace: authorizationapi.PolicyName,
-				},
-			},
-			oldObject: &authorizationapi.PolicyBinding{
-				ObjectMeta: kapi.ObjectMeta{
-					Namespace: "namespace",
-					Name:      "policybinding",
-				},
-				RoleBindings: map[string]*authorizationapi.RoleBinding{
-					"rolebinding": {
-						ObjectMeta: kapi.ObjectMeta{
-							Namespace: "namespace",
-							Name:      "rolebinding",
-						},
-						Subjects: []kapi.ObjectReference{},
-						RoleRef: kapi.ObjectReference{
-							Namespace: authorizationapi.PolicyName,
-						},
-					},
-				},
-				PolicyRef: kapi.ObjectReference{
-					Namespace: authorizationapi.PolicyName,
-				},
-			},
-			kind:        authorizationapi.Kind("PolicyBinding").WithVersion("version"),
-			resource:    authorizationapi.Resource("policybindings").WithVersion("version"),
-			namespace:   "namespace",
-			subresource: "",
-			objects: []runtime.Object{
-				&kapi.Namespace{
-					ObjectMeta: kapi.ObjectMeta{
-						Name: "namespace",
-					},
-				},
-				&authorizationapi.Policy{
-					ObjectMeta: kapi.ObjectMeta{
-						Namespace: "namespace",
-						Name:      authorizationapi.PolicyName,
-					},
-					Roles: map[string]*authorizationapi.Role{
-						"any": {
-							ObjectMeta: kapi.ObjectMeta{
-								Namespace: kapi.NamespaceDefault,
-								Name:      "any",
-							},
-						},
-					},
-				},
-				&userAlice,
-				&userBob,
-				&authorizationapi.RoleBindingRestriction{
-					ObjectMeta: kapi.ObjectMeta{
-						Name:      "match-users-alice",
-						Namespace: "namespace",
-					},
-					Spec: authorizationapi.RoleBindingRestrictionSpec{
-						UserRestriction: &authorizationapi.UserRestriction{
-							Selectors: []unversioned.LabelSelector{
-								{MatchLabels: map[string]string{"foo": "bar"}},
-							},
-						},
-					},
-				},
 			},
 		},
 	}
 
-	for _, tc := range testCases {
-		kclientset := fake.NewSimpleClientset(tc.objects...)
-		oclient := otestclient.NewSimpleFake(tc.objects...)
+	stopCh := make(chan struct{})
+	defer close(stopCh)
 
-		plugin, err := NewRestrictUsersAdmission(kclientset)
+	for _, tc := range testCases {
+		kclientset := fake.NewSimpleClientset(tc.kubeObjects...)
+		fakeUserClient := fakeuserclient.NewSimpleClientset(tc.userObjects...)
+		fakeAuthorizationClient := fakeauthorizationclient.NewSimpleClientset(tc.authorizationObjects...)
+
+		plugin, err := NewRestrictUsersAdmission()
 		if err != nil {
 			t.Errorf("unexpected error initializing admission plugin: %v", err)
 		}
 
-		plugins := []admission.Interface{plugin}
+		plugin.(kadmission.WantsInternalKubeClientSet).SetInternalKubeClientSet(kclientset)
+		plugin.(oadmission.WantsOpenshiftInternalAuthorizationClient).SetOpenshiftInternalAuthorizationClient(fakeAuthorizationClient)
+		plugin.(oadmission.WantsOpenshiftInternalUserClient).SetOpenshiftInternalUserClient(fakeUserClient)
+		plugin.(*restrictUsersAdmission).groupCache = fakeGroupCache{}
 
-		plugin.(oadmission.WantsOpenshiftClient).SetOpenshiftClient(oclient)
-
-		groupCache := usercache.NewGroupCache(&groupCache{[]userapi.Group{group}})
-		plugin.(oadmission.WantsGroupCache).SetGroupCache(groupCache)
-		groupCache.Run()
-
-		err = admission.Validate(plugins)
+		err = admission.ValidateInitialization(plugin)
 		if err != nil {
 			t.Errorf("unexpected error validating admission plugin: %v", err)
 		}
@@ -592,14 +380,14 @@ func TestAdmission(t *testing.T) {
 			tc.oldObject,
 			tc.kind,
 			tc.namespace,
-			"name",
+			tc.name,
 			tc.resource,
 			tc.subresource,
 			admission.Create,
 			&user.DefaultInfo{},
 		)
 
-		err = plugin.Admit(attributes)
+		err = plugin.(admission.MutationInterface).Admit(attributes)
 		switch {
 		case len(tc.expectedErr) == 0 && err == nil:
 		case len(tc.expectedErr) == 0 && err != nil:

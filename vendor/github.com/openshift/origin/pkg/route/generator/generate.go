@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strconv"
 
-	kapi "k8s.io/kubernetes/pkg/api"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/kubernetes/pkg/kubectl"
-	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util/intstr"
 
-	"github.com/openshift/origin/pkg/route/api"
+	routeapi "github.com/openshift/origin/pkg/route/apis/route"
 )
 
 // RouteGenerator generates routes from a given set of parameters
@@ -27,6 +27,7 @@ func (RouteGenerator) ParamNames() []kubectl.GeneratorParam {
 		{Name: "name", Required: false},
 		{Name: "hostname", Required: false},
 		{Name: "path", Required: false},
+		{Name: "wildcard-policy", Required: false},
 	}
 }
 
@@ -62,15 +63,16 @@ func (RouteGenerator) Generate(genericParams map[string]interface{}) (runtime.Ob
 		}
 	}
 
-	route := &api.Route{
-		ObjectMeta: kapi.ObjectMeta{
+	route := &routeapi.Route{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
 			Labels: labels,
 		},
-		Spec: api.RouteSpec{
-			Host: params["hostname"],
-			Path: params["path"],
-			To: api.RouteTargetReference{
+		Spec: routeapi.RouteSpec{
+			Host:           params["hostname"],
+			WildcardPolicy: routeapi.WildcardPolicyType(params["wildcard-policy"]),
+			Path:           params["path"],
+			To: routeapi.RouteTargetReference{
 				Name: params["default-name"],
 			},
 		},
@@ -84,7 +86,7 @@ func (RouteGenerator) Generate(genericParams map[string]interface{}) (runtime.Ob
 		} else {
 			targetPort = intstr.FromString(portString)
 		}
-		route.Spec.Port = &api.RoutePort{
+		route.Spec.Port = &routeapi.RoutePort{
 			TargetPort: targetPort,
 		}
 	}
