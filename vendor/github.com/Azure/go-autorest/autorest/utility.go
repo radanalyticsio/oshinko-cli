@@ -1,5 +1,19 @@
 package autorest
 
+// Copyright 2017 Microsoft Corporation
+//
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
+
 import (
 	"bytes"
 	"encoding/json"
@@ -7,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -104,6 +119,22 @@ func ensureValueString(value interface{}) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+// MapToValues method converts map[string]interface{} to url.Values.
+func MapToValues(m map[string]interface{}) url.Values {
+	v := url.Values{}
+	for key, value := range m {
+		x := reflect.ValueOf(value)
+		if x.Kind() == reflect.Array || x.Kind() == reflect.Slice {
+			for i := 0; i < x.Len(); i++ {
+				v.Add(key, ensureValueString(x.Index(i)))
+			}
+		} else {
+			v.Add(key, ensureValueString(value))
+		}
+	}
+	return v
 }
 
 // String method converts interface v to string. If interface is a list, it
