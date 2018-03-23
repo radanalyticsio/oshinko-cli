@@ -6,7 +6,8 @@ import (
 	"io"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 
-	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	//"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	"github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 )
@@ -30,7 +31,7 @@ func CmdScale(f *clientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Comm
 		Short: ScaleCmdShort,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Complete(f, cmd, args); err != nil {
-				kcmdutil.CheckErr(kcmdutil.UsageError(cmd, err.Error()))
+				kcmdutil.CheckErr(kcmdutil.UsageErrorf(cmd, err.Error()))
 			}
 			if err := options.RunScale(); err != nil {
 				kcmdutil.CheckErr(err)
@@ -49,7 +50,7 @@ func (o *CmdOptions) RunScale() error {
 	if o.MasterCount <= clusters.SentinelCountValue && o.WorkerCount <= clusters.SentinelCountValue {
 		fmt.Fprintf(o.Out, "neither masters nor workers specified, cluster \"%s\" not scaled \n", o.Name)
 	} else {
-		err := clusters.ScaleCluster(o.Name, o.Project, o.MasterCount, o.WorkerCount, o.Client, o.KClient)
+		err := clusters.ScaleCluster(o.Name, o.Project, o.MasterCount, o.WorkerCount, o.Config)
 		if err != nil {
 			return err
 		}
