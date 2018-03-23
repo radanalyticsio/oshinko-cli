@@ -5,26 +5,24 @@ import (
 	"net"
 	"net/url"
 	"path"
+	"regexp"
 	"strconv"
 
 	"github.com/spf13/pflag"
 
-	"k8s.io/kubernetes/pkg/api/unversioned"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apiserver/pkg/util/flag"
 	"k8s.io/kubernetes/pkg/master/ports"
-	"k8s.io/kubernetes/pkg/registry/service/ipallocator"
-	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util"
-	"k8s.io/kubernetes/pkg/util/sets"
-	"k8s.io/kubernetes/pkg/util/yaml"
+	"k8s.io/kubernetes/pkg/registry/core/service/ipallocator"
 
-	"github.com/openshift/origin/pkg/bootstrap"
 	"github.com/openshift/origin/pkg/cmd/flagtypes"
 	"github.com/openshift/origin/pkg/cmd/server/admin"
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
 	configapiv1 "github.com/openshift/origin/pkg/cmd/server/api/v1"
 	"github.com/openshift/origin/pkg/cmd/server/bootstrappolicy"
 	cmdutil "github.com/openshift/origin/pkg/cmd/util"
-	imagepolicyapi "github.com/openshift/origin/pkg/image/admission/imagepolicy/api"
 	"github.com/spf13/cobra"
 )
 
@@ -59,7 +57,7 @@ type MasterArgs struct {
 
 	// EtcdDir is the etcd data directory.
 	EtcdDir   string
-	ConfigDir *util.StringFlag
+	ConfigDir *flag.StringFlag
 
 	// CORSAllowedOrigins is a list of allowed origins for CORS, comma separated.
 	// An allowed origin can be a regular expression to support subdomain matching.
@@ -106,7 +104,7 @@ func NewDefaultMasterArgs() *MasterArgs {
 		MasterPublicAddr: flagtypes.Addr{Value: "localhost:8443", DefaultScheme: "https", DefaultPort: 8443, AllowPrefix: true}.Default(),
 		DNSBindAddr:      flagtypes.Addr{Value: "0.0.0.0:8053", DefaultScheme: "tcp", DefaultPort: 8053, AllowPrefix: true}.Default(),
 
-		ConfigDir: &util.StringFlag{},
+		ConfigDir: &flag.StringFlag{},
 
 		ListenArg:          NewDefaultListenArg(),
 		ImageFormatArgs:    NewDefaultImageFormatArgs(),
@@ -125,6 +123,19 @@ func (args MasterArgs) GetPolicyFile() string {
 // GetConfigFileToWrite returns the configuration filepath for master
 func (args MasterArgs) GetConfigFileToWrite() string {
 	return path.Join(args.ConfigDir.Value(), "master-config.yaml")
+}
+
+// makeHostMatchRegex returns a regex that matches this host exactly.
+// If host contains a port, the returned regex matches the port exactly.
+// If host does not contain a port, the returned regex matches any port or no port.
+func makeHostMatchRegex(host string) string {
+	if _, _, err := net.SplitHostPort(host); err == nil {
+		// we have a port, match the end exactly
+		return "//" + regexp.QuoteMeta(host) + "$"
+	} else {
+		// we don't have a port, match a port separator or the end
+		return "//" + regexp.QuoteMeta(host) + "(:|$)"
+	}
 }
 
 // BuildSerializeableMasterConfig takes the MasterArgs (partially complete config) and uses them along with defaulting behavior to create the fully specified
@@ -149,7 +160,12 @@ func (args MasterArgs) BuildSerializeableMasterConfig() (*configapi.MasterConfig
 	// always include localhost as an allowed CORS origin
 	// always include master public address as an allowed CORS origin
 	corsAllowedOrigins := sets.NewString(args.CORSAllowedOrigins...)
-	corsAllowedOrigins.Insert(assetPublicAddr.Host, masterPublicAddr.Host, "localhost", "127.0.0.1")
+	corsAllowedOrigins.Insert(
+		makeHostMatchRegex(assetPublicAddr.Host),
+		makeHostMatchRegex(masterPublicAddr.Host),
+		makeHostMatchRegex("localhost"),
+		makeHostMatchRegex("127.0.0.1"),
+	)
 
 	etcdAddress, err := args.GetEtcdAddress()
 	if err != nil {
@@ -197,6 +213,19 @@ func (args MasterArgs) BuildSerializeableMasterConfig() (*configapi.MasterConfig
 		KubernetesMasterConfig: kubernetesMasterConfig,
 		EtcdConfig:             etcdConfig,
 
+		AuthConfig: configapi.MasterAuthConfig{
+			RequestHeader: &configapi.RequestHeaderAuthenticationOptions{
+				ClientCA:            admin.DefaultCertFilename(args.ConfigDir.Value(), admin.FrontProxyCAFilePrefix),
+				ClientCommonNames:   []string{bootstrappolicy.AggregatorUsername},
+				UsernameHeaders:     []string{"X-Remote-User"},
+				GroupHeaders:        []string{"X-Remote-Group"},
+				ExtraHeaderPrefixes: []string{"X-Remote-Extra-"}},
+		},
+
+		AggregatorConfig: configapi.AggregatorConfig{
+			ProxyClientInfo: admin.DefaultAggregatorClientCertInfo(args.ConfigDir.Value()).CertLocation,
+		},
+
 		OAuthConfig: oauthConfig,
 
 		PauseControllers: args.PauseControllers,
@@ -241,6 +270,17 @@ func (args MasterArgs) BuildSerializeableMasterConfig() (*configapi.MasterConfig
 			Latest: args.ImageFormatArgs.ImageTemplate.Latest,
 		},
 
+		// List public registries that we are allowing to import images from by default.
+		// By default all registries have set to be "secure", iow. the port for them is
+		// defaulted to "443".
+		// If the registry you are adding here is insecure, you can add 'Insecure: true' which
+		// in that case it will default to port '80'.
+		// If the registry you are adding use custom port, you have to specify the port as
+		// part of the domain name.
+		ImagePolicyConfig: configapi.ImagePolicyConfig{
+			AllowedRegistriesForImport: configapi.DefaultAllowedRegistriesForImport,
+		},
+
 		ProjectConfig: configapi.ProjectConfig{
 			DefaultNodeSelector:    "",
 			ProjectRequestMessage:  "",
@@ -251,9 +291,13 @@ func (args MasterArgs) BuildSerializeableMasterConfig() (*configapi.MasterConfig
 		},
 
 		NetworkConfig: configapi.MasterNetworkConfig{
-			NetworkPluginName:  args.NetworkArgs.NetworkPluginName,
-			ClusterNetworkCIDR: args.NetworkArgs.ClusterNetworkCIDR,
-			HostSubnetLength:   args.NetworkArgs.HostSubnetLength,
+			NetworkPluginName: args.NetworkArgs.NetworkPluginName,
+			ClusterNetworks: []configapi.ClusterNetworkEntry{
+				{
+					CIDR:             args.NetworkArgs.ClusterNetworkCIDR,
+					HostSubnetLength: args.NetworkArgs.HostSubnetLength,
+				},
+			},
 			ServiceNetworkCIDR: args.NetworkArgs.ServiceNetworkCIDR,
 		},
 
@@ -268,29 +312,27 @@ func (args MasterArgs) BuildSerializeableMasterConfig() (*configapi.MasterConfig
 		},
 	}
 
-	if args.ListenArg.UseTLS() {
-		config.ServingInfo.ServerCert = admin.DefaultMasterServingCertInfo(args.ConfigDir.Value())
-		config.ServingInfo.ClientCA = admin.DefaultAPIClientCAFile(args.ConfigDir.Value())
+	config.ServingInfo.ServerCert = admin.DefaultMasterServingCertInfo(args.ConfigDir.Value())
+	config.ServingInfo.ClientCA = admin.DefaultAPIClientCAFile(args.ConfigDir.Value())
 
-		config.AssetConfig.ServingInfo.ServerCert = admin.DefaultAssetServingCertInfo(args.ConfigDir.Value())
+	config.AssetConfig.ServingInfo.ServerCert = admin.DefaultAssetServingCertInfo(args.ConfigDir.Value())
 
-		if oauthConfig != nil {
-			s := admin.DefaultCABundleFile(args.ConfigDir.Value())
-			oauthConfig.MasterCA = &s
-		}
+	if oauthConfig != nil {
+		s := admin.DefaultCABundleFile(args.ConfigDir.Value())
+		oauthConfig.MasterCA = &s
+	}
 
-		// Only set up ca/cert info for kubelet connections if we're self-hosting Kubernetes
-		if builtInKubernetes {
-			config.KubeletClientInfo.CA = admin.DefaultRootCAFile(args.ConfigDir.Value())
-			config.KubeletClientInfo.ClientCert = kubeletClientInfo.CertLocation
-			config.ServiceAccountConfig.MasterCA = admin.DefaultCABundleFile(args.ConfigDir.Value())
-		}
+	// Only set up ca/cert info for kubelet connections if we're self-hosting Kubernetes
+	if builtInKubernetes {
+		config.KubeletClientInfo.CA = admin.DefaultRootCAFile(args.ConfigDir.Value())
+		config.KubeletClientInfo.ClientCert = kubeletClientInfo.CertLocation
+		config.ServiceAccountConfig.MasterCA = admin.DefaultCABundleFile(args.ConfigDir.Value())
+	}
 
-		// Only set up ca/cert info for etcd connections if we're self-hosting etcd
-		if builtInEtcd {
-			config.EtcdClientInfo.CA = admin.DefaultRootCAFile(args.ConfigDir.Value())
-			config.EtcdClientInfo.ClientCert = etcdClientInfo.CertLocation
-		}
+	// Only set up ca/cert info for etcd connections if we're self-hosting etcd
+	if builtInEtcd {
+		config.EtcdClientInfo.CA = admin.DefaultRootCAFile(args.ConfigDir.Value())
+		config.EtcdClientInfo.ClientCert = etcdClientInfo.CertLocation
 	}
 
 	if builtInKubernetes {
@@ -317,23 +359,6 @@ func (args MasterArgs) BuildSerializeableMasterConfig() (*configapi.MasterConfig
 		config.ServiceAccountConfig.PublicKeyFiles = []string{}
 	}
 
-	// embed a default policy for generated config
-	defaultImagePolicy, err := bootstrap.Asset("pkg/image/admission/imagepolicy/api/v1/default-policy.yaml")
-	if err != nil {
-		return nil, fmt.Errorf("unable to find default image admission policy: %v", err)
-	}
-	// TODO: this should not be necessary, runtime.Unknown#MarshalJSON should handle YAML content type correctly
-	defaultImagePolicy, err = yaml.ToJSON(defaultImagePolicy)
-	if err != nil {
-		return nil, err
-	}
-	if config.AdmissionConfig.PluginConfig == nil {
-		config.AdmissionConfig.PluginConfig = make(map[string]configapi.AdmissionPluginConfig)
-	}
-	config.AdmissionConfig.PluginConfig[imagepolicyapi.PluginName] = configapi.AdmissionPluginConfig{
-		Configuration: &runtime.Unknown{Raw: defaultImagePolicy},
-	}
-
 	internal, err := applyDefaults(config, configapiv1.SchemeGroupVersion)
 	if err != nil {
 		return nil, err
@@ -346,13 +371,13 @@ func (args MasterArgs) BuildSerializeableMasterConfig() (*configapi.MasterConfig
 
 	// Default storage backend to etcd3 with protobuf storage for our innate config when starting both
 	// Kubernetes and etcd.
-	// if km := config.KubernetesMasterConfig; km != nil && config.EtcdConfig != nil {
-	// 	if len(km.APIServerArguments) == 0 {
-	// 		km.APIServerArguments = configapi.ExtendedArguments{}
-	// 		km.APIServerArguments["storage-media-type"] = []string{"application/vnd.kubernetes.protobuf"}
-	// 		km.APIServerArguments["storage-backend"] = []string{"etcd3"}
-	// 	}
-	// }
+	if km := config.KubernetesMasterConfig; km != nil && config.EtcdConfig != nil {
+		if len(km.APIServerArguments) == 0 {
+			km.APIServerArguments = configapi.ExtendedArguments{}
+			km.APIServerArguments["storage-media-type"] = []string{"application/vnd.kubernetes.protobuf"}
+			km.APIServerArguments["storage-backend"] = []string{"etcd3"}
+		}
+	}
 
 	return config, nil
 }
@@ -388,8 +413,9 @@ func (args MasterArgs) BuildSerializeableOAuthConfig() (*configapi.OAuthConfig, 
 		},
 
 		TokenConfig: configapi.TokenConfig{
-			AuthorizeTokenMaxAgeSeconds: 5 * 60,       // 5 minutes
-			AccessTokenMaxAgeSeconds:    24 * 60 * 60, // 1 day
+			AuthorizeTokenMaxAgeSeconds:         5 * 60,       // 5 minutes
+			AccessTokenMaxAgeSeconds:            24 * 60 * 60, // 1 day
+			AccessTokenInactivityTimeoutSeconds: nil,          // no timeouts by default
 		},
 	}
 
@@ -468,15 +494,18 @@ func (args MasterArgs) BuildSerializeableKubeMasterConfig() (*configapi.Kubernet
 
 func (args MasterArgs) Validate() error {
 	masterAddr, err := args.GetMasterAddress()
-	if addr, err := masterAddr, err; err != nil {
+	if err != nil {
 		return err
-	} else if len(addr.Path) != 0 {
-		return fmt.Errorf("master url may not include a path: '%v'", addr.Path)
+	}
+	if len(masterAddr.Path) != 0 {
+		return fmt.Errorf("master url may not include a path: '%v'", masterAddr.Path)
 	}
 
-	if addr, err := args.GetMasterPublicAddress(); err != nil {
+	addr, err := args.GetMasterPublicAddress()
+	if err != nil {
 		return err
-	} else if len(addr.Path) != 0 {
+	}
+	if len(addr.Path) != 0 {
 		return fmt.Errorf("master public url may not include a path: '%v'", addr.Path)
 	}
 
@@ -484,9 +513,11 @@ func (args MasterArgs) Validate() error {
 		return err
 	}
 
-	if addr, err := args.KubeConnectionArgs.GetKubernetesAddress(masterAddr); err != nil {
+	addr, err = args.KubeConnectionArgs.GetKubernetesAddress(masterAddr)
+	if err != nil {
 		return err
-	} else if len(addr.Path) != 0 {
+	}
+	if len(addr.Path) != 0 {
 		return fmt.Errorf("kubernetes url may not include a path: '%v'", addr.Path)
 	}
 
@@ -664,22 +695,13 @@ func getHost(theURL url.URL) string {
 	return host
 }
 
-func getPort(theURL url.URL) int {
-	_, port, err := net.SplitHostPort(theURL.Host)
-	if err != nil {
-		return 0
-	}
-
-	intport, _ := strconv.Atoi(port)
-	return intport
-}
-
 // applyDefaults roundtrips the config to v1 and back to ensure proper defaults are set.
-func applyDefaults(config runtime.Object, version unversioned.GroupVersion) (runtime.Object, error) {
+func applyDefaults(config runtime.Object, version schema.GroupVersion) (runtime.Object, error) {
 	ext, err := configapi.Scheme.ConvertToVersion(config, version)
 	if err != nil {
 		return nil, err
 	}
+	configapi.Scheme.Default(ext)
 	return configapi.Scheme.ConvertToVersion(ext, configapi.SchemeGroupVersion)
 }
 

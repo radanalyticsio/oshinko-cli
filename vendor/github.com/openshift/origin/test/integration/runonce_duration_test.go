@@ -3,8 +3,8 @@ package integration
 import (
 	"testing"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	kclient "k8s.io/kubernetes/pkg/client/unversioned"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	kclientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
 
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
 	pluginapi "github.com/openshift/origin/pkg/quota/admission/runonceduration/api"
@@ -28,9 +28,9 @@ func testRunOnceDurationPod(activeDeadlineSeconds int64) *kapi.Pod {
 	return pod
 }
 
-func testPodDuration(t *testing.T, name string, kclient kclient.Interface, pod *kapi.Pod, expected int64) {
+func testPodDuration(t *testing.T, name string, kclientset kclientset.Interface, pod *kapi.Pod, expected int64) {
 	// Pod with no duration set
-	pod, err := kclient.Pods(testutil.Namespace()).Create(pod)
+	pod, err := kclientset.Core().Pods(testutil.Namespace()).Create(pod)
 	if err != nil {
 		t.Fatalf("%s: unexpected: %v", name, err)
 	}
@@ -44,20 +44,19 @@ func testPodDuration(t *testing.T, name string, kclient kclient.Interface, pod *
 }
 
 func TestRunOnceDurationAdmissionPlugin(t *testing.T) {
-	defer testutil.DumpEtcdOnFailure(t)
 	var secs int64 = 3600
 	config := &pluginapi.RunOnceDurationConfig{
 		ActiveDeadlineSecondsLimit: &secs,
 	}
-	kclient := setupRunOnceDurationTest(t, config, nil)
+	kclientset, fn := setupRunOnceDurationTest(t, config, nil)
+	defer fn()
 
-	testPodDuration(t, "global, no duration", kclient, testRunOnceDurationPod(0), 3600)
-	testPodDuration(t, "global, larger duration", kclient, testRunOnceDurationPod(7200), 3600)
-	testPodDuration(t, "global, smaller duration", kclient, testRunOnceDurationPod(100), 100)
+	testPodDuration(t, "global, no duration", kclientset, testRunOnceDurationPod(0), 3600)
+	testPodDuration(t, "global, larger duration", kclientset, testRunOnceDurationPod(7200), 3600)
+	testPodDuration(t, "global, smaller duration", kclientset, testRunOnceDurationPod(100), 100)
 }
 
 func TestRunOnceDurationAdmissionPluginProjectLimit(t *testing.T) {
-	defer testutil.DumpEtcdOnFailure(t)
 	var secs int64 = 3600
 	config := &pluginapi.RunOnceDurationConfig{
 		ActiveDeadlineSecondsLimit: &secs,
@@ -65,19 +64,19 @@ func TestRunOnceDurationAdmissionPluginProjectLimit(t *testing.T) {
 	nsAnnotations := map[string]string{
 		pluginapi.ActiveDeadlineSecondsLimitAnnotation: "100",
 	}
-	kclient := setupRunOnceDurationTest(t, config, nsAnnotations)
-	testPodDuration(t, "project, no duration", kclient, testRunOnceDurationPod(0), 100)
-	testPodDuration(t, "project, larger duration", kclient, testRunOnceDurationPod(7200), 100)
-	testPodDuration(t, "project, smaller duration", kclient, testRunOnceDurationPod(50), 50)
+	kclientset, fn := setupRunOnceDurationTest(t, config, nsAnnotations)
+	defer fn()
+	testPodDuration(t, "project, no duration", kclientset, testRunOnceDurationPod(0), 100)
+	testPodDuration(t, "project, larger duration", kclientset, testRunOnceDurationPod(7200), 100)
+	testPodDuration(t, "project, smaller duration", kclientset, testRunOnceDurationPod(50), 50)
 }
 
-func setupRunOnceDurationTest(t *testing.T, pluginConfig *pluginapi.RunOnceDurationConfig, nsAnnotations map[string]string) kclient.Interface {
-	testutil.RequireEtcd(t)
+func setupRunOnceDurationTest(t *testing.T, pluginConfig *pluginapi.RunOnceDurationConfig, nsAnnotations map[string]string) (kclientset.Interface, func()) {
 	masterConfig, err := testserver.DefaultMasterOptions()
 	if err != nil {
 		t.Fatalf("error creating config: %v", err)
 	}
-	masterConfig.KubernetesMasterConfig.AdmissionConfig.PluginConfig = map[string]configapi.AdmissionPluginConfig{
+	masterConfig.AdmissionConfig.PluginConfig = map[string]*configapi.AdmissionPluginConfig{
 		"RunOnceDuration": {
 			Configuration: pluginConfig,
 		},
@@ -86,19 +85,21 @@ func setupRunOnceDurationTest(t *testing.T, pluginConfig *pluginapi.RunOnceDurat
 	if err != nil {
 		t.Fatalf("error starting server: %v", err)
 	}
-	kubeClient, err := testutil.GetClusterAdminKubeClient(kubeConfigFile)
+	kubeClientset, err := testutil.GetClusterAdminKubeClient(kubeConfigFile)
 	if err != nil {
 		t.Fatalf("error getting client: %v", err)
 	}
 	ns := &kapi.Namespace{}
 	ns.Name = testutil.Namespace()
 	ns.Annotations = nsAnnotations
-	_, err = kubeClient.Namespaces().Create(ns)
+	_, err = kubeClientset.Core().Namespaces().Create(ns)
 	if err != nil {
 		t.Fatalf("error creating namespace: %v", err)
 	}
-	if err := testserver.WaitForPodCreationServiceAccounts(kubeClient, testutil.Namespace()); err != nil {
+	if err := testserver.WaitForPodCreationServiceAccounts(kubeClientset, testutil.Namespace()); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	return kubeClient
+	return kubeClientset, func() {
+		testserver.CleanupMasterEtcd(t, masterConfig)
+	}
 }

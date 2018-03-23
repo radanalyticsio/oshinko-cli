@@ -1,15 +1,19 @@
 package imagestreammapping
 
 import (
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/errors"
-	"k8s.io/kubernetes/pkg/api/rest"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util/validation/field"
-	"k8s.io/kubernetes/pkg/util/wait"
+	"github.com/golang/glog"
 
-	"github.com/openshift/origin/pkg/image/api"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metainternal "k8s.io/apimachinery/pkg/apis/meta/internalversion"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/apimachinery/pkg/util/wait"
+	apirequest "k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/apiserver/pkg/registry/rest"
+	kapihelper "k8s.io/kubernetes/pkg/apis/core/helper"
+
+	imageapi "github.com/openshift/origin/pkg/image/apis/image"
 	"github.com/openshift/origin/pkg/image/registry/image"
 	"github.com/openshift/origin/pkg/image/registry/imagestream"
 )
@@ -27,18 +31,20 @@ type REST struct {
 	strategy            Strategy
 }
 
+var _ rest.Creater = &REST{}
+
 // NewREST returns a new REST.
-func NewREST(imageRegistry image.Registry, imageStreamRegistry imagestream.Registry, defaultRegistry api.DefaultRegistry) *REST {
+func NewREST(imageRegistry image.Registry, imageStreamRegistry imagestream.Registry, registry imageapi.RegistryHostnameRetriever) *REST {
 	return &REST{
 		imageRegistry:       imageRegistry,
 		imageStreamRegistry: imageStreamRegistry,
-		strategy:            NewStrategy(defaultRegistry),
+		strategy:            NewStrategy(registry),
 	}
 }
 
 // New returns a new ImageStreamMapping for use with Create.
 func (r *REST) New() runtime.Object {
-	return &api.ImageStreamMapping{}
+	return &imageapi.ImageStreamMapping{}
 }
 
 // Create registers a new image (if it doesn't exist) and updates the
@@ -46,12 +52,15 @@ func (r *REST) New() runtime.Object {
 // with a resource conflict, the update will be retried if the newer
 // ImageStream has no tag diffs from the previous state. If tag diffs are
 // detected, the conflict error is returned.
-func (s *REST) Create(ctx kapi.Context, obj runtime.Object) (runtime.Object, error) {
+func (s *REST) Create(ctx apirequest.Context, obj runtime.Object, createValidation rest.ValidateObjectFunc, _ bool) (runtime.Object, error) {
 	if err := rest.BeforeCreate(s.strategy, ctx, obj); err != nil {
 		return nil, err
 	}
+	if err := createValidation(obj.DeepCopyObject()); err != nil {
+		return nil, err
+	}
 
-	mapping := obj.(*api.ImageStreamMapping)
+	mapping := obj.(*imageapi.ImageStreamMapping)
 
 	stream, err := s.findStreamForMapping(ctx, mapping)
 	if err != nil {
@@ -61,29 +70,43 @@ func (s *REST) Create(ctx kapi.Context, obj runtime.Object) (runtime.Object, err
 	image := mapping.Image
 	tag := mapping.Tag
 	if len(tag) == 0 {
-		tag = api.DefaultImageTag
+		tag = imageapi.DefaultImageTag
 	}
 
-	if err := s.imageRegistry.CreateImage(ctx, &image); err != nil && !errors.IsAlreadyExists(err) {
-		return nil, err
+	imageCreateErr := s.imageRegistry.CreateImage(ctx, &image)
+	if imageCreateErr != nil && !errors.IsAlreadyExists(imageCreateErr) {
+		return nil, imageCreateErr
 	}
 
-	next := api.TagEvent{
-		Created:              unversioned.Now(),
-		DockerImageReference: image.DockerImageReference,
+	// prefer dockerImageReference set on image for the tagEvent if the image is new
+	ref := image.DockerImageReference
+	if errors.IsAlreadyExists(imageCreateErr) && image.Annotations[imageapi.ManagedByOpenShiftAnnotation] == "true" {
+		// the image is managed by us and, most probably, tagged in some other image stream
+		// let's make the reference local to this stream
+		if streamRef, err := imageapi.DockerImageReferenceForStream(stream); err == nil {
+			streamRef.ID = image.Name
+			ref = streamRef.Exact()
+		} else {
+			glog.V(4).Infof("Failed to get dockerImageReference for stream %s/%s: %v", stream.Namespace, stream.Name, err)
+		}
+	}
+
+	next := imageapi.TagEvent{
+		Created:              metav1.Now(),
+		DockerImageReference: ref,
 		Image:                image.Name,
 	}
 
 	err = wait.ExponentialBackoff(wait.Backoff{Steps: maxRetriesOnConflict}, func() (bool, error) {
-		lastEvent := api.LatestTaggedImage(stream, tag)
+		lastEvent := imageapi.LatestTaggedImage(stream, tag)
 
 		next.Generation = stream.Generation
 
-		if !api.AddTagEventToImageStream(stream, tag, next) {
+		if !imageapi.AddTagEventToImageStream(stream, tag, next) {
 			// nothing actually changed
 			return true, nil
 		}
-		api.UpdateTrackingTags(stream, tag, next)
+		imageapi.UpdateTrackingTags(stream, tag, next)
 		_, err := s.imageStreamRegistry.UpdateImageStreamStatus(ctx, stream)
 		if err == nil {
 			return true, nil
@@ -106,11 +129,11 @@ func (s *REST) Create(ctx kapi.Context, obj runtime.Object) (runtime.Object, err
 		}
 
 		// check for tag change
-		newerEvent := api.LatestTaggedImage(latestStream, tag)
+		newerEvent := imageapi.LatestTaggedImage(latestStream, tag)
 		// generation and creation time differences are ignored
 		lastEvent.Generation = newerEvent.Generation
 		lastEvent.Created = newerEvent.Created
-		if kapi.Semantic.DeepEqual(lastEvent, newerEvent) {
+		if kapihelper.Semantic.DeepEqual(lastEvent, newerEvent) {
 			// The tag hasn't changed, so try again with the updated stream.
 			stream = latestStream
 			return false, nil
@@ -122,16 +145,16 @@ func (s *REST) Create(ctx kapi.Context, obj runtime.Object) (runtime.Object, err
 	if err != nil {
 		return nil, err
 	}
-	return &unversioned.Status{Status: unversioned.StatusSuccess}, nil
+	return &metav1.Status{Status: metav1.StatusSuccess}, nil
 }
 
 // findStreamForMapping retrieves an ImageStream whose DockerImageRepository matches dockerRepo.
-func (s *REST) findStreamForMapping(ctx kapi.Context, mapping *api.ImageStreamMapping) (*api.ImageStream, error) {
+func (s *REST) findStreamForMapping(ctx apirequest.Context, mapping *imageapi.ImageStreamMapping) (*imageapi.ImageStream, error) {
 	if len(mapping.Name) > 0 {
-		return s.imageStreamRegistry.GetImageStream(ctx, mapping.Name)
+		return s.imageStreamRegistry.GetImageStream(ctx, mapping.Name, &metav1.GetOptions{})
 	}
 	if len(mapping.DockerImageRepository) != 0 {
-		list, err := s.imageStreamRegistry.ListImageStreams(ctx, &kapi.ListOptions{})
+		list, err := s.imageStreamRegistry.ListImageStreams(ctx, &metainternal.ListOptions{})
 		if err != nil {
 			return nil, err
 		}
@@ -140,9 +163,9 @@ func (s *REST) findStreamForMapping(ctx kapi.Context, mapping *api.ImageStreamMa
 				return &list.Items[i], nil
 			}
 		}
-		return nil, errors.NewInvalid(api.Kind("ImageStreamMapping"), "", field.ErrorList{
+		return nil, errors.NewInvalid(imageapi.Kind("ImageStreamMapping"), "", field.ErrorList{
 			field.NotFound(field.NewPath("dockerImageStream"), mapping.DockerImageRepository),
 		})
 	}
-	return nil, errors.NewNotFound(api.Resource("imagestream"), "")
+	return nil, errors.NewNotFound(imageapi.Resource("imagestream"), "")
 }

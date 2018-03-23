@@ -4,18 +4,8 @@ metadata:
   name: history-limit
 spec:
   replicas: 1
-  selector:
-    name: history-limit
   strategy:
     type: Rolling
-    rollingParams:
-      pre:
-        failurePolicy: Abort
-        execNewPod:
-          containerName: myapp
-          command:
-          - /bin/echo
-          - test pre hook executed
   template:
     metadata:
       labels:

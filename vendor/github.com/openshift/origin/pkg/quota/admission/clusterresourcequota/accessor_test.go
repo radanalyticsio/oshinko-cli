@@ -4,20 +4,23 @@ import (
 	"strings"
 	"testing"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/resource"
-	"k8s.io/kubernetes/pkg/client/cache"
-	ktestclient "k8s.io/kubernetes/pkg/client/unversioned/testclient"
-	"k8s.io/kubernetes/pkg/controller/framework"
-	"k8s.io/kubernetes/pkg/runtime"
-	utildiff "k8s.io/kubernetes/pkg/util/diff"
-	"k8s.io/kubernetes/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	utildiff "k8s.io/apimachinery/pkg/util/diff"
+	"k8s.io/apimachinery/pkg/util/sets"
+	clientgotesting "k8s.io/client-go/testing"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	kcorelisters "k8s.io/kubernetes/pkg/client/listers/core/internalversion"
 
-	ocache "github.com/openshift/origin/pkg/client/cache"
-	"github.com/openshift/origin/pkg/client/testclient"
-	quotaapi "github.com/openshift/origin/pkg/quota/api"
-	quotaapiv1 "github.com/openshift/origin/pkg/quota/api/v1"
+	quotaapiv1 "github.com/openshift/api/quota/v1"
+	quotaapi "github.com/openshift/origin/pkg/quota/apis/quota"
 	"github.com/openshift/origin/pkg/quota/controller/clusterquotamapping"
+	fakequotaclient "github.com/openshift/origin/pkg/quota/generated/internalclientset/fake"
+	quotalister "github.com/openshift/origin/pkg/quota/generated/listers/quota/internalversion"
 )
 
 func TestUpdateQuota(t *testing.T) {
@@ -57,7 +60,7 @@ func TestUpdateQuota(t *testing.T) {
 				return []*quotaapi.ClusterResourceQuota{user1, user2}
 			},
 			quotaToUpdate: &kapi.ResourceQuota{
-				ObjectMeta: kapi.ObjectMeta{Namespace: "foo", Name: "user-one"},
+				ObjectMeta: metav1.ObjectMeta{Namespace: "foo", Name: "user-one"},
 				Spec: kapi.ResourceQuotaSpec{
 					Hard: kapi.ResourceList{
 						kapi.ResourcePods:    resource.MustParse("10"),
@@ -94,18 +97,18 @@ func TestUpdateQuota(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		quotaIndexer := cache.NewIndexer(framework.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{})
+		quotaIndexer := cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{})
 		availableQuotas := tc.availableQuotas()
 		objs := []runtime.Object{}
 		for i := range availableQuotas {
 			quotaIndexer.Add(availableQuotas[i])
 			objs = append(objs, availableQuotas[i])
 		}
-		quotaLister := &ocache.IndexerToClusterResourceQuotaLister{Indexer: quotaIndexer}
+		quotaLister := quotalister.NewClusterResourceQuotaLister(quotaIndexer)
 
-		client := testclient.NewSimpleFake(objs...)
+		client := fakequotaclient.NewSimpleClientset(objs...)
 
-		accessor := newQuotaAccessor(quotaLister, nil, client, nil)
+		accessor := newQuotaAccessor(quotaLister, nil, client.Quota(), nil)
 
 		actualErr := accessor.UpdateQuotaStatus(tc.quotaToUpdate)
 		switch {
@@ -123,7 +126,7 @@ func TestUpdateQuota(t *testing.T) {
 
 		var actualQuota *quotaapi.ClusterResourceQuota
 		for _, action := range client.Actions() {
-			updateAction, ok := action.(ktestclient.UpdateActionImpl)
+			updateAction, ok := action.(clientgotesting.UpdateActionImpl)
 			if !ok {
 				continue
 			}
@@ -133,17 +136,17 @@ func TestUpdateQuota(t *testing.T) {
 			}
 		}
 
-		expectedV1, err := kapi.Scheme.ConvertToVersion(tc.expectedQuota(), quotaapiv1.SchemeGroupVersion)
+		expectedV1, err := legacyscheme.Scheme.ConvertToVersion(tc.expectedQuota(), quotaapiv1.SchemeGroupVersion)
 		if err != nil {
 			t.Errorf("%s: unexpected error: %v", tc.name, err)
 			continue
 		}
-		actualV1, err := kapi.Scheme.ConvertToVersion(actualQuota, quotaapiv1.SchemeGroupVersion)
+		actualV1, err := legacyscheme.Scheme.ConvertToVersion(actualQuota, quotaapiv1.SchemeGroupVersion)
 		if err != nil {
 			t.Errorf("%s: unexpected error: %v", tc.name, err)
 			continue
 		}
-		if !kapi.Semantic.DeepEqual(expectedV1, actualV1) {
+		if !equality.Semantic.DeepEqual(expectedV1, actualV1) {
 			t.Errorf("%s: %v", tc.name, utildiff.ObjectDiff(expectedV1, actualV1))
 			continue
 		}
@@ -153,7 +156,7 @@ func TestUpdateQuota(t *testing.T) {
 
 func defaultQuota() *quotaapi.ClusterResourceQuota {
 	return &quotaapi.ClusterResourceQuota{
-		ObjectMeta: kapi.ObjectMeta{Name: "foo"},
+		ObjectMeta: metav1.ObjectMeta{Name: "foo"},
 		Spec: quotaapi.ClusterResourceQuotaSpec{
 			Quota: kapi.ResourceQuotaSpec{
 				Hard: kapi.ResourceList{
@@ -182,7 +185,7 @@ func TestGetQuota(t *testing.T) {
 				return nil
 			},
 			availableNamespaces: []*kapi.Namespace{
-				{ObjectMeta: kapi.ObjectMeta{Name: "foo", Labels: map[string]string{"one": "alfa"}}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "foo", Labels: map[string]string{"one": "alfa"}}},
 			},
 			mapperFunc: func() clusterquotamapping.ClusterQuotaMapper {
 				mapper := newFakeClusterQuotaMapper()
@@ -200,7 +203,7 @@ func TestGetQuota(t *testing.T) {
 				return nil
 			},
 			availableNamespaces: []*kapi.Namespace{
-				{ObjectMeta: kapi.ObjectMeta{Name: "foo", Labels: map[string]string{"one": "alfa"}}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "foo", Labels: map[string]string{"one": "alfa"}}},
 			},
 			mapperFunc: func() clusterquotamapping.ClusterQuotaMapper {
 				mapper := newFakeClusterQuotaMapper()
@@ -245,7 +248,7 @@ func TestGetQuota(t *testing.T) {
 				return []*quotaapi.ClusterResourceQuota{user1, user2}
 			},
 			availableNamespaces: []*kapi.Namespace{
-				{ObjectMeta: kapi.ObjectMeta{Name: "foo", Labels: map[string]string{"one": "alfa"}}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "foo", Labels: map[string]string{"one": "alfa"}}},
 			},
 			mapperFunc: func() clusterquotamapping.ClusterQuotaMapper {
 				mapper := newFakeClusterQuotaMapper()
@@ -258,7 +261,7 @@ func TestGetQuota(t *testing.T) {
 			expectedQuotas: func() []*kapi.ResourceQuota {
 				return []*kapi.ResourceQuota{
 					{
-						ObjectMeta: kapi.ObjectMeta{Namespace: "foo", Name: "user-one"},
+						ObjectMeta: metav1.ObjectMeta{Namespace: "foo", Name: "user-one"},
 						Spec: kapi.ResourceQuotaSpec{
 							Hard: kapi.ResourceList{
 								kapi.ResourcePods:    resource.MustParse("10"),
@@ -281,22 +284,22 @@ func TestGetQuota(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		quotaIndexer := cache.NewIndexer(framework.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{})
+		quotaIndexer := cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{})
 		availableQuotas := tc.availableQuotas()
 		for i := range availableQuotas {
 			quotaIndexer.Add(availableQuotas[i])
 		}
-		quotaLister := &ocache.IndexerToClusterResourceQuotaLister{Indexer: quotaIndexer}
+		quotaLister := quotalister.NewClusterResourceQuotaLister(quotaIndexer)
 
-		namespaceIndexer := cache.NewIndexer(framework.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{})
+		namespaceIndexer := cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{})
 		for i := range tc.availableNamespaces {
 			namespaceIndexer.Add(tc.availableNamespaces[i])
 		}
-		namespaceLister := &cache.IndexerToNamespaceLister{Indexer: namespaceIndexer}
+		namespaceLister := kcorelisters.NewNamespaceLister(namespaceIndexer)
 
-		client := testclient.NewSimpleFake()
+		client := fakequotaclient.NewSimpleClientset()
 
-		accessor := newQuotaAccessor(quotaLister, namespaceLister, client, tc.mapperFunc())
+		accessor := newQuotaAccessor(quotaLister, namespaceLister, client.Quota(), tc.mapperFunc())
 
 		actualQuotas, actualErr := accessor.GetQuotas(tc.requestedNamespace)
 		switch {
@@ -322,20 +325,20 @@ func TestGetQuota(t *testing.T) {
 		}
 
 		expectedQuotas := tc.expectedQuotas()
-		if !kapi.Semantic.DeepEqual(expectedQuotas, actualQuotaPointers) {
+		if !equality.Semantic.DeepEqual(expectedQuotas, actualQuotaPointers) {
 			t.Errorf("%s: expectedLen: %v actualLen: %v", tc.name, len(expectedQuotas), len(actualQuotas))
 			for i := range expectedQuotas {
-				expectedV1, err := kapi.Scheme.ConvertToVersion(expectedQuotas[i], quotaapiv1.SchemeGroupVersion)
+				expectedV1, err := legacyscheme.Scheme.ConvertToVersion(expectedQuotas[i], quotaapiv1.SchemeGroupVersion)
 				if err != nil {
 					t.Errorf("%s: unexpected error: %v", tc.name, err)
 					continue
 				}
-				actualV1, err := kapi.Scheme.ConvertToVersion(actualQuotaPointers[i], quotaapiv1.SchemeGroupVersion)
+				actualV1, err := legacyscheme.Scheme.ConvertToVersion(actualQuotaPointers[i], quotaapiv1.SchemeGroupVersion)
 				if err != nil {
 					t.Errorf("%s: unexpected error: %v", tc.name, err)
 					continue
 				}
-				t.Errorf("%s: %v equal? %v", tc.name, utildiff.ObjectDiff(expectedV1, actualV1), kapi.Semantic.DeepEqual(expectedV1, actualV1))
+				t.Errorf("%s: %v equal? %v", tc.name, utildiff.ObjectDiff(expectedV1, actualV1), equality.Semantic.DeepEqual(expectedV1, actualV1))
 			}
 			continue
 		}

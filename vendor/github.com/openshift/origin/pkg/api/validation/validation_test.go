@@ -6,14 +6,15 @@ import (
 	"strings"
 	"testing"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/validation"
-	"k8s.io/kubernetes/pkg/runtime"
-	ktypes "k8s.io/kubernetes/pkg/types"
-	"k8s.io/kubernetes/pkg/util/validation/field"
+	"k8s.io/apimachinery/pkg/api/validation/path"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/apis/core/validation"
 
-	"github.com/openshift/origin/pkg/api"
-	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
+	authorizationapi "github.com/openshift/origin/pkg/authorization/apis/authorization"
 )
 
 // Ensures that `nil` can be passed to validation functions validating top-level objects
@@ -40,7 +41,7 @@ func TestNilPath(t *testing.T) {
 }
 
 func TestNameFunc(t *testing.T) {
-	const nameRulesMessage = `must match the regex [a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)* (e.g. 'example.com')`
+	const nameRulesMessage = `a DNS-1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character (e.g. 'example.com', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*')`
 
 	for apiType, validationInfo := range Validator.typeToValidator {
 		if !validationInfo.HasObjectMeta {
@@ -51,15 +52,15 @@ func TestNameFunc(t *testing.T) {
 		apiObjectMeta := apiValue.Elem().FieldByName("ObjectMeta")
 
 		// check for illegal names
-		for _, illegalName := range api.NameMayNotBe {
-			apiObjectMeta.Set(reflect.ValueOf(kapi.ObjectMeta{Name: illegalName}))
+		for _, illegalName := range []string{".", ".."} {
+			apiObjectMeta.Set(reflect.ValueOf(metav1.ObjectMeta{Name: illegalName}))
 
 			errList := validationInfo.Validator.Validate(apiValue.Interface().(runtime.Object))
-			reasons := api.MinimalNameRequirements(illegalName, false)
+			reasons := path.ValidatePathSegmentName(illegalName, false)
 			requiredMessage := strings.Join(reasons, ", ")
 
 			if len(errList) == 0 {
-				t.Errorf("expected error for %v in %v not found amongst %v.  You probably need to add api.MinimalNameRequirements to your name validator..", illegalName, apiType.Elem(), errList)
+				t.Errorf("expected error for %v in %v not found amongst %v.  You probably need to add path.ValidatePathSegmentName to your name validator..", illegalName, apiType.Elem(), errList)
 				continue
 			}
 
@@ -73,7 +74,7 @@ func TestNameFunc(t *testing.T) {
 					foundExpectedError = true
 					break
 				}
-				// this message is from a stock name validation method in kube that covers our requirements in MinimalNameRequirements
+				// this message is from a stock name validation method in kube that covers our requirements in ValidatePathSegmentName
 				if validationError.Detail == nameRulesMessage {
 					foundExpectedError = true
 					break
@@ -81,22 +82,22 @@ func TestNameFunc(t *testing.T) {
 			}
 
 			if !foundExpectedError {
-				t.Errorf("expected error for %v in %v not found amongst %v.  You probably need to add api.MinimalNameRequirements to your name validator.", illegalName, apiType.Elem(), errList)
+				t.Errorf("expected error for %v in %v not found amongst %v.  You probably need to add path.ValidatePathSegmentName to your name validator.", illegalName, apiType.Elem(), errList)
 			}
 		}
 
 		// check for illegal contents
-		for _, illegalContent := range api.NameMayNotContain {
+		for _, illegalContent := range []string{"/", "%"} {
 			illegalName := "a" + illegalContent + "b"
 
-			apiObjectMeta.Set(reflect.ValueOf(kapi.ObjectMeta{Name: illegalName}))
+			apiObjectMeta.Set(reflect.ValueOf(metav1.ObjectMeta{Name: illegalName}))
 
 			errList := validationInfo.Validator.Validate(apiValue.Interface().(runtime.Object))
-			reasons := api.MinimalNameRequirements(illegalName, false)
+			reasons := path.ValidatePathSegmentName(illegalName, false)
 			requiredMessage := strings.Join(reasons, ", ")
 
 			if len(errList) == 0 {
-				t.Errorf("expected error for %v in %v not found amongst %v.  You probably need to add api.MinimalNameRequirements to your name validator.", illegalName, apiType.Elem(), errList)
+				t.Errorf("expected error for %v in %v not found amongst %v.  You probably need to add path.ValidatePathSegmentName to your name validator.", illegalName, apiType.Elem(), errList)
 				continue
 			}
 
@@ -111,7 +112,7 @@ func TestNameFunc(t *testing.T) {
 					foundExpectedError = true
 					break
 				}
-				// this message is from a stock name validation method in kube that covers our requirements in MinimalNameRequirements
+				// this message is from a stock name validation method in kube that covers our requirements in ValidatePathSegmentName
 				if validationError.Detail == nameRulesMessage {
 					foundExpectedError = true
 					break
@@ -119,7 +120,7 @@ func TestNameFunc(t *testing.T) {
 			}
 
 			if !foundExpectedError {
-				t.Errorf("expected error for %v in %v not found amongst %v.  You probably need to add api.MinimalNameRequirements to your name validator.", illegalName, apiType.Elem(), errList)
+				t.Errorf("expected error for %v in %v not found amongst %v.  You probably need to add path.ValidatePathSegmentName to your name validator.", illegalName, apiType.Elem(), errList)
 			}
 		}
 	}
@@ -135,13 +136,13 @@ func TestObjectMeta(t *testing.T) {
 		apiObjectMeta := apiValue.Elem().FieldByName("ObjectMeta")
 
 		if validationInfo.IsNamespaced {
-			apiObjectMeta.Set(reflect.ValueOf(kapi.ObjectMeta{Name: getValidName(apiType)}))
+			apiObjectMeta.Set(reflect.ValueOf(metav1.ObjectMeta{Name: getValidName(apiType)}))
 		} else {
-			apiObjectMeta.Set(reflect.ValueOf(kapi.ObjectMeta{Name: getValidName(apiType), Namespace: kapi.NamespaceDefault}))
+			apiObjectMeta.Set(reflect.ValueOf(metav1.ObjectMeta{Name: getValidName(apiType), Namespace: metav1.NamespaceDefault}))
 		}
 
 		errList := validationInfo.Validator.Validate(apiValue.Interface().(runtime.Object))
-		requiredErrors := validation.ValidateObjectMeta(apiObjectMeta.Addr().Interface().(*kapi.ObjectMeta), validationInfo.IsNamespaced, api.MinimalNameRequirements, field.NewPath("metadata"))
+		requiredErrors := validation.ValidateObjectMeta(apiObjectMeta.Addr().Interface().(*metav1.ObjectMeta), validationInfo.IsNamespaced, path.ValidatePathSegmentName, field.NewPath("metadata"))
 
 		if len(errList) == 0 {
 			t.Errorf("expected errors %v in %v not found amongst %v.  You probably need to call kube/validation.ValidateObjectMeta in your validator.", requiredErrors, apiType.Elem(), errList)
@@ -197,15 +198,15 @@ func TestObjectMetaUpdate(t *testing.T) {
 
 		oldAPIValue := reflect.New(apiType.Elem())
 		oldAPIObjectMeta := oldAPIValue.Elem().FieldByName("ObjectMeta")
-		oldAPIObjectMeta.Set(reflect.ValueOf(kapi.ObjectMeta{Name: "first-name", Namespace: "first-namespace", UID: ktypes.UID("first-uid")}))
+		oldAPIObjectMeta.Set(reflect.ValueOf(metav1.ObjectMeta{Name: "first-name", Namespace: "first-namespace", UID: ktypes.UID("first-uid")}))
 		oldObj := oldAPIValue.Interface().(runtime.Object)
-		oldObjMeta := oldAPIObjectMeta.Addr().Interface().(*kapi.ObjectMeta)
+		oldObjMeta := oldAPIObjectMeta.Addr().Interface().(*metav1.ObjectMeta)
 
 		newAPIValue := reflect.New(apiType.Elem())
 		newAPIObjectMeta := newAPIValue.Elem().FieldByName("ObjectMeta")
-		newAPIObjectMeta.Set(reflect.ValueOf(kapi.ObjectMeta{Name: "second-name", Namespace: "second-namespace", UID: ktypes.UID("second-uid")}))
+		newAPIObjectMeta.Set(reflect.ValueOf(metav1.ObjectMeta{Name: "second-name", Namespace: "second-namespace", UID: ktypes.UID("second-uid")}))
 		newObj := newAPIValue.Interface().(runtime.Object)
-		newObjMeta := newAPIObjectMeta.Addr().Interface().(*kapi.ObjectMeta)
+		newObjMeta := newAPIObjectMeta.Addr().Interface().(*metav1.ObjectMeta)
 
 		errList := validationInfo.Validator.ValidateUpdate(newObj, oldObj)
 		requiredErrors := validation.ValidateObjectMetaUpdate(newObjMeta, oldObjMeta, field.NewPath("metadata"))
@@ -235,7 +236,7 @@ func TestObjectMetaUpdate(t *testing.T) {
 
 func TestPodSpecNodeSelectorUpdateDisallowed(t *testing.T) {
 	oldPod := &kapi.Pod{
-		ObjectMeta: kapi.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			ResourceVersion: "1",
 		},
 		Spec: kapi.PodSpec{

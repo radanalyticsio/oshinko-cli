@@ -6,49 +6,52 @@ import (
 
 	"github.com/RangelReale/osin"
 	"github.com/golang/glog"
-	kapi "k8s.io/kubernetes/pkg/api"
-	kerrors "k8s.io/kubernetes/pkg/api/errors"
-	"k8s.io/kubernetes/pkg/api/unversioned"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/openshift/origin/pkg/auth/oauth/handlers"
 	scopeauthorizer "github.com/openshift/origin/pkg/authorization/authorizer/scope"
-	"github.com/openshift/origin/pkg/oauth/api"
-	"github.com/openshift/origin/pkg/oauth/registry/oauthaccesstoken"
-	"github.com/openshift/origin/pkg/oauth/registry/oauthauthorizetoken"
-	"github.com/openshift/origin/pkg/oauth/registry/oauthclient"
+	oauthapi "github.com/openshift/origin/pkg/oauth/apis/oauth"
+	oauthclient "github.com/openshift/origin/pkg/oauth/generated/internalclientset/typed/oauth/internalversion"
+	oauthclientregistry "github.com/openshift/origin/pkg/oauth/registry/oauthclient"
 	"github.com/openshift/origin/pkg/oauth/scope"
 )
 
 type UserConversion interface {
-	ConvertToAuthorizeToken(interface{}, *api.OAuthAuthorizeToken) error
-	ConvertToAccessToken(interface{}, *api.OAuthAccessToken) error
-	ConvertFromAuthorizeToken(*api.OAuthAuthorizeToken) (interface{}, error)
-	ConvertFromAccessToken(*api.OAuthAccessToken) (interface{}, error)
+	ConvertToAuthorizeToken(interface{}, *oauthapi.OAuthAuthorizeToken) error
+	ConvertToAccessToken(interface{}, *oauthapi.OAuthAccessToken) error
+	ConvertFromAuthorizeToken(*oauthapi.OAuthAuthorizeToken) (interface{}, error)
+	ConvertFromAccessToken(*oauthapi.OAuthAccessToken) (interface{}, error)
 }
 
 type storage struct {
-	accesstoken    oauthaccesstoken.Registry
-	authorizetoken oauthauthorizetoken.Registry
-	client         oauthclient.Getter
+	accesstoken    oauthclient.OAuthAccessTokenInterface
+	authorizetoken oauthclient.OAuthAuthorizeTokenInterface
+	client         oauthclientregistry.Getter
 	user           UserConversion
+	tokentimeout   int32
 }
 
-func New(access oauthaccesstoken.Registry, authorize oauthauthorizetoken.Registry, client oauthclient.Getter, user UserConversion) osin.Storage {
+func New(access oauthclient.OAuthAccessTokenInterface, authorize oauthclient.OAuthAuthorizeTokenInterface, client oauthclientregistry.Getter, user UserConversion, tokentimeout int32) osin.Storage {
 	return &storage{
 		accesstoken:    access,
 		authorizetoken: authorize,
 		client:         client,
 		user:           user,
+		tokentimeout:   tokentimeout,
 	}
 }
 
 type clientWrapper struct {
 	id     string
-	client *api.OAuthClient
+	client *oauthapi.OAuthClient
 }
 
 // Ensure we implement the secret matcher method that allows us to validate multiple secrets
 var _ = osin.Client(&clientWrapper{})
 var _ = osin.ClientSecretMatcher(&clientWrapper{})
+var _ = handlers.TokenMaxAgeSeconds(&clientWrapper{})
+var _ = handlers.TokenTimeoutSeconds(&clientWrapper{})
 
 func (w *clientWrapper) GetId() string {
 	return w.id
@@ -84,6 +87,14 @@ func (w *clientWrapper) GetUserData() interface{} {
 	return w.client
 }
 
+func (w *clientWrapper) GetTokenMaxAgeSeconds() *int32 {
+	return w.client.AccessTokenMaxAgeSeconds
+}
+
+func (w *clientWrapper) GetAccessTokenInactivityTimeoutSeconds() *int32 {
+	return w.client.AccessTokenInactivityTimeoutSeconds
+}
+
 // Clone the storage if needed. For example, using mgo, you can clone the session with session.Clone
 // to avoid concurrent access problems.
 // This is to avoid cloning the connection at each method access.
@@ -98,7 +109,7 @@ func (s *storage) Close() {
 
 // GetClient loads the client by id (client_id)
 func (s *storage) GetClient(id string) (osin.Client, error) {
-	c, err := s.client.GetClient(kapi.NewContext(), id)
+	c, err := s.client.Get(id, metav1.GetOptions{})
 	if err != nil {
 		if kerrors.IsNotFound(err) {
 			return nil, nil
@@ -114,7 +125,7 @@ func (s *storage) SaveAuthorize(data *osin.AuthorizeData) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.authorizetoken.CreateAuthorizeToken(kapi.NewContext(), token)
+	_, err = s.authorizetoken.Create(token)
 	return err
 }
 
@@ -122,7 +133,7 @@ func (s *storage) SaveAuthorize(data *osin.AuthorizeData) error {
 // Client information MUST be loaded together.
 // Optionally can return error if expired.
 func (s *storage) LoadAuthorize(code string) (*osin.AuthorizeData, error) {
-	authorize, err := s.authorizetoken.GetAuthorizeToken(kapi.NewContext(), code)
+	authorize, err := s.authorizetoken.Get(code, metav1.GetOptions{})
 	if kerrors.IsNotFound(err) {
 		glog.V(5).Info("Authorization code not found")
 		return nil, nil
@@ -136,7 +147,7 @@ func (s *storage) LoadAuthorize(code string) (*osin.AuthorizeData, error) {
 // RemoveAuthorize revokes or deletes the authorization code.
 func (s *storage) RemoveAuthorize(code string) error {
 	// TODO: return no error if registry returns IsNotFound
-	return s.authorizetoken.DeleteAuthorizeToken(kapi.NewContext(), code)
+	return s.authorizetoken.Delete(code, nil)
 }
 
 // SaveAccess writes AccessData.
@@ -146,7 +157,7 @@ func (s *storage) SaveAccess(data *osin.AccessData) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.accesstoken.CreateAccessToken(kapi.NewContext(), token)
+	_, err = s.accesstoken.Create(token)
 	return err
 }
 
@@ -154,7 +165,7 @@ func (s *storage) SaveAccess(data *osin.AccessData) error {
 // AuthorizeData and AccessData DON'T NEED to be loaded if not easily available.
 // Optionally can return error if expired.
 func (s *storage) LoadAccess(token string) (*osin.AccessData, error) {
-	access, err := s.accesstoken.GetAccessToken(kapi.NewContext(), token)
+	access, err := s.accesstoken.Get(token, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +175,7 @@ func (s *storage) LoadAccess(token string) (*osin.AccessData, error) {
 // RemoveAccess revokes or deletes an AccessData.
 func (s *storage) RemoveAccess(token string) error {
 	// TODO: return no error if registry returns IsNotFound
-	return s.accesstoken.DeleteAccessToken(kapi.NewContext(), token)
+	return s.accesstoken.Delete(token, nil)
 }
 
 // LoadRefresh retrieves refresh AccessData. Client information MUST be loaded together.
@@ -179,11 +190,11 @@ func (s *storage) RemoveRefresh(token string) error {
 	return errors.New("not implemented")
 }
 
-func (s *storage) convertToAuthorizeToken(data *osin.AuthorizeData) (*api.OAuthAuthorizeToken, error) {
-	token := &api.OAuthAuthorizeToken{
-		ObjectMeta: kapi.ObjectMeta{
+func (s *storage) convertToAuthorizeToken(data *osin.AuthorizeData) (*oauthapi.OAuthAuthorizeToken, error) {
+	token := &oauthapi.OAuthAuthorizeToken{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:              data.Code,
-			CreationTimestamp: unversioned.Time{Time: data.CreatedAt},
+			CreationTimestamp: metav1.Time{Time: data.CreatedAt},
 		},
 		CodeChallenge:       data.CodeChallenge,
 		CodeChallengeMethod: data.CodeChallengeMethod,
@@ -199,12 +210,12 @@ func (s *storage) convertToAuthorizeToken(data *osin.AuthorizeData) (*api.OAuthA
 	return token, nil
 }
 
-func (s *storage) convertFromAuthorizeToken(authorize *api.OAuthAuthorizeToken) (*osin.AuthorizeData, error) {
+func (s *storage) convertFromAuthorizeToken(authorize *oauthapi.OAuthAuthorizeToken) (*osin.AuthorizeData, error) {
 	user, err := s.user.ConvertFromAuthorizeToken(authorize)
 	if err != nil {
 		return nil, err
 	}
-	client, err := s.client.GetClient(kapi.NewContext(), authorize.ClientName)
+	client, err := s.client.Get(authorize.ClientName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -226,11 +237,11 @@ func (s *storage) convertFromAuthorizeToken(authorize *api.OAuthAuthorizeToken) 
 	}, nil
 }
 
-func (s *storage) convertToAccessToken(data *osin.AccessData) (*api.OAuthAccessToken, error) {
-	token := &api.OAuthAccessToken{
-		ObjectMeta: kapi.ObjectMeta{
+func (s *storage) convertToAccessToken(data *osin.AccessData) (*oauthapi.OAuthAccessToken, error) {
+	token := &oauthapi.OAuthAccessToken{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:              data.AccessToken,
-			CreationTimestamp: unversioned.Time{Time: data.CreatedAt},
+			CreationTimestamp: metav1.Time{Time: data.CreatedAt},
 		},
 		ExpiresIn:    int64(data.ExpiresIn),
 		RefreshToken: data.RefreshToken,
@@ -244,15 +255,24 @@ func (s *storage) convertToAccessToken(data *osin.AccessData) (*api.OAuthAccessT
 	if err := s.user.ConvertToAccessToken(data.UserData, token); err != nil {
 		return nil, err
 	}
+
+	token.InactivityTimeoutSeconds = s.tokentimeout
+	// Check if we have a client specific inactivity Timeout to set
+	if w, ok := data.Client.(handlers.TokenTimeoutSeconds); ok {
+		if tt := w.GetAccessTokenInactivityTimeoutSeconds(); tt != nil {
+			token.InactivityTimeoutSeconds = *tt
+		}
+	}
+
 	return token, nil
 }
 
-func (s *storage) convertFromAccessToken(access *api.OAuthAccessToken) (*osin.AccessData, error) {
+func (s *storage) convertFromAccessToken(access *oauthapi.OAuthAccessToken) (*osin.AccessData, error) {
 	user, err := s.user.ConvertFromAccessToken(access)
 	if err != nil {
 		return nil, err
 	}
-	client, err := s.client.GetClient(kapi.NewContext(), access.ClientName)
+	client, err := s.client.Get(access.ClientName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}

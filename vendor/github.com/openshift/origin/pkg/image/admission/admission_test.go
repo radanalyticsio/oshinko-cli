@@ -3,16 +3,20 @@ package admission
 import (
 	"fmt"
 	"testing"
+	"time"
 
-	kadmission "k8s.io/kubernetes/pkg/admission"
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/resource"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	clientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
-	clientsetfake "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	kadmission "k8s.io/apiserver/pkg/admission"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	kclientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
+	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
+	informers "k8s.io/kubernetes/pkg/client/informers/informers_generated/internalversion"
+	kubeadmission "k8s.io/kubernetes/pkg/kubeapiserver/admission"
 
 	"github.com/openshift/origin/pkg/image/admission/testutil"
-	imageapi "github.com/openshift/origin/pkg/image/api"
+	imageapi "github.com/openshift/origin/pkg/image/apis/image"
 )
 
 func TestAdmitImageStreamMapping(t *testing.T) {
@@ -42,18 +46,18 @@ func TestAdmitImageStreamMapping(t *testing.T) {
 	}
 
 	for k, v := range tests {
-		var fakeKubeClient clientset.Interface
+		var fakeKubeClient kclientset.Interface
 		if v.limitRange != nil {
-			fakeKubeClient = clientsetfake.NewSimpleClientset(v.limitRange)
+			fakeKubeClient = fake.NewSimpleClientset(v.limitRange)
 		} else {
-			fakeKubeClient = clientsetfake.NewSimpleClientset()
+			fakeKubeClient = fake.NewSimpleClientset()
 		}
-
-		plugin, err := NewImageLimitRangerPlugin(fakeKubeClient, nil)
+		plugin, informerFactory, err := newHandlerForTest(fakeKubeClient)
 		if err != nil {
 			t.Errorf("%s failed creating plugin %v", k, err)
 			continue
 		}
+		informerFactory.Start(wait.NeverStop)
 
 		attrs := kadmission.NewAttributesRecord(v.imageStreamMapping, nil,
 			imageapi.Kind("ImageStreamMapping").WithVersion("version"),
@@ -64,7 +68,7 @@ func TestAdmitImageStreamMapping(t *testing.T) {
 			v.operation,
 			nil)
 
-		err = plugin.Admit(attrs)
+		err = plugin.(kadmission.MutationInterface).Admit(attrs)
 		if v.shouldAdmit && err != nil {
 			t.Errorf("%s expected to be admitted but received error %v", k, err)
 		}
@@ -116,7 +120,7 @@ func TestAdmitImage(t *testing.T) {
 			}
 		}
 
-		err := AdmitImage(v.size.Value(), *limitRangeItem)
+		err := admitImage(v.size.Value(), *limitRangeItem)
 		if v.shouldAdmit && err != nil {
 			t.Errorf("%s expected to be admitted but received error %v", k, err)
 		}
@@ -170,7 +174,7 @@ func TestLimitAppliestoImages(t *testing.T) {
 		},
 	}
 
-	plugin, err := NewImageLimitRangerPlugin(clientsetfake.NewSimpleClientset(), nil)
+	plugin, err := NewImageLimitRangerPlugin(nil)
 	if err != nil {
 		t.Fatalf("error creating plugin: %v", err)
 	}
@@ -188,7 +192,7 @@ func TestLimitAppliestoImages(t *testing.T) {
 }
 
 func TestHandles(t *testing.T) {
-	plugin, err := NewImageLimitRangerPlugin(clientsetfake.NewSimpleClientset(), nil)
+	plugin, err := NewImageLimitRangerPlugin(nil)
 	if err != nil {
 		t.Fatalf("error creating plugin: %v", err)
 	}
@@ -208,21 +212,21 @@ func TestHandles(t *testing.T) {
 
 func TestSupports(t *testing.T) {
 	resources := []string{"imagestreammappings"}
-	plugin, err := NewImageLimitRangerPlugin(clientsetfake.NewSimpleClientset(), nil)
+	plugin, err := NewImageLimitRangerPlugin(nil)
 	if err != nil {
 		t.Fatalf("error creating plugin: %v", err)
 	}
 	ilr := plugin.(*imageLimitRangerPlugin)
 	for _, r := range resources {
-		attr := kadmission.NewAttributesRecord(nil, nil, unversioned.Kind("ImageStreamMapping").WithVersion("version"), "ns", "name", imageapi.Resource(r).WithVersion("version"), "", kadmission.Create, nil)
+		attr := kadmission.NewAttributesRecord(nil, nil, imageapi.LegacyKind("ImageStreamMapping").WithVersion(""), "ns", "name", imageapi.LegacyResource(r).WithVersion("version"), "", kadmission.Create, nil)
 		if !ilr.SupportsAttributes(attr) {
-			t.Errorf("plugin is expected to support %s", r)
+			t.Errorf("plugin is expected to support %#v", r)
 		}
 	}
 
 	badKinds := []string{"ImageStream", "Image", "Pod", "foo"}
 	for _, k := range badKinds {
-		attr := kadmission.NewAttributesRecord(nil, nil, unversioned.Kind(k).WithVersion("version"), "ns", "name", imageapi.Resource("bar").WithVersion("version"), "", kadmission.Create, nil)
+		attr := kadmission.NewAttributesRecord(nil, nil, imageapi.LegacyKind(k).WithVersion(""), "ns", "name", imageapi.Resource("bar").WithVersion("version"), "", kadmission.Create, nil)
 		if ilr.SupportsAttributes(attr) {
 			t.Errorf("plugin is not expected to support %s", k)
 		}
@@ -231,7 +235,7 @@ func TestSupports(t *testing.T) {
 
 func getBaseImageWith1Layer() imageapi.Image {
 	return imageapi.Image{
-		ObjectMeta: kapi.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:        testutil.BaseImageWith1LayerDigest,
 			Annotations: map[string]string{imageapi.ManagedByOpenShiftAnnotation: "true"},
 		},
@@ -242,7 +246,7 @@ func getBaseImageWith1Layer() imageapi.Image {
 
 func getLimitRange(limit string) *kapi.LimitRange {
 	return &kapi.LimitRange{
-		ObjectMeta: kapi.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-limit",
 			Namespace: "test",
 		},
@@ -261,10 +265,22 @@ func getLimitRange(limit string) *kapi.LimitRange {
 
 func getImageStreamMapping() *imageapi.ImageStreamMapping {
 	return &imageapi.ImageStreamMapping{
-		ObjectMeta: kapi.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-ism",
 			Namespace: "test",
 		},
 		Image: getBaseImageWith1Layer(),
 	}
+}
+
+func newHandlerForTest(c kclientset.Interface) (kadmission.Interface, informers.SharedInformerFactory, error) {
+	plugin, err := NewImageLimitRangerPlugin(nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	f := informers.NewSharedInformerFactory(c, 5*time.Minute)
+	pluginInitializer := kubeadmission.NewPluginInitializer(c, f, nil, nil, nil)
+	pluginInitializer.Initialize(plugin)
+	err = kadmission.ValidateInitialization(plugin)
+	return plugin, f, err
 }

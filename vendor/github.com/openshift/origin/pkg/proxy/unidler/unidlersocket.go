@@ -1,19 +1,3 @@
-/*
-Copyright 2015 The Kubernetes Authors All rights reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package unidler
 
 import (
@@ -24,11 +8,10 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	"k8s.io/kubernetes/pkg/api"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/proxy"
-	utilruntime "k8s.io/kubernetes/pkg/util/runtime"
-
-	"github.com/openshift/origin/pkg/proxy/userspace"
+	"k8s.io/kubernetes/pkg/proxy/userspace"
 )
 
 const (
@@ -128,7 +111,7 @@ var (
 	// to be dropped after the limit is reached)
 	MaxHeldConnections = 16
 
-	needPodsWaitTimeout = 30 * time.Second
+	needPodsWaitTimeout = 120 * time.Second
 	needPodsTickLen     = 5 * time.Second
 )
 
@@ -212,11 +195,11 @@ func (tcp *tcpUnidlerSocket) acceptConns(ch chan<- net.Conn, svcInfo *userspace.
 }
 
 // awaitAwakening collects new connections and signals once that pods are needed to fulfill them.  The function
-// will return when the listening socket is closed, which indicates that endpoints have succesfully appeared
+// will return when the listening socket is closed, which indicates that endpoints have successfully appeared
 // (and thus the hybrid proxy has switched this service over to using the normal proxy).  Connections will
 // be gradually timed out and dropped off the list of connections on a per-connection basis.  The list of current
 // connections is returned, in addition to whether or not we should retry this method.
-func (tcp *tcpUnidlerSocket) awaitAwakening(service proxy.ServicePortName, serviceRef api.ObjectReference, loadBalancer userspace.LoadBalancer, inConns <-chan net.Conn, endpointsAvail chan<- interface{}) (*connectionList, bool) {
+func (tcp *tcpUnidlerSocket) awaitAwakening(service proxy.ServicePortName, loadBalancer userspace.LoadBalancer, inConns <-chan net.Conn, endpointsAvail chan<- interface{}) (*connectionList, bool) {
 	// collect connections and wait for endpoints to be available
 	sent_need_pods := false
 	timeout_started := false
@@ -235,7 +218,7 @@ func (tcp *tcpUnidlerSocket) awaitAwakening(service proxy.ServicePortName, servi
 
 			if !sent_need_pods && !loadBalancer.ServiceHasEndpoints(service) {
 				glog.V(4).Infof("unidling TCP proxy sent unidle event to wake up service %s/%s:%s", service.Namespace, service.Name, service.Port)
-				tcp.signaler.NeedPods(serviceRef, service.Port)
+				tcp.signaler.NeedPods(service.NamespacedName, service.Port)
 
 				// only send NeedPods once
 				sent_need_pods = true
@@ -279,7 +262,7 @@ func (tcp *tcpUnidlerSocket) ProxyLoop(service proxy.ServicePortName, svcInfo *u
 		glog.V(4).Infof("unidling TCP proxy start/reset for service %s/%s:%s", service.Namespace, service.Name, service.Port)
 
 		var cont bool
-		if allConns, cont = tcp.awaitAwakening(service, svcInfo.ServiceRef, loadBalancer, inConns, endpointsAvail); !cont {
+		if allConns, cont = tcp.awaitAwakening(service, loadBalancer, inConns, endpointsAvail); !cont {
 			break
 		}
 	}
@@ -359,7 +342,7 @@ func (udp *udpUnidlerSocket) readFromSock(buffer []byte, svcInfo *userspace.Serv
 func (udp *udpUnidlerSocket) sendWakeup(svcPortName proxy.ServicePortName, svcInfo *userspace.ServiceInfo) *time.Timer {
 	timeoutTimer := time.NewTimer(needPodsWaitTimeout)
 	glog.V(4).Infof("unidling proxy sent unidle event to wake up service %s/%s:%s", svcPortName.Namespace, svcPortName.Name, svcPortName.Port)
-	udp.signaler.NeedPods(svcInfo.ServiceRef, svcPortName.Port)
+	udp.signaler.NeedPods(svcPortName.NamespacedName, svcPortName.Port)
 
 	return timeoutTimer
 }

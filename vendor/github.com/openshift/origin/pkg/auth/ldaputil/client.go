@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 
-	"k8s.io/kubernetes/pkg/util/crypto"
+	"k8s.io/client-go/util/cert"
 
 	"github.com/openshift/origin/pkg/auth/ldaputil/ldapclient"
 	"gopkg.in/ldap.v2"
@@ -20,7 +20,7 @@ func NewLDAPClientConfig(URL, bindDN, bindPassword, CA string, insecure bool) (l
 
 	tlsConfig := &tls.Config{}
 	if len(CA) > 0 {
-		roots, err := crypto.CertPoolFromFile(CA)
+		roots, err := cert.NewPool(CA)
 		if err != nil {
 			return nil, fmt.Errorf("error loading cert pool from ca file %s: %v", CA, err)
 		}
@@ -66,13 +66,13 @@ func (l *ldapClientConfig) Connect() (ldap.Client, error) {
 	// Ensure tlsConfig specifies the server we're connecting to
 	if tlsConfig != nil && !tlsConfig.InsecureSkipVerify && len(tlsConfig.ServerName) == 0 {
 		// Add to a copy of the tlsConfig to avoid mutating the original
-		c := *tlsConfig
+		c := tlsConfig.Clone()
 		if host, _, err := net.SplitHostPort(l.host); err == nil {
 			c.ServerName = host
 		} else {
 			c.ServerName = l.host
 		}
-		tlsConfig = &c
+		tlsConfig = c
 	}
 
 	switch l.scheme {

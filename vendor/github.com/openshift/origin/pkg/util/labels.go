@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"reflect"
 
-	kmeta "k8s.io/kubernetes/pkg/api/meta"
-	"k8s.io/kubernetes/pkg/labels"
-	"k8s.io/kubernetes/pkg/runtime"
+	kmeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 
-	deployapi "github.com/openshift/origin/pkg/deploy/api"
+	appsapi "github.com/openshift/origin/pkg/apps/apis/apps"
 )
 
 // MergeInto flags
@@ -28,7 +29,7 @@ func AddObjectLabelsWithFlags(obj runtime.Object, labels labels.Set, flags int) 
 	accessor, err := kmeta.Accessor(obj)
 
 	if err != nil {
-		if _, ok := obj.(*runtime.Unstructured); !ok {
+		if _, ok := obj.(*unstructured.Unstructured); !ok {
 			// error out if it's not possible to get an accessor and it's also not an unstructured object
 			return err
 		}
@@ -39,7 +40,7 @@ func AddObjectLabelsWithFlags(obj runtime.Object, labels labels.Set, flags int) 
 		}
 
 		switch objType := obj.(type) {
-		case *deployapi.DeploymentConfig:
+		case *appsapi.DeploymentConfig:
 			if err := addDeploymentConfigNestedLabels(objType, labels, flags); err != nil {
 				return fmt.Errorf("unable to add nested labels to %s/%s: %v", obj.GetObjectKind().GroupVersionKind(), accessor.GetName(), err)
 			}
@@ -56,7 +57,7 @@ func AddObjectLabelsWithFlags(obj runtime.Object, labels labels.Set, flags int) 
 
 	// handle unstructured object
 	// TODO: allow meta.Accessor to handle runtime.Unstructured
-	if unstruct, ok := obj.(*runtime.Unstructured); ok && unstruct.Object != nil {
+	if unstruct, ok := obj.(*unstructured.Unstructured); ok && unstruct.Object != nil {
 		// the presence of "metadata" is sufficient for us to apply the rules for Kube-like
 		// objects.
 		// TODO: add swagger detection to allow this to happen more effectively
@@ -111,7 +112,7 @@ func AddObjectAnnotations(obj runtime.Object, annotations map[string]string) err
 	accessor, err := kmeta.Accessor(obj)
 
 	if err != nil {
-		if _, ok := obj.(*runtime.Unstructured); !ok {
+		if _, ok := obj.(*unstructured.Unstructured); !ok {
 			// error out if it's not possible to get an accessor and it's also not an unstructured object
 			return err
 		}
@@ -122,7 +123,7 @@ func AddObjectAnnotations(obj runtime.Object, annotations map[string]string) err
 		}
 
 		switch objType := obj.(type) {
-		case *deployapi.DeploymentConfig:
+		case *appsapi.DeploymentConfig:
 			if err := addDeploymentConfigNestedAnnotations(objType, annotations); err != nil {
 				return fmt.Errorf("unable to add nested annotations to %s/%s: %v", obj.GetObjectKind().GroupVersionKind(), accessor.GetName(), err)
 			}
@@ -136,7 +137,7 @@ func AddObjectAnnotations(obj runtime.Object, annotations map[string]string) err
 
 	// handle unstructured object
 	// TODO: allow meta.Accessor to handle runtime.Unstructured
-	if unstruct, ok := obj.(*runtime.Unstructured); ok && unstruct.Object != nil {
+	if unstruct, ok := obj.(*unstructured.Unstructured); ok && unstruct.Object != nil {
 		// the presence of "metadata" is sufficient for us to apply the rules for Kube-like
 		// objects.
 		// TODO: add swagger detection to allow this to happen more effectively
@@ -176,7 +177,7 @@ func AddObjectAnnotations(obj runtime.Object, annotations map[string]string) err
 }
 
 // addDeploymentConfigNestedLabels adds new label(s) to a nested labels of a single DeploymentConfig object
-func addDeploymentConfigNestedLabels(obj *deployapi.DeploymentConfig, labels labels.Set, flags int) error {
+func addDeploymentConfigNestedLabels(obj *appsapi.DeploymentConfig, labels labels.Set, flags int) error {
 	if obj.Spec.Template.Labels == nil {
 		obj.Spec.Template.Labels = make(map[string]string)
 	}
@@ -186,7 +187,7 @@ func addDeploymentConfigNestedLabels(obj *deployapi.DeploymentConfig, labels lab
 	return nil
 }
 
-func addDeploymentConfigNestedAnnotations(obj *deployapi.DeploymentConfig, annotations map[string]string) error {
+func addDeploymentConfigNestedAnnotations(obj *appsapi.DeploymentConfig, annotations map[string]string) error {
 	if obj.Spec.Template == nil {
 		return nil
 	}

@@ -6,7 +6,7 @@ import (
 	"github.com/gonum/graph"
 
 	osgraph "github.com/openshift/origin/pkg/api/graph"
-	buildapi "github.com/openshift/origin/pkg/build/api"
+	buildapi "github.com/openshift/origin/pkg/build/apis/build"
 	buildgraph "github.com/openshift/origin/pkg/build/graph/nodes"
 )
 
@@ -101,7 +101,7 @@ func GetLatestBuild(g osgraph.Graph, bc graph.Node) *buildgraph.BuildNode {
 
 	for _, buildNode := range builds[1:] {
 		if build, ok := buildNode.(*buildgraph.BuildNode); ok {
-			if latestBuild.Build.CreationTimestamp.Before(build.Build.CreationTimestamp) {
+			if latestBuild.Build.CreationTimestamp.Before(&build.Build.CreationTimestamp) {
 				latestBuild = build
 			}
 		}

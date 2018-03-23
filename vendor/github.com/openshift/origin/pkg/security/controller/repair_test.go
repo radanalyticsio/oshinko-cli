@@ -4,9 +4,12 @@ import (
 	"testing"
 	"time"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/client/unversioned/testclient"
-	"k8s.io/kubernetes/pkg/runtime"
+	"k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	clientgotesting "k8s.io/client-go/testing"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 
 	"github.com/openshift/origin/pkg/security"
 	"github.com/openshift/origin/pkg/security/uid"
@@ -29,11 +32,11 @@ func (r *fakeRange) CreateOrUpdate(update *kapi.RangeAllocation) error {
 }
 
 func TestRepair(t *testing.T) {
-	client := &testclient.Fake{}
-	client.AddReactor("*", "*", func(a testclient.Action) (bool, runtime.Object, error) {
-		list := &kapi.NamespaceList{
-			Items: []kapi.Namespace{
-				{ObjectMeta: kapi.ObjectMeta{Name: "default"}},
+	client := &fake.Clientset{}
+	client.AddReactor("*", "*", func(a clientgotesting.Action) (bool, runtime.Object, error) {
+		list := &v1.NamespaceList{
+			Items: []v1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
 			},
 		}
 		return true, list, nil
@@ -44,7 +47,7 @@ func TestRepair(t *testing.T) {
 	}
 
 	uidr, _ := uid.NewRange(10, 20, 2)
-	repair := NewRepair(0*time.Second, client.Namespaces(), uidr, alloc)
+	repair := NewRepair(0*time.Second, client.Core().Namespaces(), uidr, alloc)
 
 	err := repair.RunOnce()
 	if err != nil {
@@ -62,12 +65,12 @@ func TestRepair(t *testing.T) {
 }
 
 func TestRepairIgnoresMismatch(t *testing.T) {
-	client := &testclient.Fake{}
-	client.AddReactor("*", "*", func(a testclient.Action) (bool, runtime.Object, error) {
-		list := &kapi.NamespaceList{
-			Items: []kapi.Namespace{
+	client := &fake.Clientset{}
+	client.AddReactor("*", "*", func(a clientgotesting.Action) (bool, runtime.Object, error) {
+		list := &v1.NamespaceList{
+			Items: []v1.Namespace{
 				{
-					ObjectMeta: kapi.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name:        "default",
 						Annotations: map[string]string{security.UIDRangeAnnotation: "1/5"},
 					},
@@ -82,7 +85,7 @@ func TestRepairIgnoresMismatch(t *testing.T) {
 	}
 
 	uidr, _ := uid.NewRange(10, 20, 2)
-	repair := NewRepair(0*time.Second, client.Namespaces(), uidr, alloc)
+	repair := NewRepair(0*time.Second, client.Core().Namespaces(), uidr, alloc)
 
 	err := repair.RunOnce()
 	if err != nil {

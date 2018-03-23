@@ -33,7 +33,7 @@ Steps
 
         $ oc new-app jenkins-ephemeral
 
-    **Note**: This template uses an EmptyDir type volume.  If you want to ensure your jenkins configuration/job information is persisted through pod restarts and deployments, you can use the jenkins-persistent-template.json template file which uses a persistent volume but requires additional [PersistentVolume](https://docs.openshift.org/latest/admin_guide/persistent_storage_nfs.html) setup.  
+    **Note**: This template uses an EmptyDir type volume.  If you want to ensure your jenkins configuration/job information is persisted through pod restarts and deployments, you can use the jenkins-persistent-template.json template file which uses a persistent volume but requires additional [PersistentVolume](https://docs.openshift.org/latest/install_config/persistent_storage/persistent_storage_nfs.html) setup.  
     
 1. Create the sample application configuration
 
@@ -47,7 +47,7 @@ Steps
 
     and access the host for the Jenkins route.
 
-    If you do not have a router or your host system does not support xip.io name resolution, you can access jenkins directly via the service ip.  Determine the jenkins service ip ("oc get svc") and go to it in your browser on port 80.  Do not confuse it with the jenkins-jnlp service.
+    If you do not have a router or your host system does not support nip.io name resolution, you can access jenkins directly via the service ip.  Determine the jenkins service ip ("oc get svc") and go to it in your browser on port 80.  Do not confuse it with the jenkins-jnlp service.
 
     **Note**: The OpenShift Login plugin by default manages authentication into any Jenkins instance running in OpenShift.  When this is the case, and you do intend to access Jenkins via the Service IP and not the Route, then you will need to annotate the Jenkins service account with a redirect URL so that the OAuth server's whitelist is updated and allow the login to Jenkins to complete. 
 
@@ -72,6 +72,43 @@ Steps
 1. Confirm both the test and production services are available by browsing to both services:
 
         $ oc get services -n test | grep frontend
+
+Advanced
+-----
+
+You can also work with this sample and demonstrate the use of the [kubernetes-plugin](https://wiki.jenkins-ci.org/display/JENKINS/Kubernetes+Plugin) to manage
+Jenkins slaves that run as on-demand Pods.  The kubenetes-plugin is pre-installed into the OpenShift Jenkins Images
+for Centos and RHEL produced by the [OpenShift Jenkins repository](https://github.com/openshift/jenkins).  The OpenShift
+Jenkins repository also produces a [base Jenkins slave image](https://github.com/openshift/jenkins/tree/master/slave-base),
+as well as Jenkins slave images for [Maven](https://github.com/openshift/jenkins/tree/master/slave-maven) and
+[NodeJS](https://github.com/openshift/jenkins/tree/master/slave-nodejs) which extend that base Jenkins slave image.
+
+These next set of steps builds upon the steps just executed above, leveraging the OpenShift Jenkins slave image for NodeJS to launch the sample
+job in a Jenkins slave provisioned as Kubernetes Pod on OpenShift.
+
+Steps
+------
+
+1. From the Jenkins UI, open the "OpenShift Sample" job, and click the "Configure" link.
+
+1. Check the "Restrict where this project can be run" check box under the "General" section of the Job definition.
+
+1. Under "Restrict where this project can be run", there will be a "Label Expression" field.  Enter "nodejs" in that field.
+  
+1. Click the "Save" button.
+
+1. Now click the "Run" link to run the job.  An OpenShift Pod running as a Jenkins slave will be launched to run the "OpenShift Sample" job.
+   The Pod name will start with the string "nodejs".  You should be able to follow the life cycle of that Pod with:
+   
+   ```
+   $ oc get pods -w
+   ```
+
+More details
+------------
+
+* A broader tutorial, including how to create slave images for OpenShift, is [here](https://docs.openshift.org/latest/using_images/other_images/jenkins.html#using-the-jenkins-kubernetes-plug-in-to-run-jobs).  
+
 
 Troubleshooting
 -----

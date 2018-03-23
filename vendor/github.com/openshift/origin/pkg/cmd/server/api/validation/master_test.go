@@ -3,10 +3,10 @@ package validation
 import (
 	"testing"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/util/diff"
-	"k8s.io/kubernetes/pkg/util/sets"
-	"k8s.io/kubernetes/pkg/util/validation/field"
+	"k8s.io/apimachinery/pkg/util/diff"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	kapihelper "k8s.io/kubernetes/pkg/apis/core/helper"
 
 	"github.com/openshift/origin/pkg/cmd/server/api"
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
@@ -194,7 +194,7 @@ func TestValidate_ValidateEtcdStorageConfig(t *testing.T) {
 			KubernetesStorageVersion: test.kubeStorageVersion,
 		}
 		results := ValidateEtcdStorageConfig(config, nil)
-		if !kapi.Semantic.DeepEqual(test.expected, results) {
+		if !kapihelper.Semantic.DeepEqual(test.expected, results) {
 			t.Errorf("unexpected validation results; diff:\n%v", diff.ObjectDiff(test.expected, results))
 			return
 		}
@@ -215,38 +215,55 @@ func TestValidateAdmissionPluginConfig(t *testing.T) {
 	bothEmpty := configapi.AdmissionPluginConfig{}
 
 	tests := []struct {
-		config      map[string]configapi.AdmissionPluginConfig
-		expectError bool
+		config        map[string]*configapi.AdmissionPluginConfig
+		expectError   bool
+		warningFields []string
 	}{
 		{
-			config: map[string]configapi.AdmissionPluginConfig{
-				"one": locationOnly,
-				"two": configOnly,
+			config: map[string]*configapi.AdmissionPluginConfig{
+				"one": &locationOnly,
+				"two": &configOnly,
 			},
 		},
 		{
-			config: map[string]configapi.AdmissionPluginConfig{
-				"one": locationOnly,
-				"two": locationAndConfig,
+			config: map[string]*configapi.AdmissionPluginConfig{
+				"one": &locationOnly,
+				"two": &locationAndConfig,
 			},
 			expectError: true,
 		},
 		{
-			config: map[string]configapi.AdmissionPluginConfig{
-				"one": configOnly,
-				"two": bothEmpty,
+			config: map[string]*configapi.AdmissionPluginConfig{
+				"one": &configOnly,
+				"two": &bothEmpty,
 			},
 			expectError: true,
+		},
+		{
+			config: map[string]*configapi.AdmissionPluginConfig{
+				"openshift.io/OriginResourceQuota": &configOnly,
+				"two": &configOnly,
+			},
+			warningFields: []string{"[openshift.io/OriginResourceQuota]"},
+			expectError:   false,
 		},
 	}
 
 	for _, tc := range tests {
-		errs := ValidateAdmissionPluginConfig(tc.config, nil)
-		if len(errs) > 0 && !tc.expectError {
-			t.Errorf("Unexpected error for %#v: %v", tc.config, errs)
+		results := ValidateAdmissionPluginConfig(tc.config, nil)
+		if len(results.Errors) > 0 && !tc.expectError {
+			t.Errorf("Unexpected error for %#v: %v", tc.config, results.Errors)
 		}
-		if len(errs) == 0 && tc.expectError {
+		if len(results.Errors) == 0 && tc.expectError {
 			t.Errorf("Did not get expected error for: %#v", tc.config)
+		}
+		actualWarnings := sets.NewString()
+		expectedWarnings := sets.NewString(tc.warningFields...)
+		for i := range results.Warnings {
+			actualWarnings.Insert(results.Warnings[i].Field)
+		}
+		if !expectedWarnings.Equal(actualWarnings) {
+			t.Errorf("Expected warnings: %v, actual warnings: %v", expectedWarnings, actualWarnings)
 		}
 	}
 }
@@ -257,6 +274,7 @@ func TestValidateAdmissionPluginConfigConflicts(t *testing.T) {
 		options configapi.MasterConfig
 
 		warningFields []string
+		errorFields   []string
 	}{
 		{
 			name: "stock everything",
@@ -270,7 +288,7 @@ func TestValidateAdmissionPluginConfigConflicts(t *testing.T) {
 					},
 				},
 			},
-			warningFields: []string{"kubernetesMasterConfig.admissionConfig.pluginOrderOverride"},
+			errorFields: []string{"kubernetesMasterConfig.admissionConfig.pluginOrderOverride"},
 		},
 		{
 			name: "specified kube admission order 02",
@@ -307,7 +325,7 @@ func TestValidateAdmissionPluginConfigConflicts(t *testing.T) {
 			name: "specified, non-conflicting plugin configs 01",
 			options: configapi.MasterConfig{
 				AdmissionConfig: configapi.AdmissionConfig{
-					PluginConfig: map[string]configapi.AdmissionPluginConfig{
+					PluginConfig: map[string]*configapi.AdmissionPluginConfig{
 						"foo": {
 							Location: "bar",
 						},
@@ -320,7 +338,7 @@ func TestValidateAdmissionPluginConfigConflicts(t *testing.T) {
 			options: configapi.MasterConfig{
 				KubernetesMasterConfig: &configapi.KubernetesMasterConfig{
 					AdmissionConfig: configapi.AdmissionConfig{
-						PluginConfig: map[string]configapi.AdmissionPluginConfig{
+						PluginConfig: map[string]*configapi.AdmissionPluginConfig{
 							"foo": {
 								Location: "bar",
 							},
@@ -331,7 +349,7 @@ func TestValidateAdmissionPluginConfigConflicts(t *testing.T) {
 					},
 				},
 				AdmissionConfig: configapi.AdmissionConfig{
-					PluginConfig: map[string]configapi.AdmissionPluginConfig{
+					PluginConfig: map[string]*configapi.AdmissionPluginConfig{
 						"foo": {
 							Location: "bar",
 						},
@@ -344,7 +362,7 @@ func TestValidateAdmissionPluginConfigConflicts(t *testing.T) {
 			options: configapi.MasterConfig{
 				KubernetesMasterConfig: &configapi.KubernetesMasterConfig{
 					AdmissionConfig: configapi.AdmissionConfig{
-						PluginConfig: map[string]configapi.AdmissionPluginConfig{
+						PluginConfig: map[string]*configapi.AdmissionPluginConfig{
 							"foo": {
 								Location: "bar",
 							},
@@ -361,7 +379,7 @@ func TestValidateAdmissionPluginConfigConflicts(t *testing.T) {
 			options: configapi.MasterConfig{
 				KubernetesMasterConfig: &configapi.KubernetesMasterConfig{
 					AdmissionConfig: configapi.AdmissionConfig{
-						PluginConfig: map[string]configapi.AdmissionPluginConfig{
+						PluginConfig: map[string]*configapi.AdmissionPluginConfig{
 							"foo": {
 								Location: "different",
 							},
@@ -369,21 +387,21 @@ func TestValidateAdmissionPluginConfigConflicts(t *testing.T) {
 					},
 				},
 				AdmissionConfig: configapi.AdmissionConfig{
-					PluginConfig: map[string]configapi.AdmissionPluginConfig{
+					PluginConfig: map[string]*configapi.AdmissionPluginConfig{
 						"foo": {
 							Location: "bar",
 						},
 					},
 				},
 			},
-			warningFields: []string{"kubernetesMasterConfig.admissionConfig.pluginConfig[foo]"},
+			errorFields: []string{"kubernetesMasterConfig.admissionConfig.pluginConfig"},
 		},
 	}
 
 	// these fields have warnings in the empty case
 	defaultWarningFields := sets.NewString(
 		"serviceAccountConfig.managedNames", "serviceAccountConfig.publicKeyFiles", "serviceAccountConfig.privateKeyFile", "serviceAccountConfig.masterCA",
-		"projectConfig.securityAllocator", "kubernetesMasterConfig.proxyClientInfo", "auditConfig.auditFilePath")
+		"projectConfig.securityAllocator", "kubernetesMasterConfig.proxyClientInfo", "auditConfig.auditFilePath", "aggregatorConfig.proxyClientInfo", "controllerConfig.serviceServingCert.signer")
 
 	for _, tc := range testCases {
 		results := ValidateMasterConfig(&tc.options, nil)
@@ -419,6 +437,21 @@ func TestValidateAdmissionPluginConfigConflicts(t *testing.T) {
 				t.Errorf("%s: didn't find %q", tc.name, expectedField)
 			}
 		}
+
+		for _, expectedField := range tc.errorFields {
+			found := false
+			for _, result := range results.Errors {
+				if result.Field == expectedField {
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				t.Errorf("%s: didn't find %q", tc.name, expectedField)
+			}
+		}
+
 	}
 }
 
@@ -478,7 +511,11 @@ func TestValidateIngressIPNetworkCIDR(t *testing.T) {
 			NetworkConfig: configapi.MasterNetworkConfig{
 				IngressIPNetworkCIDR: test.cidr,
 				ServiceNetworkCIDR:   test.serviceCIDR,
-				ClusterNetworkCIDR:   test.clusterCIDR,
+				ClusterNetworks: []configapi.ClusterNetworkEntry{
+					{
+						CIDR: test.clusterCIDR,
+					},
+				},
 			},
 		}
 		errors := ValidateIngressIPNetworkCIDR(config, nil)

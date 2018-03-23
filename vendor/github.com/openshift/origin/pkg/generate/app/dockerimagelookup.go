@@ -9,12 +9,13 @@ import (
 	docker "github.com/fsouza/go-dockerclient"
 
 	"github.com/golang/glog"
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/unversioned"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 
-	"github.com/openshift/origin/pkg/client"
-	"github.com/openshift/origin/pkg/dockerregistry"
-	imageapi "github.com/openshift/origin/pkg/image/api"
+	imageapi "github.com/openshift/origin/pkg/image/apis/image"
+	imageclient "github.com/openshift/origin/pkg/image/generated/internalclientset/typed/image/internalversion"
+	dockerregistry "github.com/openshift/origin/pkg/image/importer/dockerv1client"
 )
 
 // DockerClient is the local interface for the docker client
@@ -131,7 +132,7 @@ func (r DockerClientSearcher) Search(precise bool, terms ...string) (ComponentMa
 				continue
 			}
 			dockerImage := &imageapi.DockerImage{}
-			if err := kapi.Scheme.Convert(image, dockerImage, nil); err != nil {
+			if err := legacyscheme.Scheme.Convert(image, dockerImage, nil); err != nil {
 				errs = append(errs, err)
 				continue
 			}
@@ -178,7 +179,7 @@ func (r MissingImageSearcher) Search(precise bool, terms ...string) (ComponentMa
 }
 
 type ImageImportSearcher struct {
-	Client        client.ImageStreamInterface
+	Client        imageclient.ImageStreamImportInterface
 	AllowInsecure bool
 	Fallback      Searcher
 }
@@ -199,9 +200,9 @@ func (s ImageImportSearcher) Search(precise bool, terms ...string) (ComponentMat
 		})
 	}
 	isi.Name = "newapp"
-	result, err := s.Client.Import(isi)
+	result, err := s.Client.Create(isi)
 	if err != nil {
-		if err == client.ErrImageStreamImportUnsupported && s.Fallback != nil {
+		if err == imageapi.ErrImageStreamImportUnsupported && s.Fallback != nil {
 			return s.Fallback.Search(precise, terms...)
 		}
 		return nil, []error{fmt.Errorf("can't lookup images: %v", err)}
@@ -210,12 +211,19 @@ func (s ImageImportSearcher) Search(precise bool, terms ...string) (ComponentMat
 	componentMatches := ComponentMatches{}
 	for i, image := range result.Status.Images {
 		term := result.Spec.Images[i].From.Name
-		if image.Status.Status != unversioned.StatusSuccess {
+		if image.Status.Status != metav1.StatusSuccess {
 			glog.V(4).Infof("image import failed: %#v", image)
 			switch image.Status.Reason {
-			case unversioned.StatusReasonInternalError:
-				glog.Warningf("Docker registry lookup failed: %s", image.Status.Message)
-			case unversioned.StatusReasonInvalid, unversioned.StatusReasonUnauthorized, unversioned.StatusReasonNotFound:
+			case metav1.StatusReasonInternalError:
+				// try to find the cause of the internal error
+				if image.Status.Details != nil && len(image.Status.Details.Causes) > 0 {
+					for _, c := range image.Status.Details.Causes {
+						glog.Warningf("Docker registry lookup failed: %s", c.Message)
+					}
+				} else {
+					glog.Warningf("Docker registry lookup failed: %s", image.Status.Message)
+				}
+			case metav1.StatusReasonInvalid, metav1.StatusReasonUnauthorized, metav1.StatusReasonNotFound:
 			default:
 				errs = append(errs, fmt.Errorf("can't look up Docker image %q: %s", term, image.Status.Message))
 			}
@@ -309,7 +317,7 @@ func (r DockerRegistrySearcher) Search(precise bool, terms ...string) (Component
 		glog.V(4).Infof("found image: %#v", image)
 
 		dockerImage := &imageapi.DockerImage{}
-		if err = kapi.Scheme.Convert(&image.Image, dockerImage, nil); err != nil {
+		if err = legacyscheme.Scheme.Convert(&image.Image, dockerImage, nil); err != nil {
 			errs = append(errs, err)
 			continue
 		}

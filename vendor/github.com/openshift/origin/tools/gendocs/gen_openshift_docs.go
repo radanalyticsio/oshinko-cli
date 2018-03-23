@@ -7,9 +7,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/openshift/origin/pkg/cmd/admin"
-	"github.com/openshift/origin/pkg/cmd/cli"
+	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+
 	"github.com/openshift/origin/pkg/cmd/util/gendocs"
+	"github.com/openshift/origin/pkg/oc/cli"
 )
 
 func OutDir(path string) (string, error) {
@@ -48,9 +49,7 @@ func main() {
 	outFile := outDir + "oc_by_example_content.adoc"
 	out := os.Stdout
 	cmd := cli.NewCommandCLI("oc", "oc", &bytes.Buffer{}, out, ioutil.Discard)
-	gendocs.GenDocs(cmd, outFile)
+	kcmdutil.AddPrinterFlags(cmd)
 
-	outFile = outDir + "oadm_by_example_content.adoc"
-	cmd = admin.NewCommandAdmin("oadm", "oadm", &bytes.Buffer{}, ioutil.Discard, ioutil.Discard)
 	gendocs.GenDocs(cmd, outFile)
 }

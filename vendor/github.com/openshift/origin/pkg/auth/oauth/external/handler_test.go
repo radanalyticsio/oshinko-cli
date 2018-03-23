@@ -9,13 +9,13 @@ import (
 	"github.com/RangelReale/osincli"
 	"github.com/openshift/origin/pkg/auth/oauth/handlers"
 	"github.com/openshift/origin/pkg/auth/server/csrf"
-	"k8s.io/kubernetes/pkg/auth/user"
+	"k8s.io/apiserver/pkg/authentication/user"
 )
 
 func TestHandler(t *testing.T) {
 	redirectors := new(handlers.AuthenticationRedirectors)
 	redirectors.Add("handler", &Handler{})
-	_ = handlers.NewUnionAuthenticationHandler(nil, redirectors, nil, nil)
+	_ = handlers.NewUnionAuthenticationHandler(nil, redirectors, nil, nil, nil)
 }
 
 func TestRedirectingStateValidCSRF(t *testing.T) {

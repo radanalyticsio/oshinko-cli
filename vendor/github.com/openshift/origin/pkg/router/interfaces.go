@@ -1,11 +1,11 @@
 package router
 
 import (
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/util/sets"
-	"k8s.io/kubernetes/pkg/watch"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/watch"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 
-	routeapi "github.com/openshift/origin/pkg/route/api"
+	routeapi "github.com/openshift/origin/pkg/route/apis/route"
 )
 
 // Plugin is the interface the router controller dispatches watch events
@@ -16,5 +16,5 @@ type Plugin interface {
 	// If sent, filter the list of accepted routes and endpoints to this set
 	HandleNamespaces(namespaces sets.String) error
 	HandleNode(watch.EventType, *kapi.Node) error
-	SetLastSyncProcessed(processed bool) error
+	Commit() error
 }

@@ -1,17 +1,14 @@
 package identity
 
 import (
-	"fmt"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	apirequest "k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/apiserver/pkg/registry/rest"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/fields"
-	"k8s.io/kubernetes/pkg/labels"
-	"k8s.io/kubernetes/pkg/registry/generic"
-	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util/validation/field"
-
-	"github.com/openshift/origin/pkg/user/api"
-	"github.com/openshift/origin/pkg/user/api/validation"
+	userapi "github.com/openshift/origin/pkg/user/apis/user"
+	"github.com/openshift/origin/pkg/user/apis/user/validation"
 )
 
 // identityStrategy implements behavior for Identities
@@ -21,9 +18,15 @@ type identityStrategy struct {
 
 // Strategy is the default logic that applies when creating and updating Identity
 // objects via the REST API.
-var Strategy = identityStrategy{kapi.Scheme}
+var Strategy = identityStrategy{legacyscheme.Scheme}
 
-func (identityStrategy) PrepareForUpdate(ctx kapi.Context, obj, old runtime.Object) {}
+var _ rest.GarbageCollectionDeleteStrategy = identityStrategy{}
+
+func (identityStrategy) DefaultGarbageCollectionPolicy(ctx apirequest.Context) rest.GarbageCollectionPolicy {
+	return rest.Unsupported
+}
+
+func (identityStrategy) PrepareForUpdate(ctx apirequest.Context, obj, old runtime.Object) {}
 
 // NamespaceScoped is false for users
 func (identityStrategy) NamespaceScoped() bool {
@@ -34,14 +37,20 @@ func (identityStrategy) GenerateName(base string) string {
 	return base
 }
 
-func (identityStrategy) PrepareForCreate(ctx kapi.Context, obj runtime.Object) {
-	identity := obj.(*api.Identity)
+func (identityStrategy) PrepareForCreate(ctx apirequest.Context, obj runtime.Object) {
+	identity := obj.(*userapi.Identity)
 	identity.Name = identityName(identity.ProviderName, identity.ProviderUserName)
 }
 
+// this name cannot change since it must match resources persisted into etcd.
+func identityName(provider, identity string) string {
+	// TODO: normalize?
+	return provider + ":" + identity
+}
+
 // Validate validates a new user
-func (identityStrategy) Validate(ctx kapi.Context, obj runtime.Object) field.ErrorList {
-	identity := obj.(*api.Identity)
+func (identityStrategy) Validate(ctx apirequest.Context, obj runtime.Object) field.ErrorList {
+	identity := obj.(*userapi.Identity)
 	return validation.ValidateIdentity(identity)
 }
 
@@ -59,26 +68,6 @@ func (identityStrategy) Canonicalize(obj runtime.Object) {
 }
 
 // ValidateUpdate is the default update validation for an identity
-func (identityStrategy) ValidateUpdate(ctx kapi.Context, obj, old runtime.Object) field.ErrorList {
-	return validation.ValidateIdentityUpdate(obj.(*api.Identity), old.(*api.Identity))
-}
-
-// Matcher returns a generic matcher for a given label and field selector.
-func Matcher(label labels.Selector, field fields.Selector) *generic.SelectionPredicate {
-	return &generic.SelectionPredicate{
-		Label: label,
-		Field: field,
-		GetAttrs: func(o runtime.Object) (labels.Set, fields.Set, error) {
-			obj, ok := o.(*api.Identity)
-			if !ok {
-				return nil, nil, fmt.Errorf("not an Identity")
-			}
-			return labels.Set(obj.Labels), SelectableFields(obj), nil
-		},
-	}
-}
-
-// SelectableFields returns a field set that can be used for filter selection
-func SelectableFields(obj *api.Identity) fields.Set {
-	return api.IdentityToSelectableFields(obj)
+func (identityStrategy) ValidateUpdate(ctx apirequest.Context, obj, old runtime.Object) field.ErrorList {
+	return validation.ValidateIdentityUpdate(obj.(*userapi.Identity), old.(*userapi.Identity))
 }

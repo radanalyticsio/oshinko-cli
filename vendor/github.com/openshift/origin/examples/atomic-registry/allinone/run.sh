@@ -6,7 +6,7 @@
 # $1 - The URL to check
 # $2 - Optional prefix to use when echoing a successful result
 # $3 - Optional time to sleep between attempts (Default: 0.2s)
-# $4 - Optional number of attemps to make (Default: 10)
+# $4 - Optional number of attempts to make (Default: 10)
 # attribution: openshift/origin hack/util.sh
 function wait_for_url {
 	url=$1
@@ -52,7 +52,7 @@ echo "Starting registry services..."
 
 set -x
 
-$CMD oadm registry --latest-images=true
+$CMD oc adm registry --latest-images=true
 # we're hacking the service to use a node port to reduce deployment complexity
 $CMD oc patch service docker-registry -p \
      '{ "spec": { "type": "NodePort", "selector": {"docker-registry": "default"}, "ports": [ {"nodePort": 5000, "port": 5000, "targetPort": 5000}] }}'

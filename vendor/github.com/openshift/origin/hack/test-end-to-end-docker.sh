@@ -2,7 +2,6 @@
 
 # This script tests the high level end-to-end functionality demonstrated
 # as part of the examples/sample-app
-STARTTIME=$(date +%s)
 source "$(dirname "${BASH_SOURCE}")/lib/init.sh"
 
 os::log::info "Starting containerized end-to-end test"
@@ -10,61 +9,50 @@ os::log::info "Starting containerized end-to-end test"
 unset KUBECONFIG
 
 os::util::environment::use_sudo
-os::util::environment::setup_all_server_vars "test-end-to-end-docker/"
+os::cleanup::tmpdir
+os::util::environment::setup_all_server_vars
+os::util::environment::setup_time_vars
+export HOME="${FAKE_HOME_DIR}"
 
-function cleanup()
-{
-	out=$?
-	echo
-	if [ $out -ne 0 ]; then
-		echo "[FAIL] !!!!! Test Failed !!!!"
-	else
-		os::log::info "Test Succeeded"
-	fi
-	echo
+function cleanup() {
+	return_code=$?
 
-	set +e
-	dump_container_logs
+	os::test::junit::generate_report
+	os::cleanup::all
 
-	# pull information out of the server log so that we can get failure management in jenkins to highlight it and
-	# really have it smack people in their logs.  This is a severe correctness problem
-    grep -a5 "CACHE.*ALTERED" ${LOG_DIR}/container-origin.log
-
-	os::cleanup::dump_etcd
-
-	if [[ -z "${SKIP_TEARDOWN-}" ]]; then
-		os::log::info "remove the openshift container"
-		docker stop origin
-		docker rm origin
-
-		os::log::info "Stopping k8s docker containers"; docker ps | awk 'index($NF,"k8s_")==1 { print $1 }' | xargs -l -r docker stop
-		if [[ -z "${SKIP_IMAGE_CLEANUP-}" ]]; then
-			os::log::info "Removing k8s docker containers"; docker ps -a | awk 'index($NF,"k8s_")==1 { print $1 }' | xargs -l -r docker rm
-		fi
-		set -u
+	# restore journald to previous form
+	if os::util::ensure::system_binary_exists 'systemctl'; then
+		os::log::info "Restoring journald limits"
+		${USE_SUDO:+sudo} mv /etc/systemd/{journald.conf.bak,journald.conf}
+		${USE_SUDO:+sudo} systemctl restart systemd-journald.service
+		# Docker has "some" problems when journald is restarted, so we need to
+		# restart docker, as well.
+		${USE_SUDO:+sudo} systemctl restart docker.service
 	fi
 
-	journalctl --unit docker.service --since -15minutes > "${LOG_DIR}/docker.log"
-
-	delete_empty_logs
-	truncate_large_logs
-	set -e
-
-	os::log::info "Exiting"
-	ENDTIME=$(date +%s); echo "$0 took $(($ENDTIME - $STARTTIME)) seconds"
-	exit $out
+	os::util::describe_return_code "${return_code}"
+	exit "${return_code}"
 }
-
-trap "cleanup" EXIT INT TERM
+trap "cleanup" EXIT
 
 os::log::system::start
 
-out=$(
-	set +e
-	docker stop origin 2>&1
-	docker rm origin 2>&1
-	set -e
-)
+# This turns-off rate limiting in journald to bypass the problem from
+# https://github.com/openshift/origin/issues/12558.
+if os::util::ensure::system_binary_exists 'systemctl'; then
+	os::log::info "Turning off journald limits"
+	${USE_SUDO:+sudo} cp /etc/systemd/{journald.conf,journald.conf.bak}
+	os::util::sed "s/^.*RateLimitInterval.*$/RateLimitInterval=0/g" /etc/systemd/journald.conf
+	os::util::sed "s/^.*RateLimitBurst.*$/RateLimitBurst=0/g" /etc/systemd/journald.conf
+	${USE_SUDO:+sudo} systemctl restart systemd-journald.service
+	# Docker has "some" problems when journald is restarted, so we need to
+	# restart docker, as well.
+	${USE_SUDO:+sudo} systemctl restart docker.service
+fi
+
+# Tag the web console image with the same tag as the other origin images
+docker pull openshift/origin-web-console:latest
+docker tag openshift/origin-web-console:latest openshift/origin-web-console:${TAG}
 
 # Setup
 os::log::info "openshift version: `openshift version`"
@@ -76,7 +64,9 @@ oc cluster up --server-loglevel=4 --version="${TAG}" \
         --host-data-dir="${VOLUME_DIR}/etcd" \
         --host-volumes-dir="${VOLUME_DIR}"
 
-oc cluster status
+os::test::junit::declare_suite_start "setup/start-oc_cluster_up"
+os::cmd::try_until_success "oc cluster status" "$((5*TIME_MIN))" "10"
+os::test::junit::declare_suite_end
 
 IMAGE_WORKING_DIR=/var/lib/origin
 docker cp origin:${IMAGE_WORKING_DIR}/openshift.local.config ${BASETMPDIR}

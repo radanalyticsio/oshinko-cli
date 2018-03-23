@@ -6,24 +6,23 @@ import (
 	"strings"
 
 	"github.com/golang/glog"
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/errors"
-	"k8s.io/kubernetes/pkg/api/meta"
+	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/kubectl/resource"
-	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util/sets"
 
-	"github.com/openshift/origin/pkg/client"
 	"github.com/openshift/origin/pkg/template"
-	templateapi "github.com/openshift/origin/pkg/template/api"
+	templateapi "github.com/openshift/origin/pkg/template/apis/template"
+	templateclient "github.com/openshift/origin/pkg/template/generated/internalclientset/typed/template/internalversion"
 )
 
 // TemplateSearcher resolves stored template arguments into template objects
 type TemplateSearcher struct {
-	Client                    client.TemplatesNamespacer
-	TemplateConfigsNamespacer client.TemplateConfigsNamespacer
-	Namespaces                []string
-	StopOnExactMatch          bool
+	Client           templateclient.TemplatesGetter
+	Namespaces       []string
+	StopOnExactMatch bool
 }
 
 // Search searches for a template and returns matches with the object representation
@@ -53,7 +52,7 @@ func (r TemplateSearcher) Search(precise bool, terms ...string) (ComponentMatche
 			}
 			checkedNamespaces.Insert(namespace)
 
-			templates, err := r.Client.Templates(namespace).List(kapi.ListOptions{})
+			templates, err := r.Client.Templates(namespace).List(metav1.ListOptions{})
 			if err != nil {
 				if errors.IsNotFound(err) || errors.IsForbidden(err) {
 					continue
@@ -95,19 +94,17 @@ func (r TemplateSearcher) Search(precise bool, terms ...string) (ComponentMatche
 }
 
 // IsPossibleTemplateFile returns true if the argument can be a template file
-func IsPossibleTemplateFile(value string) bool {
+func IsPossibleTemplateFile(value string) (bool, error) {
 	return isFile(value)
 }
 
 // TemplateFileSearcher resolves template files into template objects
 type TemplateFileSearcher struct {
-	Mapper       meta.RESTMapper
-	Typer        runtime.ObjectTyper
-	ClientMapper resource.ClientMapper
-	Namespace    string
+	Builder   *resource.Builder
+	Namespace string
 }
 
-// Search attemps to read template files and transform it into template objects
+// Search attempts to read template files and transform it into template objects
 func (r *TemplateFileSearcher) Search(precise bool, terms ...string) (ComponentMatches, []error) {
 	matches := ComponentMatches{}
 	var errs []error
@@ -117,17 +114,20 @@ func (r *TemplateFileSearcher) Search(precise bool, terms ...string) (ComponentM
 			continue
 		}
 
-		var isSingular bool
-		obj, err := resource.NewBuilder(r.Mapper, r.Typer, r.ClientMapper, kapi.Codecs.UniversalDecoder()).
+		var isSingleItemImplied bool
+		obj, err := r.Builder.
+			Internal().
 			NamespaceParam(r.Namespace).RequireNamespace().
-			FilenameParam(false, false, term).
+			FilenameParam(false, &resource.FilenameOptions{Recursive: false, Filenames: terms}).
 			Do().
-			IntoSingular(&isSingular).
+			IntoSingleItemImplied(&isSingleItemImplied).
 			Object()
 
 		if err != nil {
 			switch {
 			case strings.Contains(err.Error(), "does not exist") && strings.Contains(err.Error(), "the path"):
+				continue
+			case strings.Contains(err.Error(), "not a directory") && strings.Contains(err.Error(), "the path"):
 				continue
 			default:
 				if syntaxErr, ok := err.(*json.SyntaxError); ok {
@@ -138,14 +138,20 @@ func (r *TemplateFileSearcher) Search(precise bool, terms ...string) (ComponentM
 			}
 		}
 
-		if list, isList := obj.(*kapi.List); isList && !isSingular {
+		if list, isList := obj.(*kapi.List); isList && !isSingleItemImplied {
 			if len(list.Items) == 1 {
 				obj = list.Items[0]
-				isSingular = true
+				isSingleItemImplied = true
+			}
+		}
+		if list, isList := obj.(*v1.List); isList && !isSingleItemImplied {
+			if len(list.Items) == 1 {
+				obj = list.Items[0].Object
+				isSingleItemImplied = true
 			}
 		}
 
-		if !isSingular {
+		if !isSingleItemImplied {
 			errs = append(errs, fmt.Errorf("there is more than one object in %q", term))
 			continue
 		}

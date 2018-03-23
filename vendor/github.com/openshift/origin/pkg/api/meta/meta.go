@@ -3,11 +3,12 @@ package meta
 import (
 	"fmt"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util/validation/field"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 
-	buildapi "github.com/openshift/origin/pkg/build/api"
+	buildapi "github.com/openshift/origin/pkg/build/apis/build"
 )
 
 // ImageReferenceMutateFunc is passed a reference representing an image, and may alter
@@ -25,17 +26,99 @@ type ImageReferenceMutator interface {
 var errNoImageMutator = fmt.Errorf("No list of images available for this object")
 
 // GetImageReferenceMutator returns a mutator for the provided object, or an error if no
-// such mutator is defined.
-func GetImageReferenceMutator(obj runtime.Object) (ImageReferenceMutator, error) {
+// such mutator is defined. Only references that are different between obj and old will
+// be returned unless old is nil.
+func GetImageReferenceMutator(obj, old runtime.Object) (ImageReferenceMutator, error) {
 	switch t := obj.(type) {
 	case *buildapi.Build:
+		if oldT, ok := old.(*buildapi.Build); ok && oldT != nil {
+			return &buildSpecMutator{spec: &t.Spec.CommonSpec, oldSpec: &oldT.Spec.CommonSpec, path: field.NewPath("spec")}, nil
+		}
 		return &buildSpecMutator{spec: &t.Spec.CommonSpec, path: field.NewPath("spec")}, nil
 	case *buildapi.BuildConfig:
+		if oldT, ok := old.(*buildapi.BuildConfig); ok && oldT != nil {
+			return &buildSpecMutator{spec: &t.Spec.CommonSpec, oldSpec: &oldT.Spec.CommonSpec, path: field.NewPath("spec")}, nil
+		}
 		return &buildSpecMutator{spec: &t.Spec.CommonSpec, path: field.NewPath("spec")}, nil
 	default:
 		if spec, path, err := GetPodSpec(obj); err == nil {
-			return &podSpecMutator{spec: spec, path: path}, nil
+			if old == nil {
+				return &podSpecMutator{spec: spec, path: path}, nil
+			}
+			oldSpec, _, err := GetPodSpec(old)
+			if err != nil {
+				return nil, fmt.Errorf("old and new pod spec objects were not of the same type %T != %T: %v", obj, old, err)
+			}
+			return &podSpecMutator{spec: spec, oldSpec: oldSpec, path: path}, nil
+		}
+		if spec, path, err := GetPodSpecV1(obj); err == nil {
+			if old == nil {
+				return &podSpecV1Mutator{spec: spec, path: path}, nil
+			}
+			oldSpec, _, err := GetPodSpecV1(old)
+			if err != nil {
+				return nil, fmt.Errorf("old and new pod spec objects were not of the same type %T != %T: %v", obj, old, err)
+			}
+			return &podSpecV1Mutator{spec: spec, oldSpec: oldSpec, path: path}, nil
 		}
 		return nil, errNoImageMutator
+	}
+}
+
+type pairwiseMutator struct {
+	newer ImageReferenceMutator
+	older ImageReferenceMutator
+}
+
+type AnnotationAccessor interface {
+	// Annotations returns a map representing annotations. Not mutable.
+	Annotations() map[string]string
+	// SetAnnotations sets representing annotations onto the object.
+	SetAnnotations(map[string]string)
+	// TemplateAnnotations returns a map representing annotations on a nested template in the object. Not mutable.
+	// If no template is present bool will be false.
+	TemplateAnnotations() (map[string]string, bool)
+	// SetTemplateAnnotations sets annotations on a nested template in the object.
+	// If no template is present bool will be false.
+	SetTemplateAnnotations(map[string]string) bool
+}
+
+type annotationsAccessor struct {
+	object   metav1.Object
+	template metav1.Object
+}
+
+func (a annotationsAccessor) Annotations() map[string]string {
+	return a.object.GetAnnotations()
+}
+
+func (a annotationsAccessor) TemplateAnnotations() (map[string]string, bool) {
+	if a.template == nil {
+		return nil, false
+	}
+	return a.template.GetAnnotations(), true
+}
+
+func (a annotationsAccessor) SetAnnotations(annotations map[string]string) {
+	a.object.SetAnnotations(annotations)
+}
+
+func (a annotationsAccessor) SetTemplateAnnotations(annotations map[string]string) bool {
+	if a.template == nil {
+		return false
+	}
+	a.template.SetAnnotations(annotations)
+	return true
+}
+
+// GetAnnotationAccessor returns an accessor for the provided object or false if the object
+// does not support accessing annotations.
+func GetAnnotationAccessor(obj runtime.Object) (AnnotationAccessor, bool) {
+	switch t := obj.(type) {
+	case metav1.Object:
+		templateObject, _ := GetTemplateMetaObject(obj)
+		return annotationsAccessor{object: t, template: templateObject}, true
+	default:
+		return nil, false
 	}
 }

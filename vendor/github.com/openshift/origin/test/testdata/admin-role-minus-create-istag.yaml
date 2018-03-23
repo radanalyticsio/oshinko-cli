@@ -87,10 +87,25 @@ rules:
   - update
   - watch
 - apiGroups:
+  - apps
+  attributeRestrictions: null
+  resources:
+  - statefulsets
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - batch
   attributeRestrictions: null
   resources:
   - jobs
+  - cronjobs
   verbs:
   - create
   - delete
@@ -104,8 +119,10 @@ rules:
   - extensions
   attributeRestrictions: null
   resources:
+  - deployments
   - horizontalpodautoscalers
   - jobs
+  - replicasets
   - replicationcontrollers/scale
   verbs:
   - create
@@ -126,6 +143,7 @@ rules:
   - list
   - watch
 - apiGroups:
+  - authorization.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -141,6 +159,7 @@ rules:
   - update
   - watch
 - apiGroups:
+  - authorization.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -149,6 +168,7 @@ rules:
   verbs:
   - create
 - apiGroups:
+  - authorization.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -159,6 +179,7 @@ rules:
   - list
   - watch
 - apiGroups:
+  - build.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -175,6 +196,7 @@ rules:
   - update
   - watch
 - apiGroups:
+  - build.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -184,6 +206,7 @@ rules:
   - list
   - watch
 - apiGroups:
+  - build.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -193,6 +216,7 @@ rules:
   verbs:
   - create
 - apiGroups:
+  - apps.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -211,6 +235,7 @@ rules:
   - update
   - watch
 - apiGroups:
+  - apps.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -221,6 +246,7 @@ rules:
   - list
   - watch
 - apiGroups:
+  - image.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -238,6 +264,7 @@ rules:
   - update
   - watch
 - apiGroups:
+  - image.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -247,6 +274,7 @@ rules:
   - list
   - watch
 - apiGroups:
+  - image.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -255,6 +283,7 @@ rules:
   - get
   - update
 - apiGroups:
+  - image.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -262,6 +291,7 @@ rules:
   verbs:
   - create
 - apiGroups:
+  - project.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -272,6 +302,7 @@ rules:
   - patch
   - update
 - apiGroups:
+  - quota.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -281,6 +312,7 @@ rules:
   - list
   - watch
 - apiGroups:
+  - route.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -295,6 +327,7 @@ rules:
   - update
   - watch
 - apiGroups:
+  - route.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -304,6 +337,7 @@ rules:
   - list
   - watch
 - apiGroups:
+  - route.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -311,6 +345,7 @@ rules:
   verbs:
   - update
 - apiGroups:
+  - template.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -327,6 +362,7 @@ rules:
   - update
   - watch
 - apiGroups:
+  - build.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -350,6 +386,7 @@ rules:
   - list
   - watch
 - apiGroups:
+  - authorization.openshift.io
   - ""
   attributeRestrictions: null
   resources:
@@ -358,6 +395,7 @@ rules:
   verbs:
   - create
 - apiGroups:
+  - image.openshift.io
   - ""
   attributeRestrictions: null
   resources:

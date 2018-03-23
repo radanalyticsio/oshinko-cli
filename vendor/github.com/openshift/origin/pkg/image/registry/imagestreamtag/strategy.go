@@ -3,15 +3,17 @@ package imagestreamtag
 import (
 	"fmt"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/fields"
-	"k8s.io/kubernetes/pkg/labels"
-	"k8s.io/kubernetes/pkg/registry/generic"
-	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util/validation/field"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	apirequest "k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/apiserver/pkg/registry/generic"
+	kstorage "k8s.io/apiserver/pkg/storage"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
 
-	"github.com/openshift/origin/pkg/image/api"
-	"github.com/openshift/origin/pkg/image/api/validation"
+	imageapi "github.com/openshift/origin/pkg/image/apis/image"
+	"github.com/openshift/origin/pkg/image/apis/image/validation"
 )
 
 // strategy implements behavior for ImageStreamTags.
@@ -20,26 +22,29 @@ type strategy struct {
 }
 
 var Strategy = &strategy{
-	ObjectTyper: kapi.Scheme,
+	ObjectTyper: legacyscheme.Scheme,
 }
 
 func (s *strategy) NamespaceScoped() bool {
 	return true
 }
 
-func (s *strategy) PrepareForCreate(ctx kapi.Context, obj runtime.Object) {
-	newIST := obj.(*api.ImageStreamTag)
-
+func (s *strategy) PrepareForCreate(ctx apirequest.Context, obj runtime.Object) {
+	newIST := obj.(*imageapi.ImageStreamTag)
+	if newIST.Tag != nil && len(newIST.Tag.Name) == 0 {
+		_, tag, _ := imageapi.SplitImageStreamTag(newIST.Name)
+		newIST.Tag.Name = tag
+	}
 	newIST.Conditions = nil
-	newIST.Image = api.Image{}
+	newIST.Image = imageapi.Image{}
 }
 
 func (s *strategy) GenerateName(base string) string {
 	return base
 }
 
-func (s *strategy) Validate(ctx kapi.Context, obj runtime.Object) field.ErrorList {
-	istag := obj.(*api.ImageStreamTag)
+func (s *strategy) Validate(ctx apirequest.Context, obj runtime.Object) field.ErrorList {
+	istag := obj.(*imageapi.ImageStreamTag)
 
 	return validation.ValidateImageStreamTag(istag)
 }
@@ -56,9 +61,9 @@ func (*strategy) AllowUnconditionalUpdate() bool {
 func (strategy) Canonicalize(obj runtime.Object) {
 }
 
-func (s *strategy) PrepareForUpdate(ctx kapi.Context, obj, old runtime.Object) {
-	newIST := obj.(*api.ImageStreamTag)
-	oldIST := old.(*api.ImageStreamTag)
+func (s *strategy) PrepareForUpdate(ctx apirequest.Context, obj, old runtime.Object) {
+	newIST := obj.(*imageapi.ImageStreamTag)
+	oldIST := old.(*imageapi.ImageStreamTag)
 
 	// for backwards compatibility, callers can't be required to set both annotation locations when
 	// doing a GET and then update.
@@ -70,29 +75,29 @@ func (s *strategy) PrepareForUpdate(ctx kapi.Context, obj, old runtime.Object) {
 	newIST.Image = oldIST.Image
 }
 
-func (s *strategy) ValidateUpdate(ctx kapi.Context, obj, old runtime.Object) field.ErrorList {
-	newIST := obj.(*api.ImageStreamTag)
-	oldIST := old.(*api.ImageStreamTag)
+func (s *strategy) ValidateUpdate(ctx apirequest.Context, obj, old runtime.Object) field.ErrorList {
+	newIST := obj.(*imageapi.ImageStreamTag)
+	oldIST := old.(*imageapi.ImageStreamTag)
 
 	return validation.ValidateImageStreamTagUpdate(newIST, oldIST)
 }
 
 // MatchImageStreamTag returns a generic matcher for a given label and field selector.
-func MatchImageStreamTag(label labels.Selector, field fields.Selector) generic.Matcher {
-	return &generic.SelectionPredicate{
+func MatchImageStreamTag(label labels.Selector, field fields.Selector) kstorage.SelectionPredicate {
+	return kstorage.SelectionPredicate{
 		Label: label,
 		Field: field,
-		GetAttrs: func(o runtime.Object) (labels.Set, fields.Set, error) {
-			obj, ok := o.(*api.ImageStreamTag)
+		GetAttrs: func(o runtime.Object) (labels.Set, fields.Set, bool, error) {
+			obj, ok := o.(*imageapi.ImageStreamTag)
 			if !ok {
-				return nil, nil, fmt.Errorf("not an ImageStreamTag")
+				return nil, nil, false, fmt.Errorf("not an ImageStreamTag")
 			}
-			return labels.Set(obj.Labels), SelectableFields(obj), nil
+			return labels.Set(obj.Labels), SelectableFields(obj), obj.Initializers != nil, nil
 		},
 	}
 }
 
 // SelectableFields returns a field set that can be used for filter selection
-func SelectableFields(obj *api.ImageStreamTag) fields.Set {
+func SelectableFields(obj *imageapi.ImageStreamTag) fields.Set {
 	return generic.ObjectMetaFieldsSet(&obj.ObjectMeta, true)
 }

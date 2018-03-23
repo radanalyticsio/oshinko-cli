@@ -3,103 +3,91 @@ package image
 import (
 	"fmt"
 
-	"k8s.io/kubernetes/pkg/admission"
-	kapi "k8s.io/kubernetes/pkg/api"
-	kerrors "k8s.io/kubernetes/pkg/api/errors"
-	"k8s.io/kubernetes/pkg/api/resource"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	kadmission "k8s.io/apiserver/pkg/admission"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 	kquota "k8s.io/kubernetes/pkg/quota"
 	"k8s.io/kubernetes/pkg/quota/generic"
-	"k8s.io/kubernetes/pkg/runtime"
-	utilruntime "k8s.io/kubernetes/pkg/util/runtime"
 
-	osclient "github.com/openshift/origin/pkg/client"
-	imageapi "github.com/openshift/origin/pkg/image/api"
+	imageapi "github.com/openshift/origin/pkg/image/apis/image"
+	imageclient "github.com/openshift/origin/pkg/image/generated/internalclientset/typed/image/internalversion"
+	imageinternalversion "github.com/openshift/origin/pkg/image/generated/listers/image/internalversion"
 )
 
-const imageStreamTagEvaluatorName = "Evaluator.ImageStreamTag"
+var imageStreamTagResources = []kapi.ResourceName{
+	imageapi.ResourceImageStreams,
+}
+
+type imageStreamTagEvaluator struct {
+	store     imageinternalversion.ImageStreamLister
+	istGetter imageclient.ImageStreamTagsGetter
+}
 
 // NewImageStreamTagEvaluator computes resource usage of ImageStreamsTags. Its sole purpose is to handle
 // UPDATE admission operations on imageStreamTags resource.
-func NewImageStreamTagEvaluator(istNamespacer osclient.ImageStreamTagsNamespacer, isNamespacer osclient.ImageStreamsNamespacer) kquota.Evaluator {
-	computeResources := []kapi.ResourceName{
-		imageapi.ResourceImageStreams,
-	}
-
-	matchesScopeFunc := func(kapi.ResourceQuotaScope, runtime.Object) bool { return true }
-	getFuncByNamespace := func(namespace, id string) (runtime.Object, error) {
-		isName, tag, err := imageapi.ParseImageStreamTagName(id)
-		if err != nil {
-			return nil, err
-		}
-
-		obj, err := istNamespacer.ImageStreamTags(namespace).Get(isName, tag)
-		if err != nil {
-			if !kerrors.IsNotFound(err) {
-				return nil, err
-			}
-			obj = &imageapi.ImageStreamTag{
-				ObjectMeta: kapi.ObjectMeta{
-					Namespace: namespace,
-					Name:      id,
-				},
-			}
-		}
-		return obj, nil
-	}
-
-	return &generic.GenericEvaluator{
-		Name:              imageStreamTagEvaluatorName,
-		InternalGroupKind: imageapi.Kind("ImageStreamTag"),
-		InternalOperationResources: map[admission.Operation][]kapi.ResourceName{
-			admission.Update: computeResources,
-			admission.Create: computeResources,
-		},
-		MatchedResourceNames: computeResources,
-		MatchesScopeFunc:     matchesScopeFunc,
-		UsageFunc:            makeImageStreamTagAdmissionUsageFunc(isNamespacer),
-		GetFuncByNamespace:   getFuncByNamespace,
-		ListFuncByNamespace: func(namespace string, options kapi.ListOptions) (runtime.Object, error) {
-			return &imageapi.ImageStreamTagList{}, nil
-		},
-		ConstraintsFunc: imageStreamTagConstraintsFunc,
+func NewImageStreamTagEvaluator(store imageinternalversion.ImageStreamLister, istGetter imageclient.ImageStreamTagsGetter) kquota.Evaluator {
+	return &imageStreamTagEvaluator{
+		store:     store,
+		istGetter: istGetter,
 	}
 }
 
-// imageStreamTagConstraintsFunc checks that given object is an image stream tag
-func imageStreamTagConstraintsFunc(required []kapi.ResourceName, object runtime.Object) error {
+// Constraints checks that given object is an image stream tag
+func (i *imageStreamTagEvaluator) Constraints(required []kapi.ResourceName, object runtime.Object) error {
 	if _, ok := object.(*imageapi.ImageStreamTag); !ok {
 		return fmt.Errorf("unexpected input object %v", object)
 	}
 	return nil
 }
 
-// makeImageStreamTagAdmissionUsageFunc returns a function that computes a resource usage for given image
-// stream tag during admission.
-func makeImageStreamTagAdmissionUsageFunc(isNamespacer osclient.ImageStreamsNamespacer) generic.UsageFunc {
-	return func(object runtime.Object) kapi.ResourceList {
-		ist, ok := object.(*imageapi.ImageStreamTag)
-		if !ok {
-			return kapi.ResourceList{}
-		}
+func (i *imageStreamTagEvaluator) GroupResource() schema.GroupResource {
+	return imageapi.Resource("imagestreamtags")
+}
 
-		res := map[kapi.ResourceName]resource.Quantity{
-			imageapi.ResourceImageStreams: *resource.NewQuantity(0, resource.BinarySI),
-		}
+func (i *imageStreamTagEvaluator) Handles(a kadmission.Attributes) bool {
+	operation := a.GetOperation()
+	return operation == kadmission.Create || operation == kadmission.Update
+}
 
-		isName, _, err := imageapi.ParseImageStreamTagName(ist.Name)
-		if err != nil {
-			utilruntime.HandleError(err)
-			return kapi.ResourceList{}
-		}
+func (i *imageStreamTagEvaluator) Matches(resourceQuota *kapi.ResourceQuota, item runtime.Object) (bool, error) {
+	matchesScopeFunc := func(kapi.ResourceQuotaScope, runtime.Object) (bool, error) { return true, nil }
+	return generic.Matches(resourceQuota, item, i.MatchingResources, matchesScopeFunc)
+}
 
-		is, err := isNamespacer.ImageStreams(ist.Namespace).Get(isName)
-		if err != nil && !kerrors.IsNotFound(err) {
-			utilruntime.HandleError(fmt.Errorf("failed to get image stream %s/%s: %v", ist.Namespace, isName, err))
-		}
-		if is == nil || kerrors.IsNotFound(err) {
-			res[imageapi.ResourceImageStreams] = *resource.NewQuantity(1, resource.BinarySI)
-		}
+func (i *imageStreamTagEvaluator) MatchingResources(input []kapi.ResourceName) []kapi.ResourceName {
+	return kquota.Intersection(input, imageStreamTagResources)
+}
 
-		return res
+func (i *imageStreamTagEvaluator) Usage(item runtime.Object) (kapi.ResourceList, error) {
+	ist, ok := item.(*imageapi.ImageStreamTag)
+	if !ok {
+		return kapi.ResourceList{}, nil
 	}
+
+	res := map[kapi.ResourceName]resource.Quantity{
+		imageapi.ResourceImageStreams: *resource.NewQuantity(0, resource.BinarySI),
+	}
+
+	isName, _, err := imageapi.ParseImageStreamTagName(ist.Name)
+	if err != nil {
+		return kapi.ResourceList{}, err
+	}
+
+	is, err := i.store.ImageStreams(ist.Namespace).Get(isName)
+	if err != nil && !kerrors.IsNotFound(err) {
+		utilruntime.HandleError(fmt.Errorf("failed to get image stream %s/%s: %v", ist.Namespace, isName, err))
+	}
+	if is == nil || kerrors.IsNotFound(err) {
+		res[imageapi.ResourceImageStreams] = *resource.NewQuantity(1, resource.BinarySI)
+	}
+
+	return res, nil
+}
+
+func (i *imageStreamTagEvaluator) UsageStats(options kquota.UsageStatsOptions) (kquota.UsageStats, error) {
+	return kquota.UsageStats{}, nil
 }

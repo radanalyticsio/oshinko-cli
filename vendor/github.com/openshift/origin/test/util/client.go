@@ -1,6 +1,7 @@
 package util
 
 import (
+	"encoding/base64"
 	"fmt"
 	"math/rand"
 	"os"
@@ -8,22 +9,25 @@ import (
 	"path/filepath"
 	"time"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	kerrs "k8s.io/kubernetes/pkg/api/errors"
-	"k8s.io/kubernetes/pkg/client/restclient"
-	kclient "k8s.io/kubernetes/pkg/client/unversioned"
-	"k8s.io/kubernetes/pkg/fields"
-	"k8s.io/kubernetes/pkg/quota"
-	"k8s.io/kubernetes/pkg/util/wait"
+	"github.com/pborman/uuid"
 
-	"github.com/openshift/origin/pkg/client"
+	kerrs "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/util/wait"
+	restclient "k8s.io/client-go/rest"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	kclientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
+	kcoreclient "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/typed/core/internalversion"
+	"k8s.io/kubernetes/pkg/quota"
+
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
-	"github.com/openshift/origin/pkg/cmd/server/origin"
 	cmdutil "github.com/openshift/origin/pkg/cmd/util"
-	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
-	"github.com/openshift/origin/pkg/cmd/util/tokencmd"
-	oauthapi "github.com/openshift/origin/pkg/oauth/api"
+	oauthapi "github.com/openshift/origin/pkg/oauth/apis/oauth"
+	oauthclient "github.com/openshift/origin/pkg/oauth/generated/internalclientset"
 	"github.com/openshift/origin/pkg/serviceaccounts"
+	userapi "github.com/openshift/origin/pkg/user/apis/user"
+	userclient "github.com/openshift/origin/pkg/user/generated/internalclientset"
 )
 
 // GetBaseDir returns the base directory used for test.
@@ -35,110 +39,137 @@ func KubeConfigPath() string {
 	return filepath.Join(GetBaseDir(), "openshift.local.config", "master", "admin.kubeconfig")
 }
 
-func GetClusterAdminKubeClient(adminKubeConfigFile string) (*kclient.Client, error) {
-	c, _, err := configapi.GetKubeClient(adminKubeConfigFile, nil)
+func GetClusterAdminKubeClient(adminKubeConfigFile string) (kclientset.Interface, error) {
+	c, _, err := configapi.GetInternalKubeClient(adminKubeConfigFile, nil)
 	if err != nil {
 		return nil, err
 	}
 	return c, nil
 }
 
-func GetClusterAdminClient(adminKubeConfigFile string) (*client.Client, error) {
-	clientConfig, err := GetClusterAdminClientConfig(adminKubeConfigFile)
-	if err != nil {
-		return nil, err
-	}
-	osClient, err := client.New(clientConfig)
-	if err != nil {
-		return nil, err
-	}
-	return osClient, nil
-}
-
 func GetClusterAdminClientConfig(adminKubeConfigFile string) (*restclient.Config, error) {
-	_, conf, err := configapi.GetKubeClient(adminKubeConfigFile, nil)
+	_, conf, err := configapi.GetInternalKubeClient(adminKubeConfigFile, nil)
 	if err != nil {
 		return nil, err
 	}
 	return conf, nil
 }
 
-func GetClientForUser(clientConfig restclient.Config, username string) (*client.Client, *kclient.Client, *restclient.Config, error) {
-	token, err := tokencmd.RequestToken(&clientConfig, nil, username, "password")
+// GetClusterAdminClientConfigOrDie returns a REST config for the cluster admin
+// user or panic.
+func GetClusterAdminClientConfigOrDie(adminKubeConfigFile string) *restclient.Config {
+	conf, err := GetClusterAdminClientConfig(adminKubeConfigFile)
 	if err != nil {
-		return nil, nil, nil, err
+		panic(err)
 	}
-
-	userClientConfig := clientcmd.AnonymousClientConfig(&clientConfig)
-	userClientConfig.BearerToken = token
-
-	kubeClient, err := kclient.New(&userClientConfig)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	osClient, err := client.New(&userClientConfig)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	return osClient, kubeClient, &userClientConfig, nil
+	return conf
 }
 
-func GetScopedClientForUser(adminClient *client.Client, clientConfig restclient.Config, username string, scopes []string) (*client.Client, *kclient.Client, *restclient.Config, error) {
-	// make sure the user exists
-	if _, _, _, err := GetClientForUser(clientConfig, username); err != nil {
-		return nil, nil, nil, err
-	}
-	user, err := adminClient.Users().Get(username)
+func GetClientForUser(clusterAdminConfig *restclient.Config, username string) (kclientset.Interface, *restclient.Config, error) {
+	userClient, err := userclient.NewForConfig(clusterAdminConfig)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
+	}
+
+	user, err := userClient.User().Users().Get(username, metav1.GetOptions{})
+	if err != nil {
+		user = &userapi.User{
+			ObjectMeta: metav1.ObjectMeta{Name: username},
+		}
+		user, err = userClient.User().Users().Create(user)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	oauthClient, err := oauthclient.NewForConfig(clusterAdminConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	oauthClientObj := &oauthapi.OAuthClient{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-integration-client"},
+	}
+	if _, err := oauthClient.Oauth().OAuthClients().Create(oauthClientObj); err != nil && !kerrs.IsAlreadyExists(err) {
+		return nil, nil, err
+	}
+
+	randomToken := uuid.NewRandom()
+	accesstoken := base64.RawURLEncoding.EncodeToString([]byte(randomToken))
+	for i := len(accesstoken); i < 32; i++ {
+		accesstoken = accesstoken + "A"
+	}
+	token := &oauthapi.OAuthAccessToken{
+		ObjectMeta: metav1.ObjectMeta{Name: accesstoken},
+		ClientName: oauthClientObj.Name,
+		UserName:   username,
+		UserUID:    string(user.UID),
+	}
+	if _, err := oauthClient.Oauth().OAuthAccessTokens().Create(token); err != nil {
+		return nil, nil, err
+	}
+
+	userClientConfig := restclient.AnonymousClientConfig(clusterAdminConfig)
+	userClientConfig.BearerToken = token.Name
+
+	kubeClientset, err := kclientset.NewForConfig(userClientConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return kubeClientset, userClientConfig, nil
+}
+
+func GetScopedClientForUser(clusterAdminClientConfig *restclient.Config, username string, scopes []string) (kclientset.Interface, *restclient.Config, error) {
+	// make sure the user exists
+	if _, _, err := GetClientForUser(clusterAdminClientConfig, username); err != nil {
+		return nil, nil, err
+	}
+	user, err := userclient.NewForConfigOrDie(clusterAdminClientConfig).User().Users().Get(username, metav1.GetOptions{})
+	if err != nil {
+		return nil, nil, err
 	}
 
 	token := &oauthapi.OAuthAccessToken{
-		ObjectMeta:  kapi.ObjectMeta{Name: fmt.Sprintf("%s-token-plus-some-padding-here-to-make-the-limit-%d", username, rand.Int())},
-		ClientName:  origin.OpenShiftCLIClientID,
+		ObjectMeta:  metav1.ObjectMeta{Name: fmt.Sprintf("%s-token-plus-some-padding-here-to-make-the-limit-%d", username, rand.Int())},
+		ClientName:  "openshift-challenging-client",
 		ExpiresIn:   86400,
 		Scopes:      scopes,
 		RedirectURI: "https://127.0.0.1:12000/oauth/token/implicit",
 		UserName:    user.Name,
 		UserUID:     string(user.UID),
 	}
-	if _, err := adminClient.OAuthAccessTokens().Create(token); err != nil {
-		return nil, nil, nil, err
+	if _, err := oauthclient.NewForConfigOrDie(clusterAdminClientConfig).Oauth().OAuthAccessTokens().Create(token); err != nil {
+		return nil, nil, err
 	}
 
-	scopedConfig := clientcmd.AnonymousClientConfig(&clientConfig)
+	scopedConfig := restclient.AnonymousClientConfig(clusterAdminClientConfig)
 	scopedConfig.BearerToken = token.Name
-	kubeClient, err := kclient.New(&scopedConfig)
+	kubeClient, err := kclientset.NewForConfig(scopedConfig)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	osClient, err := client.New(&scopedConfig)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return osClient, kubeClient, &scopedConfig, nil
+	return kubeClient, scopedConfig, nil
 }
 
-func GetClientForServiceAccount(adminClient *kclient.Client, clientConfig restclient.Config, namespace, name string) (*client.Client, *kclient.Client, *restclient.Config, error) {
-	_, err := adminClient.Namespaces().Create(&kapi.Namespace{ObjectMeta: kapi.ObjectMeta{Name: namespace}})
+func GetClientForServiceAccount(adminClient kclientset.Interface, clientConfig restclient.Config, namespace, name string) (*kclientset.Clientset, *restclient.Config, error) {
+	_, err := adminClient.Core().Namespaces().Create(&kapi.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}})
 	if err != nil && !kerrs.IsAlreadyExists(err) {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
-	sa, err := adminClient.ServiceAccounts(namespace).Create(&kapi.ServiceAccount{ObjectMeta: kapi.ObjectMeta{Name: name}})
+	sa, err := adminClient.Core().ServiceAccounts(namespace).Create(&kapi.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: name}})
 	if kerrs.IsAlreadyExists(err) {
-		sa, err = adminClient.ServiceAccounts(namespace).Get(name)
+		sa, err = adminClient.Core().ServiceAccounts(namespace).Get(name, metav1.GetOptions{})
 	}
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	token := ""
 	err = wait.Poll(time.Second, 30*time.Second, func() (bool, error) {
 		selector := fields.OneTermEqualSelector(kapi.SecretTypeField, string(kapi.SecretTypeServiceAccountToken))
-		secrets, err := adminClient.Secrets(namespace).List(kapi.ListOptions{FieldSelector: selector})
+		secrets, err := adminClient.Core().Secrets(namespace).List(metav1.ListOptions{FieldSelector: selector.String()})
 		if err != nil {
 			return false, err
 		}
@@ -151,29 +182,24 @@ func GetClientForServiceAccount(adminClient *kclient.Client, clientConfig restcl
 		return false, nil
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
-	saClientConfig := clientcmd.AnonymousClientConfig(&clientConfig)
+	saClientConfig := restclient.AnonymousClientConfig(&clientConfig)
 	saClientConfig.BearerToken = token
 
-	kubeClient, err := kclient.New(&saClientConfig)
+	kubeClientset, err := kclientset.NewForConfig(saClientConfig)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
-	osClient, err := client.New(&saClientConfig)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	return osClient, kubeClient, &saClientConfig, nil
+	return kubeClientset, saClientConfig, nil
 }
 
 // WaitForResourceQuotaSync watches given resource quota until its hard limit is updated to match the desired
 // spec or timeout occurs.
 func WaitForResourceQuotaLimitSync(
-	client kclient.ResourceQuotaInterface,
+	client kcoreclient.ResourceQuotaInterface,
 	name string,
 	hardLimit kapi.ResourceList,
 	timeout time.Duration,
@@ -184,7 +210,7 @@ func WaitForResourceQuotaLimitSync(
 
 	expectedResourceNames := quota.ResourceNames(hardLimit)
 
-	list, err := client.List(kapi.ListOptions{FieldSelector: fields.Set{"metadata.name": name}.AsSelector()})
+	list, err := client.List(metav1.ListOptions{FieldSelector: fields.Set{"metadata.name": name}.AsSelector().String()})
 	if err != nil {
 		return err
 	}
@@ -197,7 +223,7 @@ func WaitForResourceQuotaLimitSync(
 	}
 
 	rv := list.ResourceVersion
-	w, err := client.Watch(kapi.ListOptions{FieldSelector: fields.Set{"metadata.name": name}.AsSelector(), ResourceVersion: rv})
+	w, err := client.Watch(metav1.ListOptions{FieldSelector: fields.Set{"metadata.name": name}.AsSelector().String(), ResourceVersion: rv})
 	if err != nil {
 		return err
 	}

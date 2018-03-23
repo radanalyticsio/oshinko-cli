@@ -1,14 +1,12 @@
 package rulevalidation
 
 import (
-	"fmt"
 	"reflect"
 
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/sets"
 
-	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
+	authorizationapi "github.com/openshift/origin/pkg/authorization/apis/authorization"
 )
 
 // CompactRules combines rules that contain a single APIGroup/Resource, differ only by verb, and contain no other attributes.
@@ -16,7 +14,7 @@ import (
 func CompactRules(rules []authorizationapi.PolicyRule) ([]authorizationapi.PolicyRule, error) {
 	compacted := make([]authorizationapi.PolicyRule, 0, len(rules))
 
-	simpleRules := map[unversioned.GroupResource]*authorizationapi.PolicyRule{}
+	simpleRules := map[schema.GroupResource]*authorizationapi.PolicyRule{}
 	for _, rule := range rules {
 		if resource, isSimple := isSimpleResourceRule(&rule); isSimple {
 			if existingRule, ok := simpleRules[resource]; ok {
@@ -27,17 +25,8 @@ func CompactRules(rules []authorizationapi.PolicyRule) ([]authorizationapi.Polic
 				existingRule.Verbs.Insert(rule.Verbs.List()...)
 			} else {
 				// Copy the rule to accumulate matching simple resource rules into
-				objCopy, err := api.Scheme.DeepCopy(rule)
-				if err != nil {
-					// Unit tests ensure this should not ever happen
-					return nil, err
-				}
-				ruleCopy, ok := objCopy.(authorizationapi.PolicyRule)
-				if !ok {
-					// Unit tests ensure this should not ever happen
-					return nil, fmt.Errorf("expected authorizationapi.PolicyRule, got %#v", objCopy)
-				}
-				simpleRules[resource] = &ruleCopy
+				ruleCopy := rule.DeepCopy()
+				simpleRules[resource] = ruleCopy
 			}
 		} else {
 			compacted = append(compacted, rule)
@@ -53,8 +42,8 @@ func CompactRules(rules []authorizationapi.PolicyRule) ([]authorizationapi.Polic
 }
 
 // isSimpleResourceRule returns true if the given rule contains verbs, a single resource, a single API group, and no other values
-func isSimpleResourceRule(rule *authorizationapi.PolicyRule) (unversioned.GroupResource, bool) {
-	resource := unversioned.GroupResource{}
+func isSimpleResourceRule(rule *authorizationapi.PolicyRule) (schema.GroupResource, bool) {
+	resource := schema.GroupResource{}
 
 	// If we have "complex" rule attributes, return early without allocations or expensive comparisons
 	if len(rule.ResourceNames) > 0 || len(rule.NonResourceURLs) > 0 || rule.AttributeRestrictions != nil {
@@ -70,6 +59,6 @@ func isSimpleResourceRule(rule *authorizationapi.PolicyRule) (unversioned.GroupR
 	if !reflect.DeepEqual(simpleRule, rule) {
 		return resource, false
 	}
-	resource = unversioned.GroupResource{Group: rule.APIGroups[0], Resource: rule.Resources.List()[0]}
+	resource = schema.GroupResource{Group: rule.APIGroups[0], Resource: rule.Resources.List()[0]}
 	return resource, true
 }

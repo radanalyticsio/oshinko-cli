@@ -10,8 +10,8 @@ import (
 	"github.com/gonum/graph/concrete"
 	"github.com/gonum/graph/encoding/dot"
 
-	"k8s.io/kubernetes/pkg/api/meta"
-	"k8s.io/kubernetes/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 type Node struct {
@@ -668,26 +668,4 @@ func IsFromDifferentNamespace(namespace string, node graph.Node) bool {
 		return false
 	}
 	return object.GetNamespace() != namespace
-}
-
-func pathCovered(path []graph.Node, paths map[int][]graph.Node) bool {
-	l := len(path)
-	for _, existing := range paths {
-		if l >= len(existing) {
-			continue
-		}
-		if pathEqual(path, existing) {
-			return true
-		}
-	}
-	return false
-}
-
-func pathEqual(a, b []graph.Node) bool {
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

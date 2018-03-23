@@ -1,21 +1,3 @@
-/*
-Copyright 2014 The Kubernetes Authors All rights reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-Updated for Openshift CLI
-*/
-
 package main
 
 import (
@@ -25,9 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/openshift/origin/pkg/cmd/admin"
-	"github.com/openshift/origin/pkg/cmd/cli"
 	"github.com/openshift/origin/pkg/cmd/openshift"
+	"github.com/openshift/origin/pkg/oc/cli"
 	mangen "github.com/openshift/origin/tools/genman/md2man"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -36,7 +17,7 @@ import (
 
 func main() {
 	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "Root command not specified (oc | oadm | openshift).\n")
+		fmt.Fprintf(os.Stderr, "Root command not specified (oc | openshift).\n")
 		os.Exit(1)
 	}
 
@@ -44,10 +25,8 @@ func main() {
 		genCmdMan("oc", cli.NewCommandCLI("oc", "oc", &bytes.Buffer{}, os.Stdout, ioutil.Discard))
 	} else if strings.HasSuffix(os.Args[2], "openshift") {
 		genCmdMan("openshift", openshift.NewCommandOpenShift("openshift"))
-	} else if strings.HasSuffix(os.Args[2], "oadm") {
-		genCmdMan("oadm", admin.NewCommandAdmin("oadm", "oadm", &bytes.Buffer{}, os.Stdout, ioutil.Discard))
 	} else {
-		fmt.Fprintf(os.Stderr, "Root command not specified (os | oadm | openshift).")
+		fmt.Fprintf(os.Stderr, "Root command not specified (oc | openshift).")
 		os.Exit(1)
 	}
 }
