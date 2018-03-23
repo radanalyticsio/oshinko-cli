@@ -1,12 +1,31 @@
 package date
 
+// Copyright 2017 Microsoft Corporation
+//
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
+
 import (
+	"regexp"
 	"time"
 )
 
+// Azure reports time in UTC but it doesn't include the 'Z' time zone suffix in some cases.
 const (
-	rfc3339JSON = `"` + time.RFC3339Nano + `"`
-	rfc3339     = time.RFC3339Nano
+	azureUtcFormatJSON = `"2006-01-02T15:04:05.999999999"`
+	azureUtcFormat     = "2006-01-02T15:04:05.999999999"
+	rfc3339JSON        = `"` + time.RFC3339Nano + `"`
+	rfc3339            = time.RFC3339Nano
+	tzOffsetRegex      = `(Z|z|\+|-)(\d+:\d+)*"*$`
 )
 
 // Time defines a type similar to time.Time but assumes a layout of RFC3339 date-time (i.e.,
@@ -36,7 +55,14 @@ func (t Time) MarshalJSON() (json []byte, err error) {
 // UnmarshalJSON reconstitutes the Time from a JSON string conforming to RFC3339 date-time
 // (i.e., 2006-01-02T15:04:05Z).
 func (t *Time) UnmarshalJSON(data []byte) (err error) {
-	t.Time, err = ParseTime(rfc3339JSON, string(data))
+	timeFormat := azureUtcFormatJSON
+	match, err := regexp.Match(tzOffsetRegex, data)
+	if err != nil {
+		return err
+	} else if match {
+		timeFormat = rfc3339JSON
+	}
+	t.Time, err = ParseTime(timeFormat, string(data))
 	return err
 }
 
@@ -49,7 +75,14 @@ func (t Time) MarshalText() (text []byte, err error) {
 // UnmarshalText reconstitutes a Time saved as a byte array conforming to RFC3339 date-time
 // (i.e., 2006-01-02T15:04:05Z).
 func (t *Time) UnmarshalText(data []byte) (err error) {
-	t.Time, err = ParseTime(rfc3339, string(data))
+	timeFormat := azureUtcFormat
+	match, err := regexp.Match(tzOffsetRegex, data)
+	if err != nil {
+		return err
+	} else if match {
+		timeFormat = rfc3339
+	}
+	t.Time, err = ParseTime(timeFormat, string(data))
 	return err
 }
 
