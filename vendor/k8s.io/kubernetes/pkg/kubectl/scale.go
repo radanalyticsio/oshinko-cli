@@ -21,16 +21,22 @@ import (
 	"strconv"
 	"time"
 
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/errors"
-	"k8s.io/kubernetes/pkg/api/unversioned"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/kubernetes/pkg/apis/apps"
 	"k8s.io/kubernetes/pkg/apis/batch"
+	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/extensions"
+	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
+	appsclient "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/typed/apps/internalversion"
+	batchclient "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/typed/batch/internalversion"
+	coreclient "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/typed/core/internalversion"
+	extensionsclient "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/typed/extensions/internalversion"
 	client "k8s.io/kubernetes/pkg/client/unversioned"
-	"k8s.io/kubernetes/pkg/fields"
-	"k8s.io/kubernetes/pkg/util/wait"
-	"k8s.io/kubernetes/pkg/watch"
 )
 
 // Scaler provides an interface for resources that can be scaled.
@@ -44,17 +50,17 @@ type Scaler interface {
 	ScaleSimple(namespace, name string, preconditions *ScalePrecondition, newSize uint) (updatedResourceVersion string, err error)
 }
 
-func ScalerFor(kind unversioned.GroupKind, c client.Interface) (Scaler, error) {
+func ScalerFor(kind schema.GroupKind, c internalclientset.Interface) (Scaler, error) {
 	switch kind {
 	case api.Kind("ReplicationController"):
-		return &ReplicationControllerScaler{c}, nil
-	case extensions.Kind("ReplicaSet"):
+		return &ReplicationControllerScaler{c.Core()}, nil
+	case extensions.Kind("ReplicaSet"), apps.Kind("ReplicaSet"):
 		return &ReplicaSetScaler{c.Extensions()}, nil
-	case extensions.Kind("Job"), batch.Kind("Job"):
+	case batch.Kind("Job"):
 		return &JobScaler{c.Batch()}, nil // Either kind of job can be scaled with Batch interface.
-	case apps.Kind("PetSet"):
-		return &PetSetScaler{c.Apps()}, nil
-	case extensions.Kind("Deployment"):
+	case apps.Kind("StatefulSet"):
+		return &StatefulSetScaler{c.Apps()}, nil
+	case extensions.Kind("Deployment"), apps.Kind("Deployment"):
 		return &DeploymentScaler{c.Extensions()}, nil
 	}
 	return nil, fmt.Errorf("no scaler has been implemented for %q", kind)
@@ -98,9 +104,11 @@ type ScaleError struct {
 }
 
 func (c ScaleError) Error() string {
-	return fmt.Sprintf(
-		"Scaling the resource failed with: %v; Current resource version %s",
-		c.ActualError, c.ResourceVersion)
+	msg := fmt.Sprintf("Scaling the resource failed with: %v", c.ActualError)
+	if len(c.ResourceVersion) > 0 {
+		msg += fmt.Sprintf("; Current resource version %s", c.ResourceVersion)
+	}
+	return msg
 }
 
 // RetryParams encapsulates the retry parameters used by kubectl's scaler.
@@ -132,8 +140,8 @@ func ScaleCondition(r Scaler, precondition *ScalePrecondition, namespace, name s
 	}
 }
 
-// ValidatePetSet ensures that the preconditions match. Returns nil if they are valid, an error otherwise.
-func (precondition *ScalePrecondition) ValidatePetSet(ps *apps.PetSet) error {
+// ValidateStatefulSet ensures that the preconditions match. Returns nil if they are valid, an error otherwise.
+func (precondition *ScalePrecondition) ValidateStatefulSet(ps *apps.StatefulSet) error {
 	if precondition.Size != -1 && int(ps.Spec.Replicas) != precondition.Size {
 		return PreconditionError{"replicas", strconv.Itoa(precondition.Size), strconv.Itoa(int(ps.Spec.Replicas))}
 	}
@@ -155,15 +163,15 @@ func (precondition *ScalePrecondition) ValidateReplicationController(controller 
 }
 
 type ReplicationControllerScaler struct {
-	c client.Interface
+	c coreclient.ReplicationControllersGetter
 }
 
 // ScaleSimple does a simple one-shot attempt at scaling. It returns the
 // resourceVersion of the replication controller if the update is successful.
 func (scaler *ReplicationControllerScaler) ScaleSimple(namespace, name string, preconditions *ScalePrecondition, newSize uint) (string, error) {
-	controller, err := scaler.c.ReplicationControllers(namespace).Get(name)
+	controller, err := scaler.c.ReplicationControllers(namespace).Get(name, metav1.GetOptions{})
 	if err != nil {
-		return "", ScaleError{ScaleGetFailure, "Unknown", err}
+		return "", ScaleError{ScaleGetFailure, "", err}
 	}
 	if preconditions != nil {
 		if err := preconditions.ValidateReplicationController(controller); err != nil {
@@ -213,13 +221,13 @@ func (scaler *ReplicationControllerScaler) Scale(namespace, name string, newSize
 		// will be deliver, since it may already be in the expected state.
 		// To protect from these two, we first issue Get() to ensure that we
 		// are not already in the expected state.
-		currentRC, err := scaler.c.ReplicationControllers(namespace).Get(name)
+		currentRC, err := scaler.c.ReplicationControllers(namespace).Get(name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
 		if !checkRC(currentRC) {
-			watchOptions := api.ListOptions{
-				FieldSelector:   fields.OneTermEqualSelector("metadata.name", name),
+			watchOptions := metav1.ListOptions{
+				FieldSelector:   fields.OneTermEqualSelector("metadata.name", name).String(),
 				ResourceVersion: updatedResourceVersion,
 			}
 			watcher, err := scaler.c.ReplicationControllers(namespace).Watch(watchOptions)
@@ -253,15 +261,15 @@ func (precondition *ScalePrecondition) ValidateReplicaSet(replicaSet *extensions
 }
 
 type ReplicaSetScaler struct {
-	c client.ExtensionsInterface
+	c extensionsclient.ReplicaSetsGetter
 }
 
 // ScaleSimple does a simple one-shot attempt at scaling. It returns the
 // resourceVersion of the replicaset if the update is successful.
 func (scaler *ReplicaSetScaler) ScaleSimple(namespace, name string, preconditions *ScalePrecondition, newSize uint) (string, error) {
-	rs, err := scaler.c.ReplicaSets(namespace).Get(name)
+	rs, err := scaler.c.ReplicaSets(namespace).Get(name, metav1.GetOptions{})
 	if err != nil {
-		return "", ScaleError{ScaleGetFailure, "Unknown", err}
+		return "", ScaleError{ScaleGetFailure, "", err}
 	}
 	if preconditions != nil {
 		if err := preconditions.ValidateReplicaSet(rs); err != nil {
@@ -295,9 +303,12 @@ func (scaler *ReplicaSetScaler) Scale(namespace, name string, newSize uint, prec
 		return err
 	}
 	if waitForReplicas != nil {
-		rs, err := scaler.c.ReplicaSets(namespace).Get(name)
+		rs, err := scaler.c.ReplicaSets(namespace).Get(name, metav1.GetOptions{})
 		if err != nil {
 			return err
+		}
+		if rs.Initializers != nil {
+			return nil
 		}
 		err = wait.Poll(waitForReplicas.Interval, waitForReplicas.Timeout, client.ReplicaSetHasDesiredReplicas(scaler.c, rs))
 
@@ -323,34 +334,34 @@ func (precondition *ScalePrecondition) ValidateJob(job *batch.Job) error {
 	return nil
 }
 
-type PetSetScaler struct {
-	c client.AppsInterface
+type StatefulSetScaler struct {
+	c appsclient.StatefulSetsGetter
 }
 
 // ScaleSimple does a simple one-shot attempt at scaling. It returns the
-// resourceVersion of the petset if the update is successful.
-func (scaler *PetSetScaler) ScaleSimple(namespace, name string, preconditions *ScalePrecondition, newSize uint) (string, error) {
-	ps, err := scaler.c.PetSets(namespace).Get(name)
+// resourceVersion of the statefulset if the update is successful.
+func (scaler *StatefulSetScaler) ScaleSimple(namespace, name string, preconditions *ScalePrecondition, newSize uint) (string, error) {
+	ss, err := scaler.c.StatefulSets(namespace).Get(name, metav1.GetOptions{})
 	if err != nil {
-		return "", ScaleError{ScaleGetFailure, "Unknown", err}
+		return "", ScaleError{ScaleGetFailure, "", err}
 	}
 	if preconditions != nil {
-		if err := preconditions.ValidatePetSet(ps); err != nil {
+		if err := preconditions.ValidateStatefulSet(ss); err != nil {
 			return "", err
 		}
 	}
-	ps.Spec.Replicas = int(newSize)
-	updatedPetSet, err := scaler.c.PetSets(namespace).Update(ps)
+	ss.Spec.Replicas = int32(newSize)
+	updatedStatefulSet, err := scaler.c.StatefulSets(namespace).Update(ss)
 	if err != nil {
 		if errors.IsConflict(err) {
-			return "", ScaleError{ScaleUpdateConflictFailure, ps.ResourceVersion, err}
+			return "", ScaleError{ScaleUpdateConflictFailure, ss.ResourceVersion, err}
 		}
-		return "", ScaleError{ScaleUpdateFailure, ps.ResourceVersion, err}
+		return "", ScaleError{ScaleUpdateFailure, ss.ResourceVersion, err}
 	}
-	return updatedPetSet.ResourceVersion, nil
+	return updatedStatefulSet.ResourceVersion, nil
 }
 
-func (scaler *PetSetScaler) Scale(namespace, name string, newSize uint, preconditions *ScalePrecondition, retry, waitForReplicas *RetryParams) error {
+func (scaler *StatefulSetScaler) Scale(namespace, name string, newSize uint, preconditions *ScalePrecondition, retry, waitForReplicas *RetryParams) error {
 	if preconditions == nil {
 		preconditions = &ScalePrecondition{-1, ""}
 	}
@@ -363,11 +374,14 @@ func (scaler *PetSetScaler) Scale(namespace, name string, newSize uint, precondi
 		return err
 	}
 	if waitForReplicas != nil {
-		job, err := scaler.c.PetSets(namespace).Get(name)
+		job, err := scaler.c.StatefulSets(namespace).Get(name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
-		err = wait.Poll(waitForReplicas.Interval, waitForReplicas.Timeout, client.PetSetHasDesiredPets(scaler.c, job))
+		if job.Initializers != nil {
+			return nil
+		}
+		err = wait.Poll(waitForReplicas.Interval, waitForReplicas.Timeout, client.StatefulSetHasDesiredReplicas(scaler.c, job))
 		if err == wait.ErrWaitTimeout {
 			return fmt.Errorf("timed out waiting for %q to be synced", name)
 		}
@@ -377,15 +391,15 @@ func (scaler *PetSetScaler) Scale(namespace, name string, newSize uint, precondi
 }
 
 type JobScaler struct {
-	c client.BatchInterface
+	c batchclient.JobsGetter
 }
 
 // ScaleSimple is responsible for updating job's parallelism. It returns the
 // resourceVersion of the job if the update is successful.
 func (scaler *JobScaler) ScaleSimple(namespace, name string, preconditions *ScalePrecondition, newSize uint) (string, error) {
-	job, err := scaler.c.Jobs(namespace).Get(name)
+	job, err := scaler.c.Jobs(namespace).Get(name, metav1.GetOptions{})
 	if err != nil {
-		return "", ScaleError{ScaleGetFailure, "Unknown", err}
+		return "", ScaleError{ScaleGetFailure, "", err}
 	}
 	if preconditions != nil {
 		if err := preconditions.ValidateJob(job); err != nil {
@@ -394,14 +408,14 @@ func (scaler *JobScaler) ScaleSimple(namespace, name string, preconditions *Scal
 	}
 	parallelism := int32(newSize)
 	job.Spec.Parallelism = &parallelism
-	udpatedJob, err := scaler.c.Jobs(namespace).Update(job)
+	updatedJob, err := scaler.c.Jobs(namespace).Update(job)
 	if err != nil {
 		if errors.IsConflict(err) {
 			return "", ScaleError{ScaleUpdateConflictFailure, job.ResourceVersion, err}
 		}
 		return "", ScaleError{ScaleUpdateFailure, job.ResourceVersion, err}
 	}
-	return udpatedJob.ObjectMeta.ResourceVersion, nil
+	return updatedJob.ObjectMeta.ResourceVersion, nil
 }
 
 // Scale updates a Job to a new size, with optional precondition check (if preconditions is not nil),
@@ -420,7 +434,7 @@ func (scaler *JobScaler) Scale(namespace, name string, newSize uint, preconditio
 		return err
 	}
 	if waitForReplicas != nil {
-		job, err := scaler.c.Jobs(namespace).Get(name)
+		job, err := scaler.c.Jobs(namespace).Get(name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -445,16 +459,16 @@ func (precondition *ScalePrecondition) ValidateDeployment(deployment *extensions
 }
 
 type DeploymentScaler struct {
-	c client.ExtensionsInterface
+	c extensionsclient.DeploymentsGetter
 }
 
 // ScaleSimple is responsible for updating a deployment's desired replicas
 // count. It returns the resourceVersion of the deployment if the update is
 // successful.
 func (scaler *DeploymentScaler) ScaleSimple(namespace, name string, preconditions *ScalePrecondition, newSize uint) (string, error) {
-	deployment, err := scaler.c.Deployments(namespace).Get(name)
+	deployment, err := scaler.c.Deployments(namespace).Get(name, metav1.GetOptions{})
 	if err != nil {
-		return "", ScaleError{ScaleGetFailure, "Unknown", err}
+		return "", ScaleError{ScaleGetFailure, "", err}
 	}
 	if preconditions != nil {
 		if err := preconditions.ValidateDeployment(deployment); err != nil {
@@ -490,7 +504,7 @@ func (scaler *DeploymentScaler) Scale(namespace, name string, newSize uint, prec
 		return err
 	}
 	if waitForReplicas != nil {
-		deployment, err := scaler.c.Deployments(namespace).Get(name)
+		deployment, err := scaler.c.Deployments(namespace).Get(name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}

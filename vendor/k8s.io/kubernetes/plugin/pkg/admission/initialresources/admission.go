@@ -24,13 +24,11 @@ import (
 	"strings"
 	"time"
 
-	clientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
-
 	"github.com/golang/glog"
-	"k8s.io/kubernetes/pkg/admission"
-	"k8s.io/kubernetes/pkg/api"
-	apierrors "k8s.io/kubernetes/pkg/api/errors"
-	"k8s.io/kubernetes/pkg/api/resource"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apiserver/pkg/admission"
+	api "k8s.io/kubernetes/pkg/apis/core"
 )
 
 var (
@@ -46,9 +44,11 @@ const (
 	month                      = 30 * 24 * time.Hour
 )
 
+// Register registers a plugin
 // WARNING: this feature is experimental and will definitely change.
-func init() {
-	admission.RegisterPlugin("InitialResources", func(client clientset.Interface, config io.Reader) (admission.Interface, error) {
+func Register(plugins *admission.Plugins) {
+	plugins.Register("InitialResources", func(config io.Reader) (admission.Interface, error) {
+		// TODO: remove the usage of flags in favor of reading versioned configuration
 		s, err := newDataSource(*source)
 		if err != nil {
 			return nil, err
@@ -57,15 +57,17 @@ func init() {
 	})
 }
 
-type initialResources struct {
+type InitialResources struct {
 	*admission.Handler
 	source     dataSource
 	percentile int64
 	nsOnly     bool
 }
 
-func newInitialResources(source dataSource, percentile int64, nsOnly bool) admission.Interface {
-	return &initialResources{
+var _ admission.MutationInterface = &InitialResources{}
+
+func newInitialResources(source dataSource, percentile int64, nsOnly bool) *InitialResources {
+	return &InitialResources{
 		Handler:    admission.NewHandler(admission.Create),
 		source:     source,
 		percentile: percentile,
@@ -73,7 +75,8 @@ func newInitialResources(source dataSource, percentile int64, nsOnly bool) admis
 	}
 }
 
-func (ir initialResources) Admit(a admission.Attributes) (err error) {
+// Admit makes an admission decision based on the request attributes
+func (ir InitialResources) Admit(a admission.Attributes) (err error) {
 	// Ignore all calls to subresources or resources other than pods.
 	if a.GetSubresource() != "" || a.GetResource().GroupResource() != api.Resource("pods") {
 		return nil
@@ -89,7 +92,7 @@ func (ir initialResources) Admit(a admission.Attributes) (err error) {
 
 // The method veryfies whether resources should be set for the given pod and
 // if there is estimation available the method fills Request field.
-func (ir initialResources) estimateAndFillResourcesIfNotSet(pod *api.Pod) {
+func (ir InitialResources) estimateAndFillResourcesIfNotSet(pod *api.Pod) {
 	var annotations []string
 	for i := range pod.Spec.InitContainers {
 		annotations = append(annotations, ir.estimateContainer(pod, &pod.Spec.InitContainers[i], "init container")...)
@@ -106,29 +109,11 @@ func (ir initialResources) estimateAndFillResourcesIfNotSet(pod *api.Pod) {
 	}
 }
 
-func (ir initialResources) estimateContainer(pod *api.Pod, c *api.Container, message string) []string {
+func (ir InitialResources) estimateContainer(pod *api.Pod, c *api.Container, message string) []string {
 	var annotations []string
 	req := c.Resources.Requests
-	lim := c.Resources.Limits
-	var cpu, mem *resource.Quantity
-	var err error
-	if _, ok := req[api.ResourceCPU]; !ok {
-		if _, ok2 := lim[api.ResourceCPU]; !ok2 {
-			cpu, err = ir.getEstimation(api.ResourceCPU, c, pod.ObjectMeta.Namespace)
-			if err != nil {
-				glog.Errorf("Error while trying to estimate resources: %v", err)
-			}
-		}
-	}
-	if _, ok := req[api.ResourceMemory]; !ok {
-		if _, ok2 := lim[api.ResourceMemory]; !ok2 {
-			mem, err = ir.getEstimation(api.ResourceMemory, c, pod.ObjectMeta.Namespace)
-			if err != nil {
-				glog.Errorf("Error while trying to estimate resources: %v", err)
-			}
-		}
-	}
-
+	cpu := ir.getEstimationIfNeeded(api.ResourceCPU, c, pod.ObjectMeta.Namespace)
+	mem := ir.getEstimationIfNeeded(api.ResourceMemory, c, pod.ObjectMeta.Namespace)
 	// If Requests doesn't exits and an estimation was made, create Requests.
 	if req == nil && (cpu != nil || mem != nil) {
 		c.Resources.Requests = api.ResourceList{}
@@ -153,7 +138,24 @@ func (ir initialResources) estimateContainer(pod *api.Pod, c *api.Container, mes
 	return annotations
 }
 
-func (ir initialResources) getEstimation(kind api.ResourceName, c *api.Container, ns string) (*resource.Quantity, error) {
+// getEstimationIfNeeded estimates compute resource for container if its corresponding
+// Request(min amount) and Limit(max amount) both are not specified.
+func (ir InitialResources) getEstimationIfNeeded(kind api.ResourceName, c *api.Container, ns string) *resource.Quantity {
+	requests := c.Resources.Requests
+	limits := c.Resources.Limits
+	var quantity *resource.Quantity
+	var err error
+	if _, requestFound := requests[kind]; !requestFound {
+		if _, limitFound := limits[kind]; !limitFound {
+			quantity, err = ir.getEstimation(kind, c, ns)
+			if err != nil {
+				glog.Errorf("Error while trying to estimate resources: %v", err)
+			}
+		}
+	}
+	return quantity
+}
+func (ir InitialResources) getEstimation(kind api.ResourceName, c *api.Container, ns string) (*resource.Quantity, error) {
 	end := time.Now()
 	start := end.Add(-week)
 	var usage, samples int64

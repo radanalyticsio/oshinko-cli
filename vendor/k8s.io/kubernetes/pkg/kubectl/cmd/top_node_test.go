@@ -23,12 +23,12 @@ import (
 	"strings"
 	"testing"
 
-	"k8s.io/heapster/metrics/apis/metrics/v1alpha1"
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/client/restclient"
-	"k8s.io/kubernetes/pkg/client/unversioned/fake"
 	"net/url"
+
+	"k8s.io/api/core/v1"
+	"k8s.io/client-go/rest/fake"
+	cmdtesting "k8s.io/kubernetes/pkg/kubectl/cmd/testing"
+	"k8s.io/metrics/pkg/apis/metrics/v1alpha1"
 )
 
 const (
@@ -42,7 +42,7 @@ func TestTopNodeAllMetrics(t *testing.T) {
 	expectedMetricsPath := fmt.Sprintf("%s/%s/nodes", baseMetricsAddress, metricsApiVersion)
 	expectedNodePath := fmt.Sprintf("/%s/%s/nodes", apiPrefix, apiVersion)
 
-	f, tf, codec, ns := NewAPIFactory()
+	f, tf, codec, ns := cmdtesting.NewAPIFactory()
 	tf.Printer = &testPrinter{}
 	tf.Client = &fake.RESTClient{
 		NegotiatedSerializer: ns,
@@ -63,10 +63,62 @@ func TestTopNodeAllMetrics(t *testing.T) {
 		}),
 	}
 	tf.Namespace = "test"
-	tf.ClientConfig = &restclient.Config{ContentConfig: restclient.ContentConfig{GroupVersion: &unversioned.GroupVersion{Version: "v1"}}}
+	tf.ClientConfig = defaultClientConfig()
 	buf := bytes.NewBuffer([]byte{})
 
-	cmd := NewCmdTopNode(f, buf)
+	cmd := NewCmdTopNode(f, nil, buf)
+	cmd.Run(cmd, []string{})
+
+	// Check the presence of node names in the output.
+	result := buf.String()
+	for _, m := range metrics.Items {
+		if !strings.Contains(result, m.Name) {
+			t.Errorf("missing metrics for %s: \n%s", m.Name, result)
+		}
+	}
+}
+
+func TestTopNodeAllMetricsCustomDefaults(t *testing.T) {
+	customBaseHeapsterServiceAddress := "/api/v1/namespaces/custom-namespace/services/https:custom-heapster-service:/proxy"
+	customBaseMetricsAddress := customBaseHeapsterServiceAddress + "/apis/metrics"
+
+	initTestErrorHandler(t)
+	metrics, nodes := testNodeMetricsData()
+	expectedMetricsPath := fmt.Sprintf("%s/%s/nodes", customBaseMetricsAddress, metricsApiVersion)
+	expectedNodePath := fmt.Sprintf("/%s/%s/nodes", apiPrefix, apiVersion)
+
+	f, tf, codec, ns := cmdtesting.NewAPIFactory()
+	tf.Printer = &testPrinter{}
+	tf.Client = &fake.RESTClient{
+		NegotiatedSerializer: ns,
+		Client: fake.CreateHTTPClient(func(req *http.Request) (*http.Response, error) {
+			switch p, m := req.URL.Path, req.Method; {
+			case p == expectedMetricsPath && m == "GET":
+				body, err := marshallBody(metrics)
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				return &http.Response{StatusCode: 200, Header: defaultHeader(), Body: body}, nil
+			case p == expectedNodePath && m == "GET":
+				return &http.Response{StatusCode: 200, Header: defaultHeader(), Body: objBody(codec, nodes)}, nil
+			default:
+				t.Fatalf("unexpected request: %#v\nGot URL: %#v\nExpected path: %#v", req, req.URL, expectedMetricsPath)
+				return nil, nil
+			}
+		}),
+	}
+	tf.Namespace = "test"
+	tf.ClientConfig = defaultClientConfig()
+	buf := bytes.NewBuffer([]byte{})
+
+	opts := &TopNodeOptions{
+		HeapsterOptions: HeapsterTopOptions{
+			Namespace: "custom-namespace",
+			Scheme:    "https",
+			Service:   "custom-heapster-service",
+		},
+	}
+	cmd := NewCmdTopNode(f, opts, buf)
 	cmd.Run(cmd, []string{})
 
 	// Check the presence of node names in the output.
@@ -90,7 +142,7 @@ func TestTopNodeWithNameMetrics(t *testing.T) {
 	expectedPath := fmt.Sprintf("%s/%s/nodes/%s", baseMetricsAddress, metricsApiVersion, expectedMetrics.Name)
 	expectedNodePath := fmt.Sprintf("/%s/%s/nodes/%s", apiPrefix, apiVersion, expectedMetrics.Name)
 
-	f, tf, codec, ns := NewAPIFactory()
+	f, tf, codec, ns := cmdtesting.NewAPIFactory()
 	tf.Printer = &testPrinter{}
 	tf.Client = &fake.RESTClient{
 		NegotiatedSerializer: ns,
@@ -111,10 +163,10 @@ func TestTopNodeWithNameMetrics(t *testing.T) {
 		}),
 	}
 	tf.Namespace = "test"
-	tf.ClientConfig = &restclient.Config{ContentConfig: restclient.ContentConfig{GroupVersion: &unversioned.GroupVersion{Version: "v1"}}}
+	tf.ClientConfig = defaultClientConfig()
 	buf := bytes.NewBuffer([]byte{})
 
-	cmd := NewCmdTopNode(f, buf)
+	cmd := NewCmdTopNode(f, nil, buf)
 	cmd.Run(cmd, []string{expectedMetrics.Name})
 
 	// Check the presence of node names in the output.
@@ -136,7 +188,7 @@ func TestTopNodeWithLabelSelectorMetrics(t *testing.T) {
 		ListMeta: metrics.ListMeta,
 		Items:    metrics.Items[0:1],
 	}
-	expectedNodes := api.NodeList{
+	expectedNodes := v1.NodeList{
 		ListMeta: nodes.ListMeta,
 		Items:    nodes.Items[0:1],
 	}
@@ -149,7 +201,7 @@ func TestTopNodeWithLabelSelectorMetrics(t *testing.T) {
 	expectedQuery := fmt.Sprintf("labelSelector=%s", url.QueryEscape(label))
 	expectedNodePath := fmt.Sprintf("/%s/%s/nodes", apiPrefix, apiVersion)
 
-	f, tf, codec, ns := NewAPIFactory()
+	f, tf, codec, ns := cmdtesting.NewAPIFactory()
 	tf.Printer = &testPrinter{}
 	tf.Client = &fake.RESTClient{
 		NegotiatedSerializer: ns,
@@ -170,10 +222,10 @@ func TestTopNodeWithLabelSelectorMetrics(t *testing.T) {
 		}),
 	}
 	tf.Namespace = "test"
-	tf.ClientConfig = &restclient.Config{ContentConfig: restclient.ContentConfig{GroupVersion: &unversioned.GroupVersion{Version: "v1"}}}
+	tf.ClientConfig = defaultClientConfig()
 	buf := bytes.NewBuffer([]byte{})
 
-	cmd := NewCmdTopNode(f, buf)
+	cmd := NewCmdTopNode(f, nil, buf)
 	cmd.Flags().Set("selector", label)
 	cmd.Run(cmd, []string{})
 

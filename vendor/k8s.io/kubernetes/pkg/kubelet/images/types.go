@@ -19,7 +19,7 @@ package images
 import (
 	"errors"
 
-	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/api/core/v1"
 )
 
 var (
@@ -37,6 +37,9 @@ var (
 
 	// Get http error when pulling image from registry
 	RegistryUnavailable = errors.New("RegistryUnavailable")
+
+	// Unable to parse the image name.
+	ErrInvalidImageName = errors.New("InvalidImageName")
 )
 
 // ImageManager provides an interface to manage the lifecycle of images.
@@ -46,7 +49,7 @@ var (
 // Implementations are expected to be thread safe.
 type ImageManager interface {
 	// EnsureImageExists ensures that image specified in `container` exists.
-	EnsureImageExists(pod *api.Pod, container *api.Container, pullSecrets []api.Secret) (error, string)
+	EnsureImageExists(pod *v1.Pod, container *v1.Container, pullSecrets []v1.Secret) (string, string, error)
 
 	// TODO(ronl): consolidating image managing and deleting operation in this interface
 }

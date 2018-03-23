@@ -19,28 +19,37 @@ package images
 import (
 	"time"
 
-	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
-	"k8s.io/kubernetes/pkg/util/wait"
 )
 
+type pullResult struct {
+	imageRef string
+	err      error
+}
+
 type imagePuller interface {
-	pullImage(kubecontainer.ImageSpec, []api.Secret, chan<- error)
+	pullImage(kubecontainer.ImageSpec, []v1.Secret, chan<- pullResult)
 }
 
 var _, _ imagePuller = &parallelImagePuller{}, &serialImagePuller{}
 
 type parallelImagePuller struct {
-	runtime kubecontainer.Runtime
+	imageService kubecontainer.ImageService
 }
 
-func newParallelImagePuller(runtime kubecontainer.Runtime) imagePuller {
-	return &parallelImagePuller{runtime}
+func newParallelImagePuller(imageService kubecontainer.ImageService) imagePuller {
+	return &parallelImagePuller{imageService}
 }
 
-func (pip *parallelImagePuller) pullImage(spec kubecontainer.ImageSpec, pullSecrets []api.Secret, errChan chan<- error) {
+func (pip *parallelImagePuller) pullImage(spec kubecontainer.ImageSpec, pullSecrets []v1.Secret, pullChan chan<- pullResult) {
 	go func() {
-		errChan <- pip.runtime.PullImage(spec, pullSecrets)
+		imageRef, err := pip.imageService.PullImage(spec, pullSecrets)
+		pullChan <- pullResult{
+			imageRef: imageRef,
+			err:      err,
+		}
 	}()
 }
 
@@ -48,32 +57,36 @@ func (pip *parallelImagePuller) pullImage(spec kubecontainer.ImageSpec, pullSecr
 const maxImagePullRequests = 10
 
 type serialImagePuller struct {
-	runtime      kubecontainer.Runtime
+	imageService kubecontainer.ImageService
 	pullRequests chan *imagePullRequest
 }
 
-func newSerialImagePuller(runtime kubecontainer.Runtime) imagePuller {
-	imagePuller := &serialImagePuller{runtime, make(chan *imagePullRequest, maxImagePullRequests)}
+func newSerialImagePuller(imageService kubecontainer.ImageService) imagePuller {
+	imagePuller := &serialImagePuller{imageService, make(chan *imagePullRequest, maxImagePullRequests)}
 	go wait.Until(imagePuller.processImagePullRequests, time.Second, wait.NeverStop)
 	return imagePuller
 }
 
 type imagePullRequest struct {
 	spec        kubecontainer.ImageSpec
-	pullSecrets []api.Secret
-	errChan     chan<- error
+	pullSecrets []v1.Secret
+	pullChan    chan<- pullResult
 }
 
-func (sip *serialImagePuller) pullImage(spec kubecontainer.ImageSpec, pullSecrets []api.Secret, errChan chan<- error) {
+func (sip *serialImagePuller) pullImage(spec kubecontainer.ImageSpec, pullSecrets []v1.Secret, pullChan chan<- pullResult) {
 	sip.pullRequests <- &imagePullRequest{
 		spec:        spec,
 		pullSecrets: pullSecrets,
-		errChan:     errChan,
+		pullChan:    pullChan,
 	}
 }
 
 func (sip *serialImagePuller) processImagePullRequests() {
 	for pullRequest := range sip.pullRequests {
-		pullRequest.errChan <- sip.runtime.PullImage(pullRequest.spec, pullRequest.pullSecrets)
+		imageRef, err := sip.imageService.PullImage(pullRequest.spec, pullRequest.pullSecrets)
+		pullRequest.pullChan <- pullResult{
+			imageRef: imageRef,
+			err:      err,
+		}
 	}
 }

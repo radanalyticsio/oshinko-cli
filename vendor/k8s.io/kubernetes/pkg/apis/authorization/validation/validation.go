@@ -17,9 +17,10 @@ limitations under the License.
 package validation
 
 import (
-	"k8s.io/kubernetes/pkg/api"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	authorizationapi "k8s.io/kubernetes/pkg/apis/authorization"
-	"k8s.io/kubernetes/pkg/util/validation/field"
 )
 
 func ValidateSubjectAccessReviewSpec(spec authorizationapi.SubjectAccessReviewSpec, fldPath *field.Path) field.ErrorList {
@@ -49,9 +50,13 @@ func ValidateSelfSubjectAccessReviewSpec(spec authorizationapi.SelfSubjectAccess
 	return allErrs
 }
 
+func ValidateSelfSubjectRulesReview(review *authorizationapi.SelfSubjectRulesReview) field.ErrorList {
+	return field.ErrorList{}
+}
+
 func ValidateSubjectAccessReview(sar *authorizationapi.SubjectAccessReview) field.ErrorList {
 	allErrs := ValidateSubjectAccessReviewSpec(sar.Spec, field.NewPath("spec"))
-	if !api.Semantic.DeepEqual(api.ObjectMeta{}, sar.ObjectMeta) {
+	if !apiequality.Semantic.DeepEqual(metav1.ObjectMeta{}, sar.ObjectMeta) {
 		allErrs = append(allErrs, field.Invalid(field.NewPath("metadata"), sar.ObjectMeta, `must be empty`))
 	}
 	return allErrs
@@ -59,7 +64,7 @@ func ValidateSubjectAccessReview(sar *authorizationapi.SubjectAccessReview) fiel
 
 func ValidateSelfSubjectAccessReview(sar *authorizationapi.SelfSubjectAccessReview) field.ErrorList {
 	allErrs := ValidateSelfSubjectAccessReviewSpec(sar.Spec, field.NewPath("spec"))
-	if !api.Semantic.DeepEqual(api.ObjectMeta{}, sar.ObjectMeta) {
+	if !apiequality.Semantic.DeepEqual(metav1.ObjectMeta{}, sar.ObjectMeta) {
 		allErrs = append(allErrs, field.Invalid(field.NewPath("metadata"), sar.ObjectMeta, `must be empty`))
 	}
 	return allErrs
@@ -67,8 +72,19 @@ func ValidateSelfSubjectAccessReview(sar *authorizationapi.SelfSubjectAccessRevi
 
 func ValidateLocalSubjectAccessReview(sar *authorizationapi.LocalSubjectAccessReview) field.ErrorList {
 	allErrs := ValidateSubjectAccessReviewSpec(sar.Spec, field.NewPath("spec"))
-	if !api.Semantic.DeepEqual(api.ObjectMeta{}, sar.ObjectMeta) {
-		allErrs = append(allErrs, field.Invalid(field.NewPath("metadata"), sar.ObjectMeta, `must be empty`))
+
+	objectMetaShallowCopy := sar.ObjectMeta
+	objectMetaShallowCopy.Namespace = ""
+	if !apiequality.Semantic.DeepEqual(metav1.ObjectMeta{}, objectMetaShallowCopy) {
+		allErrs = append(allErrs, field.Invalid(field.NewPath("metadata"), sar.ObjectMeta, `must be empty except for namespace`))
 	}
+
+	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != sar.Namespace {
+		allErrs = append(allErrs, field.Invalid(field.NewPath("spec.resourceAttributes.namespace"), sar.Spec.ResourceAttributes.Namespace, `must match metadata.namespace`))
+	}
+	if sar.Spec.NonResourceAttributes != nil {
+		allErrs = append(allErrs, field.Invalid(field.NewPath("spec.nonResourceAttributes"), sar.Spec.NonResourceAttributes, `disallowed on this kind of request`))
+	}
+
 	return allErrs
 }

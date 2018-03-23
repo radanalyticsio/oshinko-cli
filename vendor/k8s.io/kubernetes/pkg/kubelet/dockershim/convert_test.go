@@ -19,23 +19,53 @@ package dockershim
 import (
 	"testing"
 
-	runtimeApi "k8s.io/kubernetes/pkg/kubelet/api/v1alpha1/runtime"
+	dockertypes "github.com/docker/docker/api/types"
+	"github.com/stretchr/testify/assert"
+
+	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/v1alpha1/runtime"
 )
 
 func TestConvertDockerStatusToRuntimeAPIState(t *testing.T) {
 	testCases := []struct {
 		input    string
-		expected runtimeApi.ContainerState
+		expected runtimeapi.ContainerState
 	}{
-		{input: "Up 5 hours", expected: runtimeApi.ContainerState_RUNNING},
-		{input: "Exited (0) 2 hours ago", expected: runtimeApi.ContainerState_EXITED},
-		{input: "Created", expected: runtimeApi.ContainerState_CREATED},
-		{input: "Random string", expected: runtimeApi.ContainerState_UNKNOWN},
+		{input: "Up 5 hours", expected: runtimeapi.ContainerState_CONTAINER_RUNNING},
+		{input: "Exited (0) 2 hours ago", expected: runtimeapi.ContainerState_CONTAINER_EXITED},
+		{input: "Created", expected: runtimeapi.ContainerState_CONTAINER_CREATED},
+		{input: "Random string", expected: runtimeapi.ContainerState_CONTAINER_UNKNOWN},
 	}
 
-	for i, test := range testCases {
-		if actual := toRuntimeAPIContainerState(test.input); actual != test.expected {
-			t.Errorf("Test[%d]: expected %q, got %q", i, test.expected, actual)
-		}
+	for _, test := range testCases {
+		actual := toRuntimeAPIContainerState(test.input)
+		assert.Equal(t, test.expected, actual)
+	}
+}
+
+func TestConvertToPullableImageID(t *testing.T) {
+	testCases := []struct {
+		id       string
+		image    *dockertypes.ImageInspect
+		expected string
+	}{
+		{
+			id: "image-1",
+			image: &dockertypes.ImageInspect{
+				RepoDigests: []string{"digest-1"},
+			},
+			expected: DockerPullableImageIDPrefix + "digest-1",
+		},
+		{
+			id: "image-2",
+			image: &dockertypes.ImageInspect{
+				RepoDigests: []string{},
+			},
+			expected: DockerImageIDPrefix + "image-2",
+		},
+	}
+
+	for _, test := range testCases {
+		actual := toPullableImageID(test.id, test.image)
+		assert.Equal(t, test.expected, actual)
 	}
 }

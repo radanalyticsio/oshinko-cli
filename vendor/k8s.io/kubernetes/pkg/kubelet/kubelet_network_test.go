@@ -17,37 +17,134 @@ limitations under the License.
 package kubelet
 
 import (
+	"fmt"
 	"net"
-	"reflect"
-	"strings"
 	"testing"
 
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/util/bandwidth"
+	"github.com/stretchr/testify/assert"
 )
 
+func TestNetworkHostGetsPodNotFound(t *testing.T) {
+	testKubelet := newTestKubelet(t, true)
+	defer testKubelet.Cleanup()
+	nh := networkHost{testKubelet.kubelet}
+
+	actualPod, _ := nh.GetPodByName("", "")
+	if actualPod != nil {
+		t.Fatalf("Was expected nil, received %v instead", actualPod)
+	}
+}
+
+func TestNetworkHostGetsKubeClient(t *testing.T) {
+	testKubelet := newTestKubelet(t, true)
+	defer testKubelet.Cleanup()
+	nh := networkHost{testKubelet.kubelet}
+
+	if nh.GetKubeClient() != testKubelet.fakeKubeClient {
+		t.Fatalf("NetworkHost client does not match testKubelet's client")
+	}
+}
+
+func TestNetworkHostGetsRuntime(t *testing.T) {
+	testKubelet := newTestKubelet(t, true)
+	defer testKubelet.Cleanup()
+	nh := networkHost{testKubelet.kubelet}
+
+	if nh.GetRuntime() != testKubelet.fakeRuntime {
+		t.Fatalf("NetworkHost runtime does not match testKubelet's runtime")
+	}
+}
+
+func TestNetworkHostSupportsLegacyFeatures(t *testing.T) {
+	testKubelet := newTestKubelet(t, true)
+	defer testKubelet.Cleanup()
+	nh := networkHost{testKubelet.kubelet}
+
+	if nh.SupportsLegacyFeatures() == false {
+		t.Fatalf("SupportsLegacyFeatures should not be false")
+	}
+}
+
+func TestNoOpHostGetsName(t *testing.T) {
+	nh := NoOpLegacyHost{}
+	pod, err := nh.GetPodByName("", "")
+	if pod != nil && err != true {
+		t.Fatalf("noOpLegacyHost getpodbyname expected to be nil and true")
+	}
+}
+
+func TestNoOpHostGetsKubeClient(t *testing.T) {
+	nh := NoOpLegacyHost{}
+	if nh.GetKubeClient() != nil {
+		t.Fatalf("noOpLegacyHost client expected to be nil")
+	}
+}
+
+func TestNoOpHostGetsRuntime(t *testing.T) {
+	nh := NoOpLegacyHost{}
+	if nh.GetRuntime() != nil {
+		t.Fatalf("noOpLegacyHost runtime expected to be nil")
+	}
+}
+
+func TestNoOpHostSupportsLegacyFeatures(t *testing.T) {
+	nh := NoOpLegacyHost{}
+	if nh.SupportsLegacyFeatures() != false {
+		t.Fatalf("noOpLegacyHost legacy features expected to be false")
+	}
+}
+
 func TestNodeIPParam(t *testing.T) {
-	testKubelet := newTestKubelet(t, false /* controllerAttachDetachEnabled */)
-	kubelet := testKubelet.kubelet
-	tests := []struct {
+	type test struct {
 		nodeIP   string
 		success  bool
 		testName string
-	}{
+	}
+	tests := []test{
 		{
 			nodeIP:   "",
-			success:  true,
+			success:  false,
 			testName: "IP not set",
 		},
 		{
 			nodeIP:   "127.0.0.1",
 			success:  false,
-			testName: "loopback address",
+			testName: "IPv4 loopback address",
 		},
 		{
-			nodeIP:   "FE80::0202:B3FF:FE1E:8329",
+			nodeIP:   "::1",
 			success:  false,
-			testName: "IPv6 address",
+			testName: "IPv6 loopback address",
+		},
+		{
+			nodeIP:   "224.0.0.1",
+			success:  false,
+			testName: "multicast IPv4 address",
+		},
+		{
+			nodeIP:   "ff00::1",
+			success:  false,
+			testName: "multicast IPv6 address",
+		},
+		{
+			nodeIP:   "169.254.0.1",
+			success:  false,
+			testName: "IPv4 link-local unicast address",
+		},
+		{
+			nodeIP:   "fe80::0202:b3ff:fe1e:8329",
+			success:  false,
+			testName: "IPv6 link-local unicast address",
+		},
+		{
+			nodeIP:   "0.0.0.0",
+			success:  false,
+			testName: "Unspecified IPv4 address",
+		},
+		{
+			nodeIP:   "::",
+			success:  false,
+			testName: "Unspecified IPv6 address",
 		},
 		{
 			nodeIP:   "1.2.3.4",
@@ -55,165 +152,35 @@ func TestNodeIPParam(t *testing.T) {
 			testName: "IPv4 address that doesn't belong to host",
 		},
 	}
-	for _, test := range tests {
-		kubelet.nodeIP = net.ParseIP(test.nodeIP)
-		err := kubelet.validateNodeIP()
-		if err != nil && test.success {
-			t.Errorf("Test: %s, expected no error but got: %v", test.testName, err)
-		} else if err == nil && !test.success {
-			t.Errorf("Test: %s, expected an error", test.testName)
-		}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		assert.Error(t, err, fmt.Sprintf(
+			"Unable to obtain a list of the node's unicast interface addresses."))
 	}
-}
-
-type countingDNSScrubber struct {
-	counter *int
-}
-
-func (cds countingDNSScrubber) ScrubDNS(nameservers, searches []string) (nsOut, srchOut []string) {
-	(*cds.counter)++
-	return nameservers, searches
-}
-
-func TestParseResolvConf(t *testing.T) {
-	testCases := []struct {
-		data        string
-		nameservers []string
-		searches    []string
-	}{
-		{"", []string{}, []string{}},
-		{" ", []string{}, []string{}},
-		{"\n", []string{}, []string{}},
-		{"\t\n\t", []string{}, []string{}},
-		{"#comment\n", []string{}, []string{}},
-		{" #comment\n", []string{}, []string{}},
-		{"#comment\n#comment", []string{}, []string{}},
-		{"#comment\nnameserver", []string{}, []string{}},
-		{"#comment\nnameserver\nsearch", []string{}, []string{}},
-		{"nameserver 1.2.3.4", []string{"1.2.3.4"}, []string{}},
-		{" nameserver 1.2.3.4", []string{"1.2.3.4"}, []string{}},
-		{"\tnameserver 1.2.3.4", []string{"1.2.3.4"}, []string{}},
-		{"nameserver\t1.2.3.4", []string{"1.2.3.4"}, []string{}},
-		{"nameserver \t 1.2.3.4", []string{"1.2.3.4"}, []string{}},
-		{"nameserver 1.2.3.4\nnameserver 5.6.7.8", []string{"1.2.3.4", "5.6.7.8"}, []string{}},
-		{"search foo", []string{}, []string{"foo"}},
-		{"search foo bar", []string{}, []string{"foo", "bar"}},
-		{"search foo bar bat\n", []string{}, []string{"foo", "bar", "bat"}},
-		{"search foo\nsearch bar", []string{}, []string{"bar"}},
-		{"nameserver 1.2.3.4\nsearch foo bar", []string{"1.2.3.4"}, []string{"foo", "bar"}},
-		{"nameserver 1.2.3.4\nsearch foo\nnameserver 5.6.7.8\nsearch bar", []string{"1.2.3.4", "5.6.7.8"}, []string{"bar"}},
-		{"#comment\nnameserver 1.2.3.4\n#comment\nsearch foo\ncomment", []string{"1.2.3.4"}, []string{"foo"}},
-	}
-	for i, tc := range testCases {
-		ns, srch, err := parseResolvConf(strings.NewReader(tc.data), nil)
-		if err != nil {
-			t.Errorf("expected success, got %v", err)
-			continue
+	for _, addr := range addrs {
+		var ip net.IP
+		switch v := addr.(type) {
+		case *net.IPNet:
+			ip = v.IP
+		case *net.IPAddr:
+			ip = v.IP
 		}
-		if !reflect.DeepEqual(ns, tc.nameservers) {
-			t.Errorf("[%d] expected nameservers %#v, got %#v", i, tc.nameservers, ns)
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+			break
 		}
-		if !reflect.DeepEqual(srch, tc.searches) {
-			t.Errorf("[%d] expected searches %#v, got %#v", i, tc.searches, srch)
+		successTest := test{
+			nodeIP:   ip.String(),
+			success:  true,
+			testName: fmt.Sprintf("Success test case for address %s", ip.String()),
 		}
-
-		counter := 0
-		cds := countingDNSScrubber{&counter}
-		ns, srch, err = parseResolvConf(strings.NewReader(tc.data), cds)
-		if err != nil {
-			t.Errorf("expected success, got %v", err)
-			continue
-		}
-		if !reflect.DeepEqual(ns, tc.nameservers) {
-			t.Errorf("[%d] expected nameservers %#v, got %#v", i, tc.nameservers, ns)
-		}
-		if !reflect.DeepEqual(srch, tc.searches) {
-			t.Errorf("[%d] expected searches %#v, got %#v", i, tc.searches, srch)
-		}
-		if counter != 1 {
-			t.Errorf("[%d] expected dnsScrubber to have been called: got %d", i, counter)
-		}
-	}
-}
-
-func TestCleanupBandwidthLimits(t *testing.T) {
-	testPod := func(name, ingress string) *api.Pod {
-		pod := podWithUidNameNs("", name, "")
-
-		if len(ingress) != 0 {
-			pod.Annotations["kubernetes.io/ingress-bandwidth"] = ingress
-		}
-
-		return pod
-	}
-
-	// TODO(random-liu): We removed the test case for pod status not cached here. We should add a higher
-	// layer status getter function and test that function instead.
-	tests := []struct {
-		status           *api.PodStatus
-		pods             []*api.Pod
-		inputCIDRs       []string
-		expectResetCIDRs []string
-		name             string
-	}{
-		{
-			status: &api.PodStatus{
-				PodIP: "1.2.3.4",
-				Phase: api.PodRunning,
-			},
-			pods: []*api.Pod{
-				testPod("foo", "10M"),
-				testPod("bar", ""),
-			},
-			inputCIDRs:       []string{"1.2.3.4/32", "2.3.4.5/32", "5.6.7.8/32"},
-			expectResetCIDRs: []string{"2.3.4.5/32", "5.6.7.8/32"},
-			name:             "pod running",
-		},
-		{
-			status: &api.PodStatus{
-				PodIP: "1.2.3.4",
-				Phase: api.PodFailed,
-			},
-			pods: []*api.Pod{
-				testPod("foo", "10M"),
-				testPod("bar", ""),
-			},
-			inputCIDRs:       []string{"1.2.3.4/32", "2.3.4.5/32", "5.6.7.8/32"},
-			expectResetCIDRs: []string{"1.2.3.4/32", "2.3.4.5/32", "5.6.7.8/32"},
-			name:             "pod not running",
-		},
-		{
-			status: &api.PodStatus{
-				PodIP: "1.2.3.4",
-				Phase: api.PodFailed,
-			},
-			pods: []*api.Pod{
-				testPod("foo", ""),
-				testPod("bar", ""),
-			},
-			inputCIDRs:       []string{"1.2.3.4/32", "2.3.4.5/32", "5.6.7.8/32"},
-			expectResetCIDRs: []string{"1.2.3.4/32", "2.3.4.5/32", "5.6.7.8/32"},
-			name:             "no bandwidth limits",
-		},
+		tests = append(tests, successTest)
 	}
 	for _, test := range tests {
-		shaper := &bandwidth.FakeShaper{
-			CIDRs: test.inputCIDRs,
-		}
-
-		testKube := newTestKubelet(t, false /* controllerAttachDetachEnabled */)
-		testKube.kubelet.shaper = shaper
-
-		for _, pod := range test.pods {
-			testKube.kubelet.statusManager.SetPodStatus(pod, *test.status)
-		}
-
-		err := testKube.kubelet.cleanupBandwidthLimits(test.pods)
-		if err != nil {
-			t.Errorf("unexpected error: %v (%s)", test.name, err)
-		}
-		if !reflect.DeepEqual(shaper.ResetCIDRs, test.expectResetCIDRs) {
-			t.Errorf("[%s]\nexpected: %v, saw: %v", test.name, test.expectResetCIDRs, shaper.ResetCIDRs)
+		err := validateNodeIP(net.ParseIP(test.nodeIP))
+		if test.success {
+			assert.NoError(t, err, "test %s", test.testName)
+		} else {
+			assert.Error(t, err, fmt.Sprintf("test %s", test.testName))
 		}
 	}
 }
@@ -234,8 +201,6 @@ func TestGetIPTablesMark(t *testing.T) {
 	}
 	for _, tc := range tests {
 		res := getIPTablesMark(tc.bit)
-		if res != tc.expect {
-			t.Errorf("getIPTablesMark output unexpected result: %v when input bit is %d. Expect result: %v", res, tc.bit, tc.expect)
-		}
+		assert.Equal(t, tc.expect, res, "input %d", tc.bit)
 	}
 }

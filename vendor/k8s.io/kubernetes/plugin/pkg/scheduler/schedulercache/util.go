@@ -16,18 +16,18 @@ limitations under the License.
 
 package schedulercache
 
-import "k8s.io/kubernetes/pkg/api"
+import "k8s.io/api/core/v1"
 
 // CreateNodeNameToInfoMap obtains a list of pods and pivots that list into a map where the keys are node names
 // and the values are the aggregated information for that node.
-func CreateNodeNameToInfoMap(pods []*api.Pod, nodes []*api.Node) map[string]*NodeInfo {
+func CreateNodeNameToInfoMap(pods []*v1.Pod, nodes []*v1.Node) map[string]*NodeInfo {
 	nodeNameToInfo := make(map[string]*NodeInfo)
 	for _, pod := range pods {
 		nodeName := pod.Spec.NodeName
 		if _, ok := nodeNameToInfo[nodeName]; !ok {
 			nodeNameToInfo[nodeName] = NewNodeInfo()
 		}
-		nodeNameToInfo[nodeName].addPod(pod)
+		nodeNameToInfo[nodeName].AddPod(pod)
 	}
 	for _, node := range nodes {
 		if _, ok := nodeNameToInfo[node.Name]; !ok {

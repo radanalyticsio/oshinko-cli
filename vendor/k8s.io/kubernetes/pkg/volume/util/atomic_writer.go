@@ -23,12 +23,13 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/golang/glog"
 
-	"k8s.io/kubernetes/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 const (
@@ -96,7 +97,7 @@ const (
 //  5.  The payload is written to the new timestamped directory
 //  6.  Symlinks and directory for new user-visible files are created (if needed).
 //
-//      For example consider the files:
+//      For example, consider the files:
 //        <target-dir>/podName
 //        <target-dir>/user/labels
 //        <target-dir>/k8s/annotations
@@ -183,7 +184,14 @@ func (w *AtomicWriter) Write(payload map[string]FileProjection) error {
 	}
 
 	// (9)
-	if err = os.Rename(newDataDirPath, dataDirPath); err != nil {
+	if runtime.GOOS == "windows" {
+		os.Remove(dataDirPath)
+		err = os.Symlink(tsDirName, dataDirPath)
+		os.Remove(newDataDirPath)
+	} else {
+		err = os.Rename(newDataDirPath, dataDirPath)
+	}
+	if err != nil {
 		os.Remove(newDataDirPath)
 		os.RemoveAll(tsDir)
 		glog.Errorf("%s: error renaming symbolic link for data directory %s: %v", w.logContext, newDataDirPath, err)
@@ -303,7 +311,7 @@ func (w *AtomicWriter) pathsToRemove(payload map[string]FileProjection) (sets.St
 		}
 
 		relativePath := strings.TrimPrefix(path, w.targetDir)
-		relativePath = strings.TrimPrefix(relativePath, "/")
+		relativePath = strings.TrimPrefix(relativePath, string(os.PathSeparator))
 		if strings.HasPrefix(relativePath, "..") {
 			return nil
 		}
@@ -327,7 +335,7 @@ func (w *AtomicWriter) pathsToRemove(payload map[string]FileProjection) (sets.St
 		for subPath := file; subPath != ""; {
 			newPaths.Insert(subPath)
 			subPath, _ = filepath.Split(subPath)
-			subPath = strings.TrimSuffix(subPath, "/")
+			subPath = strings.TrimSuffix(subPath, string(os.PathSeparator))
 		}
 	}
 	glog.V(5).Infof("%s: new paths:       %+v", w.targetDir, newPaths.List())
@@ -412,7 +420,7 @@ func (w *AtomicWriter) createUserVisibleFiles(payload map[string]FileProjection)
 			// Since filepath.Split leaves a trailing path separator, in this
 			// example, dir = "foo/".  In order to calculate the number of
 			// subdirectories, we must subtract 1 from the number returned by split.
-			subDirs = len(strings.Split(dir, "/")) - 1
+			subDirs = len(strings.Split(dir, string(os.PathSeparator))) - 1
 			err := os.MkdirAll(path.Join(w.targetDir, dir), os.ModePerm)
 			if err != nil {
 				return err

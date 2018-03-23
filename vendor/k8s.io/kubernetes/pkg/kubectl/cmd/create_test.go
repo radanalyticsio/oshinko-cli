@@ -21,17 +21,20 @@ import (
 	"net/http"
 	"testing"
 
-	"k8s.io/kubernetes/pkg/client/typed/dynamic"
-	"k8s.io/kubernetes/pkg/client/unversioned/fake"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/rest/fake"
+	cmdtesting "k8s.io/kubernetes/pkg/kubectl/cmd/testing"
 )
 
 func TestExtraArgsFail(t *testing.T) {
 	initTestErrorHandler(t)
 	buf := bytes.NewBuffer([]byte{})
+	errBuf := bytes.NewBuffer([]byte{})
 
-	f, _, _, _ := NewAPIFactory()
-	c := NewCmdCreate(f, buf, buf)
-	if ValidateArgs(c, []string{"rc"}) == nil {
+	f, _, _, _ := cmdtesting.NewAPIFactory()
+	c := NewCmdCreate(f, buf, errBuf)
+	options := CreateOptions{}
+	if options.ValidateArgs(c, []string{"rc"}) == nil {
 		t.Errorf("unexpected non-error")
 	}
 }
@@ -41,11 +44,11 @@ func TestCreateObject(t *testing.T) {
 	_, _, rc := testData()
 	rc.Items[0].Name = "redis-master-controller"
 
-	f, tf, codec, _ := NewAPIFactory()
-	ns := dynamic.ContentConfig().NegotiatedSerializer
+	f, tf, codec, _ := cmdtesting.NewAPIFactory()
 	tf.Printer = &testPrinter{}
-	tf.Client = &fake.RESTClient{
-		NegotiatedSerializer: ns,
+	tf.UnstructuredClient = &fake.RESTClient{
+		GroupVersion:         schema.GroupVersion{Version: "v1"},
+		NegotiatedSerializer: unstructuredSerializer,
 		Client: fake.CreateHTTPClient(func(req *http.Request) (*http.Response, error) {
 			switch p, m := req.URL.Path, req.Method; {
 			case p == "/namespaces/test/replicationcontrollers" && m == http.MethodPost:
@@ -58,8 +61,9 @@ func TestCreateObject(t *testing.T) {
 	}
 	tf.Namespace = "test"
 	buf := bytes.NewBuffer([]byte{})
+	errBuf := bytes.NewBuffer([]byte{})
 
-	cmd := NewCmdCreate(f, buf, buf)
+	cmd := NewCmdCreate(f, buf, errBuf)
 	cmd.Flags().Set("filename", "../../../examples/guestbook/legacy/redis-master-controller.yaml")
 	cmd.Flags().Set("output", "name")
 	cmd.Run(cmd, []string{})
@@ -74,11 +78,11 @@ func TestCreateMultipleObject(t *testing.T) {
 	initTestErrorHandler(t)
 	_, svc, rc := testData()
 
-	f, tf, codec, _ := NewAPIFactory()
-	ns := dynamic.ContentConfig().NegotiatedSerializer
+	f, tf, codec, _ := cmdtesting.NewAPIFactory()
 	tf.Printer = &testPrinter{}
-	tf.Client = &fake.RESTClient{
-		NegotiatedSerializer: ns,
+	tf.UnstructuredClient = &fake.RESTClient{
+		GroupVersion:         schema.GroupVersion{Version: "v1"},
+		NegotiatedSerializer: unstructuredSerializer,
 		Client: fake.CreateHTTPClient(func(req *http.Request) (*http.Response, error) {
 			switch p, m := req.URL.Path, req.Method; {
 			case p == "/namespaces/test/services" && m == http.MethodPost:
@@ -93,8 +97,9 @@ func TestCreateMultipleObject(t *testing.T) {
 	}
 	tf.Namespace = "test"
 	buf := bytes.NewBuffer([]byte{})
+	errBuf := bytes.NewBuffer([]byte{})
 
-	cmd := NewCmdCreate(f, buf, buf)
+	cmd := NewCmdCreate(f, buf, errBuf)
 	cmd.Flags().Set("filename", "../../../examples/guestbook/legacy/redis-master-controller.yaml")
 	cmd.Flags().Set("filename", "../../../examples/guestbook/frontend-service.yaml")
 	cmd.Flags().Set("output", "name")
@@ -111,11 +116,11 @@ func TestCreateDirectory(t *testing.T) {
 	_, _, rc := testData()
 	rc.Items[0].Name = "name"
 
-	f, tf, codec, _ := NewAPIFactory()
-	ns := dynamic.ContentConfig().NegotiatedSerializer
+	f, tf, codec, _ := cmdtesting.NewAPIFactory()
 	tf.Printer = &testPrinter{}
-	tf.Client = &fake.RESTClient{
-		NegotiatedSerializer: ns,
+	tf.UnstructuredClient = &fake.RESTClient{
+		GroupVersion:         schema.GroupVersion{Version: "v1"},
+		NegotiatedSerializer: unstructuredSerializer,
 		Client: fake.CreateHTTPClient(func(req *http.Request) (*http.Response, error) {
 			switch p, m := req.URL.Path, req.Method; {
 			case p == "/namespaces/test/replicationcontrollers" && m == http.MethodPost:
@@ -128,8 +133,9 @@ func TestCreateDirectory(t *testing.T) {
 	}
 	tf.Namespace = "test"
 	buf := bytes.NewBuffer([]byte{})
+	errBuf := bytes.NewBuffer([]byte{})
 
-	cmd := NewCmdCreate(f, buf, buf)
+	cmd := NewCmdCreate(f, buf, errBuf)
 	cmd.Flags().Set("filename", "../../../examples/guestbook/legacy")
 	cmd.Flags().Set("output", "name")
 	cmd.Run(cmd, []string{})
