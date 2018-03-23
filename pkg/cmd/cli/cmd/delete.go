@@ -5,7 +5,8 @@ import (
 	"github.com/spf13/cobra"
 	"io"
 
-	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	//"github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	"github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
@@ -43,7 +44,7 @@ func CmdDelete(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 		Hidden: extended,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Complete(f, cmd, args); err != nil {
-				kcmdutil.CheckErr(kcmdutil.UsageError(cmd, err.Error()))
+				kcmdutil.CheckErr(kcmdutil.UsageErrorf(cmd, err.Error()))
 			}
 			if err := options.RunDelete(out, cmd, args); err != nil {
 				kcmdutil.CheckErr(err)
@@ -64,7 +65,7 @@ func (o *CmdOptions) RunDelete(out io.Writer, cmd *cobra.Command, args []string)
 	if (o.App == "" || o.AppStatus == "") && o.App + o.AppStatus != "" {
 		return fmt.Errorf("Both --app and --app-status must be set")
 	}
-	info, err := clusters.DeleteCluster(o.Name, o.Project, o.Client, o.KClient, o.App, o.AppStatus)
+	info, err := clusters.DeleteCluster(o.Name, o.Project, o.Config, o.App, o.AppStatus)
 	if info != "" && (err != nil || o.Verbose){
 		fmt.Println(info)
 	}
