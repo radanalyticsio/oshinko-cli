@@ -9,22 +9,23 @@ os::util::environment::setup_time_vars
 
 os::build::setup_env
 
-function cleanup()
-{
-	out=$?
-	docker rmi test/scratchimage
-	cleanup_openshift
-	os::log::info "Exiting"
-	return "${out}"
-}
+function cleanup() {
+	return_code=$?
 
-trap "exit" INT TERM
+	docker rmi test/scratchimage
+
+	os::test::junit::generate_report
+	os::cleanup::all
+	os::util::describe_return_code "${return_code}"
+	exit "${return_code}"
+}
 trap "cleanup" EXIT
 
 os::log::info "Starting server"
 
 os::util::environment::use_sudo
-os::util::environment::setup_all_server_vars "test-extended/cmd/"
+os::cleanup::tmpdir
+os::util::environment::setup_all_server_vars
 
 os::log::system::start
 
@@ -35,7 +36,7 @@ export KUBECONFIG="${ADMIN_KUBECONFIG}"
 
 oc login -u system:admin -n default
 # let everyone be able to see stuff in the default namespace
-oadm policy add-role-to-group view system:authenticated -n default
+oc adm policy add-role-to-group view system:authenticated -n default
 
 os::start::registry
 oc rollout status dc/docker-registry
@@ -101,8 +102,6 @@ os::cmd::expect_success "docker login -u imagensbuilder -p ${token} -e fake@exam
 os::cmd::expect_success "oc import-image busybox:latest --confirm"
 os::cmd::expect_success "docker pull busybox"
 os::cmd::expect_success "docker tag docker.io/busybox:latest ${docker_registry}/image-ns/busybox:latest"
-os::cmd::expect_success "docker push ${docker_registry}/image-ns/busybox:latest"
-os::cmd::expect_success "docker rmi -f ${docker_registry}/image-ns/busybox:latest"
 
 
 DOCKER_CONFIG_JSON="${HOME}/.docker/config.json"
@@ -112,26 +111,26 @@ os::cmd::expect_success "oc delete secrets --all"
 os::cmd::expect_success "oc secrets new image-ns-pull .dockerconfigjson=${DOCKER_CONFIG_JSON}"
 os::cmd::expect_success "oc secrets new-dockercfg image-ns-pull-old --docker-email=fake@example.org --docker-username=imagensbuilder --docker-server=${docker_registry} --docker-password=${token}"
 
-os::cmd::expect_success "oc process -f test/extended/testdata/image-pull-secrets/pod-with-no-pull-secret.yaml --value=DOCKER_REGISTRY=${docker_registry} | oc create -f - "
+os::cmd::expect_success "oc process -f test/extended/testdata/image-pull-secrets/pod-with-no-pull-secret.yaml --param=DOCKER_REGISTRY=${docker_registry} | oc create -f - "
 os::cmd::try_until_text "oc describe pod/no-pull-pod" "Back-off pulling image"
 os::cmd::expect_success "oc delete pods --all"
 
-os::cmd::expect_success "oc process -f test/extended/testdata/image-pull-secrets/pod-with-new-pull-secret.yaml --value=DOCKER_REGISTRY=${docker_registry} | oc create -f - "
+os::cmd::expect_success "oc process -f test/extended/testdata/image-pull-secrets/pod-with-new-pull-secret.yaml --param=DOCKER_REGISTRY=${docker_registry} | oc create -f - "
 os::cmd::try_until_text "oc get pods/new-pull-pod -o jsonpath='{.status.containerStatuses[0].imageID}'" "docker"
 os::cmd::expect_success "oc delete pods --all"
 os::cmd::expect_success "docker rmi -f ${docker_registry}/image-ns/busybox:latest"
 
-os::cmd::expect_success "oc process -f test/extended/testdata/image-pull-secrets/pod-with-old-pull-secret.yaml --value=DOCKER_REGISTRY=${docker_registry} | oc create -f - "
+os::cmd::expect_success "oc process -f test/extended/testdata/image-pull-secrets/pod-with-old-pull-secret.yaml --param=DOCKER_REGISTRY=${docker_registry} | oc create -f - "
 os::cmd::try_until_text "oc get pods/old-pull-pod -o jsonpath='{.status.containerStatuses[0].imageID}'" "docker"
 os::cmd::expect_success "oc delete pods --all"
 os::cmd::expect_success "docker rmi -f ${docker_registry}/image-ns/busybox:latest"
 
-os::cmd::expect_success "oc process -f test/extended/testdata/image-pull-secrets/dc-with-old-pull-secret.yaml --value=DOCKER_REGISTRY=${docker_registry} | oc create -f - "
+os::cmd::expect_success "oc process -f test/extended/testdata/image-pull-secrets/dc-with-old-pull-secret.yaml --param=DOCKER_REGISTRY=${docker_registry} | oc create -f - "
 os::cmd::try_until_text "oc get pods/my-dc-old-1-hook-pre -o jsonpath='{.status.containerStatuses[0].imageID}'" "docker"
 os::cmd::expect_success "oc delete all --all"
 os::cmd::expect_success "docker rmi -f ${docker_registry}/image-ns/busybox:latest"
 
-os::cmd::expect_success "oc process -f test/extended/testdata/image-pull-secrets/dc-with-new-pull-secret.yaml --value=DOCKER_REGISTRY=${docker_registry} | oc create -f - "
+os::cmd::expect_success "oc process -f test/extended/testdata/image-pull-secrets/dc-with-new-pull-secret.yaml --param=DOCKER_REGISTRY=${docker_registry} | oc create -f - "
 os::cmd::try_until_text "oc get pods/my-dc-1-hook-pre -o jsonpath='{.status.containerStatuses[0].imageID}'" "docker"
 os::cmd::expect_success "oc delete all --all"
 os::cmd::expect_success "docker rmi -f ${docker_registry}/image-ns/busybox:latest"
@@ -148,7 +147,7 @@ os::test::junit::declare_suite_start "extended/cmd/service-signer"
 # check to make sure that service serving cert signing works correctly
 # nginx currently needs to run as root
 os::cmd::expect_success "oc login -u system:admin -n default"
-os::cmd::expect_success "oadm policy add-scc-to-user anyuid system:serviceaccount:service-serving-cert-generation:default"
+os::cmd::expect_success "oc adm policy add-scc-to-user anyuid system:serviceaccount:service-serving-cert-generation:default"
 
 os::cmd::expect_success "oc login -u serving-cert -p asdf"
 VERBOSE=true os::cmd::expect_success "oc new-project service-serving-cert-generation"
@@ -174,11 +173,9 @@ os::cmd::try_until_text 'oc get pods/centos -o jsonpath={.status.phase}' "Succee
 os::cmd::expect_success_and_text 'oc logs pods/centos' "Welcome to nginx"
 os::test::junit::declare_suite_end
 
-os::test::junit::declare_suite_end
-
 os::test::junit::declare_suite_start "extended/cmd/oc-on-kube"
 os::cmd::expect_success "oc login -u system:admin -n default"
-os::cmd::expect_success "oc new-project kube"
+os::cmd::expect_success "oc new-project kubeapi"
 os::cmd::expect_success "oc create -f test/testdata/kubernetes-server/apiserver.yaml"
 os::cmd::try_until_text "oc get pods/kube-apiserver -o 'jsonpath={.status.conditions[?(@.type == "Ready")].status}'" "True"
 os::cmd::try_until_text "oc get pods/kube-apiserver -o 'jsonpath={.status.podIP}'" "172"
@@ -187,3 +184,4 @@ kube_kubectl="${tmp}/kube-kubeconfig"
 os::cmd::try_until_text "oc login --config ${kube_kubectl}../kube-kubeconfig https://${kube_ip}:443 --token=secret --insecure-skip-tls-verify=true --loglevel=8" ' as "secret" using the token provided.'
 os::test::junit::declare_suite_end
 
+os::test::junit::declare_suite_end

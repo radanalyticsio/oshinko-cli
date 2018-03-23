@@ -3,7 +3,6 @@
   "apiVersion": "v1",
   "metadata": {
     "name": "ruby-helloworld-sample",
-    "creationTimestamp": null,
     "annotations": {
       "description": "This example shows how to create a simple ruby application in openshift origin v3",
       "iconClass": "icon-ruby",
@@ -12,11 +11,21 @@
   },
   "objects": [
     {
+      "kind": "Secret",
+      "apiVersion": "v1",
+      "metadata": {
+        "name": "dbsecret"
+      },
+      "stringData" : {
+        "mysql-user" : "${MYSQL_USER}",
+        "mysql-password" : "${MYSQL_PASSWORD}"
+      }
+    },
+    {
       "kind": "Service",
       "apiVersion": "v1",
       "metadata": {
-        "name": "frontend",
-        "creationTimestamp": null
+        "name": "frontend"
       },
       "spec": {
         "ports": [
@@ -43,7 +52,9 @@
       "apiVersion": "v1",
       "metadata": {
         "name": "route-edge",
-        "creationTimestamp": null
+        "annotations": {
+          "template.openshift.io/expose-uri": "http://{.spec.host}{.spec.path}"
+        }
       },
       "spec": {
         "host": "www.example.com",
@@ -61,8 +72,7 @@
       "kind": "ImageStream",
       "apiVersion": "v1",
       "metadata": {
-        "name": "origin-ruby-sample",
-        "creationTimestamp": null
+        "name": "origin-ruby-sample"
       },
       "spec": {},
       "status": {
@@ -73,8 +83,7 @@
       "kind": "ImageStream",
       "apiVersion": "v1",
       "metadata": {
-        "name": "ruby-22-centos7",
-        "creationTimestamp": null
+        "name": "ruby-22-centos7"
       },
       "spec": {
         "dockerImageRepository": "centos/ruby-22-centos7"
@@ -88,9 +97,11 @@
       "apiVersion": "v1",
       "metadata": {
         "name": "ruby-sample-build",
-        "creationTimestamp": null,
         "labels": {
           "name": "ruby-sample-build"
+        },
+        "annotations": {
+          "template.alpha.openshift.io/wait-for-ready": "true"
         }
       },
       "spec": {
@@ -104,7 +115,8 @@
           {
             "type": "Generic",
             "generic": {
-              "secret": "secret101"
+              "secret": "secret101",
+              "allowEnv": true
             }
           },
           {
@@ -146,7 +158,9 @@
       "apiVersion": "v1",
       "metadata": {
         "name": "frontend",
-        "creationTimestamp": null
+        "annotations": {
+          "template.alpha.openshift.io/wait-for-ready": "true"
+        }
       },
       "spec": {
         "strategy": {
@@ -174,7 +188,7 @@
               "failurePolicy": "Ignore",
               "execNewPod": {
                 "command": [
-                  "/bin/false"
+                  "/bin/true"
                 ],
                 "env": [
                   {
@@ -212,7 +226,6 @@
         },
         "template": {
           "metadata": {
-            "creationTimestamp": null,
             "labels": {
               "name": "frontend"
             }
@@ -230,20 +243,22 @@
                 ],
                 "env": [
                   {
-                    "name": "ADMIN_USERNAME",
-                    "value": "${ADMIN_USERNAME}"
-                  },
-                  {
-                    "name": "ADMIN_PASSWORD",
-                    "value": "${ADMIN_PASSWORD}"
-                  },
-                  {
                     "name": "MYSQL_USER",
-                    "value": "${MYSQL_USER}"
+                    "valueFrom": {
+                      "secretKeyRef" : {
+                        "name" : "dbsecret",
+                        "key" : "mysql-user"
+                      }
+                    }
                   },
                   {
                     "name": "MYSQL_PASSWORD",
-                    "value": "${MYSQL_PASSWORD}"
+                    "valueFrom": {
+                      "secretKeyRef" : {
+                        "name" : "dbsecret",
+                        "key" : "mysql-password"
+                      }
+                    }
                   },
                   {
                     "name": "MYSQL_DATABASE",
@@ -270,8 +285,7 @@
       "kind": "Service",
       "apiVersion": "v1",
       "metadata": {
-        "name": "database",
-        "creationTimestamp": null
+        "name": "database"
       },
       "spec": {
         "ports": [
@@ -298,7 +312,9 @@
       "apiVersion": "v1",
       "metadata": {
         "name": "database",
-        "creationTimestamp": null
+        "annotations": {
+          "template.alpha.openshift.io/wait-for-ready": "true"
+        }
       },
       "spec": {
         "strategy": {
@@ -320,11 +336,27 @@
                 "volumes": ["ruby-helloworld-data"]
               }
             },
+            "mid": {
+              "failurePolicy": "Abort",
+              "execNewPod": {
+                "command": [
+                  "/bin/true"
+                ],
+                "env": [
+                  {
+                    "name": "CUSTOM_VAR2",
+                    "value": "custom_value2"
+                  }
+                ],
+                "containerName": "ruby-helloworld-database",
+                "volumes": ["ruby-helloworld-data"]
+              }
+            },
             "post": {
               "failurePolicy": "Ignore",
               "execNewPod": {
                 "command": [
-                  "/bin/false"
+                  "/bin/true"
                 ],
                 "env": [
                   {
@@ -350,7 +382,6 @@
         },
         "template": {
           "metadata": {
-            "creationTimestamp": null,
             "labels": {
               "name": "database"
             }
@@ -359,7 +390,7 @@
             "containers": [
               {
                 "name": "ruby-helloworld-database",
-                "image": "openshift/mysql-55-centos7:latest",
+                "image": "centos/mysql-57-centos7:latest",
                 "ports": [
                   {
                     "containerPort": 3306,
@@ -369,11 +400,21 @@
                 "env": [
                   {
                     "name": "MYSQL_USER",
-                    "value": "${MYSQL_USER}"
+                    "valueFrom": {
+                      "secretKeyRef" : {
+                        "name" : "dbsecret",
+                        "key" : "mysql-user"
+                      }
+                    }
                   },
                   {
                     "name": "MYSQL_PASSWORD",
-                    "value": "${MYSQL_PASSWORD}"
+                    "valueFrom": {
+                      "secretKeyRef" : {
+                        "name" : "dbsecret",
+                        "key" : "mysql-password"
+                      }
+                    }
                   },
                   {
                     "name": "MYSQL_DATABASE",
@@ -413,33 +454,24 @@
   ],
   "parameters": [
     {
-      "name": "ADMIN_USERNAME",
-      "description": "administrator username",
-      "generate": "expression",
-      "from": "admin[A-Z0-9]{3}"
-    },
-    {
-      "name": "ADMIN_PASSWORD",
-      "description": "administrator password",
-      "generate": "expression",
-      "from": "[a-zA-Z0-9]{8}"
-    },
-    {
       "name": "MYSQL_USER",
       "description": "database username",
       "generate": "expression",
-      "from": "user[A-Z0-9]{3}"
+      "from": "user[A-Z0-9]{3}",
+      "required": true
     },
     {
       "name": "MYSQL_PASSWORD",
       "description": "database password",
       "generate": "expression",
-      "from": "[a-zA-Z0-9]{8}"
+      "from": "[a-zA-Z0-9]{8}",
+      "required": true
     },
     {
       "name": "MYSQL_DATABASE",
       "description": "database name",
-      "value": "root"
+      "value": "root",
+      "required": true
     }
   ],
   "labels": {

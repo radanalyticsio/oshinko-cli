@@ -3,20 +3,12 @@ kind: DeploymentConfig
 metadata:
   name: deployment-simple
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     name: deployment-simple
   strategy:
     type: Rolling
     rollingParams:
-      #TODO: add a hook for testing
-      #pre:
-      #  failurePolicy: Abort
-      #  execNewPod:
-      #    containerName: myapp
-      #    command:
-      #    - /bin/echo
-      #    - test pre hook executed
   template:
     metadata:
       labels:

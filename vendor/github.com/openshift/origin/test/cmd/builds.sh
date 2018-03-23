@@ -65,26 +65,10 @@ os::cmd::expect_failure_and_text 'oc new-build ruby-22-centos7~https://github.co
 os::cmd::expect_success 'oc delete all --all'
 
 os::cmd::expect_success "oc new-build -D \$'FROM centos:7' --no-output"
-os::cmd::expect_success_and_text 'oc get bc/centos -o=jsonpath="{.spec.output.to}"' '^nil$'
+os::cmd::expect_success_and_not_text 'oc get bc/centos -o=jsonpath="{.spec.output.to}"' '.'
 
 # Ensure output is valid JSON
 os::cmd::expect_success 'oc new-build -D "FROM centos:7" -o json | python -m json.tool'
-
-os::test::junit::declare_suite_start "cmd/builds/postcommithook"
-# Ensure post commit hook is executed
-os::cmd::expect_success 'oc new-build -D "FROM busybox:1"'
-os::cmd::try_until_text 'oc get istag busybox:1' 'busybox@sha256:'
-os::cmd::expect_success 'oc patch bc/busybox -p '\''{"spec":{"postCommit":{"script":"echo hello $1","args":["world"],"command":null}}}'\'
-os::cmd::expect_success_and_text 'oc get bc/busybox -o=jsonpath="{.spec.postCommit['\''script'\'','\''args'\'','\''command'\'']}"' '^echo hello \$1 \[world\] \[\]$'
-# os::cmd::expect_success_and_text 'oc start-build --wait --follow busybox' 'hello world'
-os::cmd::expect_success 'oc patch bc/busybox -p '\''{"spec":{"postCommit":{"command":["sh","-c"],"args":["echo explicit command"],"script":""}}}'\'
-os::cmd::expect_success_and_text 'oc get bc/busybox -o=jsonpath="{.spec.postCommit['\''script'\'','\''args'\'','\''command'\'']}"' ' \[echo explicit command\] \[sh -c\]'
-# os::cmd::expect_success_and_text 'oc start-build --wait --follow busybox' 'explicit command'
-os::cmd::expect_success 'oc patch bc/busybox -p '\''{"spec":{"postCommit":{"args":["echo","default entrypoint"],"command":null,"script":""}}}'\'
-os::cmd::expect_success_and_text 'oc get bc/busybox -o=jsonpath="{.spec.postCommit['\''script'\'','\''args'\'','\''command'\'']}"' ' \[echo default entrypoint\] \[\]'
-# os::cmd::expect_success_and_text 'oc start-build --wait --follow busybox' 'default entrypoint'
-echo "postCommitHook: ok"
-os::test::junit::declare_suite_end
 
 os::cmd::expect_success 'oc delete all --all'
 os::cmd::expect_success 'oc process -f examples/sample-app/application-template-dockerbuild.json -l build=docker | oc create -f -'
@@ -104,18 +88,29 @@ echo "patchAnonFields: ok"
 os::test::junit::declare_suite_end
 
 os::test::junit::declare_suite_start "cmd/builds/config"
-os::cmd::expect_success_and_text 'oc describe buildConfigs ruby-sample-build' "${url}/oapi/v1/namespaces/${project}/buildconfigs/ruby-sample-build/webhooks/secret101/github"
+os::cmd::expect_success_and_text 'oc describe buildConfigs ruby-sample-build' "${url}/apis/build.openshift.io/v1/namespaces/${project}/buildconfigs/ruby-sample-build/webhooks/<secret>/github"
 os::cmd::expect_success_and_text 'oc describe buildConfigs ruby-sample-build' "Webhook GitHub"
-os::cmd::expect_success_and_text 'oc describe buildConfigs ruby-sample-build' "${url}/oapi/v1/namespaces/${project}/buildconfigs/ruby-sample-build/webhooks/secret101/generic"
+os::cmd::expect_success_and_text 'oc describe buildConfigs ruby-sample-build' "${url}/apis/build.openshift.io/v1/namespaces/${project}/buildconfigs/ruby-sample-build/webhooks/<secret>/generic"
 os::cmd::expect_success_and_text 'oc describe buildConfigs ruby-sample-build' "Webhook Generic"
 os::cmd::expect_success 'oc start-build --list-webhooks=all ruby-sample-build'
 os::cmd::expect_success_and_text 'oc start-build --list-webhooks=all bc/ruby-sample-build' 'generic'
 os::cmd::expect_success_and_text 'oc start-build --list-webhooks=all ruby-sample-build' 'github'
-os::cmd::expect_success_and_text 'oc start-build --list-webhooks=github ruby-sample-build' 'secret101'
+os::cmd::expect_success_and_text 'oc start-build --list-webhooks=github ruby-sample-build' '<secret>'
 os::cmd::expect_failure 'oc start-build --list-webhooks=blah'
-os::cmd::expect_success "oc start-build --from-webhook='$(oc start-build --list-webhooks='generic' ruby-sample-build --api-version=v1 | head -n 1)'"
+hook=$(oc start-build --list-webhooks='generic' ruby-sample-build | head -n 1)
+hook=${hook/<secret>/secret101}
+os::cmd::expect_success_and_text "oc start-build --from-webhook=${hook}" "build \"ruby-sample-build-[0-9]\" started"
+os::cmd::expect_failure_and_text "oc start-build --from-webhook=${hook}/foo" "error: server rejected our request"
+os::cmd::expect_success "oc patch bc/ruby-sample-build -p '{\"spec\":{\"strategy\":{\"dockerStrategy\":{\"from\":{\"name\":\"asdf:7\"}}}}}'"
+os::cmd::expect_failure_and_text "oc start-build --from-webhook=${hook}" "Error resolving ImageStreamTag asdf:7"
 os::cmd::expect_success 'oc get builds'
+os::cmd::expect_success 'oc set triggers bc/ruby-sample-build --from-github --remove'
+os::cmd::expect_success_and_not_text 'oc describe buildConfigs ruby-sample-build' "Webhook GitHub"
+# make sure we describe webhooks using secretReferences properly
+os::cmd::expect_success "oc patch bc/ruby-sample-build -p '{\"spec\":{\"triggers\":[{\"github\":{\"secretReference\":{\"name\":\"mysecret\"}},\"type\":\"GitHub\"}]}}'"
+os::cmd::expect_success_and_text 'oc describe buildConfigs ruby-sample-build' "Webhook GitHub"
 os::cmd::expect_success 'oc delete all -l build=docker'
+
 echo "buildConfig: ok"
 os::test::junit::declare_suite_end
 
@@ -131,12 +126,47 @@ os::cmd::expect_success_and_text "oc describe build ${frombuild}" 'centos/ruby-2
 os::cmd::expect_failure_and_text "oc start-build ruby-sample-build-invalid-tag --from-dir=. --from-build=${started}" "Cannot use '--from-build' flag with binary builds"
 os::cmd::expect_failure_and_text "oc start-build ruby-sample-build-invalid-tag --from-file=. --from-build=${started}" "Cannot use '--from-build' flag with binary builds"
 os::cmd::expect_failure_and_text "oc start-build ruby-sample-build-invalid-tag --from-repo=. --from-build=${started}" "Cannot use '--from-build' flag with binary builds"
+# --incremental flag should override Spec.Strategy.SourceStrategy.Incremental
+os::cmd::expect_success 'oc create -f test/extended/testdata/builds/test-s2i-build.json'
+build_name="$(oc start-build -o=name test)"
+os::cmd::expect_success_and_not_text "oc describe ${build_name}" 'Incremental Build'
+build_name="$(oc start-build -o=name --incremental test)"
+os::cmd::expect_success_and_text "oc describe ${build_name}" 'Incremental Build'
+os::cmd::expect_success "oc patch bc/test -p '{\"spec\":{\"strategy\":{\"sourceStrategy\":{\"incremental\": true}}}}'"
+build_name="$(oc start-build -o=name test)"
+os::cmd::expect_success_and_text "oc describe ${build_name}" 'Incremental Build'
+build_name="$(oc start-build -o=name --incremental=false test)"
+os::cmd::expect_success_and_not_text "oc describe ${build_name}" 'Incremental Build'
+os::cmd::expect_success "oc patch bc/test -p '{\"spec\":{\"strategy\":{\"sourceStrategy\":{\"incremental\": false}}}}'"
+build_name="$(oc start-build -o=name test)"
+os::cmd::expect_success_and_not_text "oc describe ${build_name}" 'Incremental Build'
+build_name="$(oc start-build -o=name --incremental test)"
+os::cmd::expect_success_and_text "oc describe ${build_name}" 'Incremental Build'
+os::cmd::expect_success 'oc delete all --selector="name=test"'
+# --no-cache flag should override Spec.Strategy.SourceStrategy.NoCache
+os::cmd::expect_success 'oc create -f test/extended/testdata/builds/test-docker-build.json'
+build_name="$(oc start-build -o=name test)"
+os::cmd::expect_success_and_not_text "oc describe ${build_name}" 'No Cache'
+build_name="$(oc start-build -o=name --no-cache test)"
+os::cmd::expect_success_and_text "oc describe ${build_name}" 'No Cache'
+os::cmd::expect_success "oc patch bc/test -p '{\"spec\":{\"strategy\":{\"dockerStrategy\":{\"noCache\": true}}}}'"
+build_name="$(oc start-build -o=name test)"
+os::cmd::expect_success_and_text "oc describe ${build_name}" 'No Cache'
+build_name="$(oc start-build -o=name --no-cache=false test)"
+os::cmd::expect_success_and_not_text "oc describe ${build_name}" 'No Cache'
+os::cmd::expect_success "oc patch bc/test -p '{\"spec\":{\"strategy\":{\"dockerStrategy\":{\"noCache\": false}}}}'"
+build_name="$(oc start-build -o=name test)"
+os::cmd::expect_success_and_not_text "oc describe ${build_name}" 'No Cache'
+build_name="$(oc start-build -o=name --no-cache test)"
+os::cmd::expect_success_and_text "oc describe ${build_name}" 'No Cache'
+os::cmd::expect_success 'oc delete all --selector="name=test"'
 echo "start-build: ok"
 os::test::junit::declare_suite_end
 
 os::test::junit::declare_suite_start "cmd/builds/cancel-build"
 os::cmd::expect_success_and_text "oc cancel-build ${started} --dump-logs --restart" "restarted build \"${started}\""
 os::cmd::expect_success 'oc delete all --all'
+os::cmd::expect_success 'oc delete secret dbsecret'
 os::cmd::expect_success 'oc process -f examples/sample-app/application-template-dockerbuild.json -l build=docker | oc create -f -'
 os::cmd::try_until_success 'oc get build/ruby-sample-build-1'
 # Uses type/name resource syntax to cancel the build and check for proper message
@@ -156,6 +186,7 @@ done
 # Running this command again when all builds are cancelled should be no-op.
 os::cmd::expect_success 'oc cancel-build bc/ruby-sample-build'
 os::cmd::expect_success 'oc delete all --all'
+os::cmd::expect_success 'oc delete secret dbsecret'
 echo "cancel-build: ok"
 os::test::junit::declare_suite_end
 

@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -11,14 +12,14 @@ import (
 	g "github.com/onsi/ginkgo"
 	o "github.com/onsi/gomega"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/util/wait"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	e2e "k8s.io/kubernetes/test/e2e/framework"
 
 	exutil "github.com/openshift/origin/test/extended/util"
 )
 
-var _ = g.Describe("[networking][router] weighted openshift router", func() {
+var _ = g.Describe("[Conformance][Area:Networking][Feature:Router] weighted openshift router", func() {
 	defer g.GinkgoRecover()
 	var (
 		configPath = exutil.FixturePath("testdata", "weighted-router.yaml")
@@ -26,25 +27,34 @@ var _ = g.Describe("[networking][router] weighted openshift router", func() {
 	)
 
 	g.BeforeEach(func() {
-		// defer oc.Run("delete").Args("-f", configPath).Execute()
+		imagePrefix := os.Getenv("OS_IMAGE_PREFIX")
+		if len(imagePrefix) == 0 {
+			imagePrefix = "openshift/origin"
+		}
 		err := oc.AsAdmin().Run("adm").Args("policy", "add-cluster-role-to-user", "system:router", oc.Username()).Execute()
 		o.Expect(err).NotTo(o.HaveOccurred())
-		err = oc.Run("create").Args("-f", configPath).Execute()
+		err = oc.Run("new-app").Args("-f", configPath, "-p", "IMAGE="+imagePrefix+"-haproxy-router").Execute()
 		o.Expect(err).NotTo(o.HaveOccurred())
 	})
 
 	g.Describe("The HAProxy router", func() {
 		g.It("should appropriately serve a route that points to two services", func() {
+			defer func() {
+				// This should be done if the test fails but
+				// for now always dump the logs.
+				// if g.CurrentGinkgoTestDescription().Failed
+				dumpWeightedRouterLogs(oc, g.CurrentGinkgoTestDescription().FullTestText)
+			}()
 			oc.SetOutputDir(exutil.TestContext.OutputDir)
 			ns := oc.KubeFramework().Namespace.Name
-			execPodName := exutil.CreateExecPodOrFail(oc.AdminKubeREST(), ns, "execpod")
-			defer func() { oc.AdminKubeREST().Pods(ns).Delete(execPodName, kapi.NewDeleteOptions(1)) }()
+			execPodName := exutil.CreateExecPodOrFail(oc.AdminKubeClient().Core(), ns, "execpod")
+			defer func() { oc.AdminKubeClient().Core().Pods(ns).Delete(execPodName, metav1.NewDeleteOptions(1)) }()
 
 			g.By(fmt.Sprintf("creating a weighted router from a config file %q", configPath))
 
 			var routerIP string
 			err := wait.Poll(time.Second, changeTimeoutSeconds*time.Second, func() (bool, error) {
-				pod, err := oc.KubeFramework().Client.Pods(oc.KubeFramework().Namespace.Name).Get("weighted-router")
+				pod, err := oc.KubeFramework().ClientSet.Core().Pods(oc.KubeFramework().Namespace.Name).Get("weighted-router", metav1.GetOptions{})
 				if err != nil {
 					return false, err
 				}
@@ -75,7 +85,7 @@ var _ = g.Describe("[networking][router] weighted openshift router", func() {
 			err = expectRouteStatusCodeRepeatedExec(ns, execPodName, routerURL, "weighted.example.com", http.StatusOK, times)
 			o.Expect(err).NotTo(o.HaveOccurred())
 
-			g.By(fmt.Sprintf("checking that there are two weighted backends in the router stats"))
+			g.By(fmt.Sprintf("checking that there are three weighted backends in the router stats"))
 			var trafficValues []string
 			err = wait.PollImmediate(100*time.Millisecond, changeTimeoutSeconds*time.Second, func() (bool, error) {
 				statsURL := fmt.Sprintf("http://%s:1936/;csv", routerIP)
@@ -83,7 +93,7 @@ var _ = g.Describe("[networking][router] weighted openshift router", func() {
 				o.Expect(err).NotTo(o.HaveOccurred())
 				trafficValues, err = parseStats(stats, "weightedroute", 7)
 				o.Expect(err).NotTo(o.HaveOccurred())
-				return len(trafficValues) == 2, nil
+				return len(trafficValues) == 3, nil
 			})
 			o.Expect(err).NotTo(o.HaveOccurred())
 
@@ -119,4 +129,9 @@ func parseStats(stats string, backendSubstr string, statsField int) ([]string, e
 		}
 	}
 	return fieldValues, nil
+}
+
+func dumpWeightedRouterLogs(oc *exutil.CLI, name string) {
+	log, _ := e2e.GetPodLogs(oc.AdminKubeClient(), oc.KubeFramework().Namespace.Name, "weighted-router", "router")
+	e2e.Logf("Weighted Router test %s logs:\n %s", name, log)
 }

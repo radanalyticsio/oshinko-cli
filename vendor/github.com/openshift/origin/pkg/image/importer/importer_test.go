@@ -4,31 +4,224 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
+
+	gocontext "golang.org/x/net/context"
 
 	"github.com/docker/distribution"
-	"github.com/docker/distribution/digest"
+	"github.com/docker/distribution/context"
 	"github.com/docker/distribution/manifest/schema1"
 	"github.com/docker/distribution/manifest/schema2"
+	"github.com/docker/distribution/reference"
+	godigest "github.com/opencontainers/go-digest"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/unversioned"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 
-	"github.com/openshift/origin/pkg/image/api"
+	imageapi "github.com/openshift/origin/pkg/image/apis/image"
+	dockerregistry "github.com/openshift/origin/pkg/image/importer/dockerv1client"
+	"github.com/openshift/origin/pkg/image/registryclient"
 )
 
+type mockRetriever struct {
+	repo     distribution.Repository
+	insecure bool
+	err      error
+}
+
+func (r *mockRetriever) Repository(ctx gocontext.Context, registry *url.URL, repoName string, insecure bool) (distribution.Repository, error) {
+	r.insecure = insecure
+	return r.repo, r.err
+}
+
+type mockRepository struct {
+	repoErr, getErr, getByTagErr, getTagErr, tagErr, untagErr, allTagErr, err error
+
+	blobs *mockBlobStore
+
+	manifest distribution.Manifest
+	tags     map[string]string
+}
+
+func (r *mockRepository) Name() string { return "test" }
+func (r *mockRepository) Named() reference.Named {
+	named, _ := reference.WithName("test")
+	return named
+}
+
+func (r *mockRepository) Manifests(ctx context.Context, options ...distribution.ManifestServiceOption) (distribution.ManifestService, error) {
+	return r, r.repoErr
+}
+func (r *mockRepository) Blobs(ctx context.Context) distribution.BlobStore { return r.blobs }
+func (r *mockRepository) Exists(ctx context.Context, dgst godigest.Digest) (bool, error) {
+	return false, r.getErr
+}
+func (r *mockRepository) Get(ctx context.Context, dgst godigest.Digest, options ...distribution.ManifestServiceOption) (distribution.Manifest, error) {
+	for _, option := range options {
+		if _, ok := option.(distribution.WithTagOption); ok {
+			return r.manifest, r.getByTagErr
+		}
+	}
+	return r.manifest, r.getErr
+}
+func (r *mockRepository) Delete(ctx context.Context, dgst godigest.Digest) error {
+	return fmt.Errorf("not implemented")
+}
+func (r *mockRepository) Put(ctx context.Context, manifest distribution.Manifest, options ...distribution.ManifestServiceOption) (godigest.Digest, error) {
+	return "", fmt.Errorf("not implemented")
+}
+func (r *mockRepository) Tags(ctx context.Context) distribution.TagService {
+	return &mockTagService{repo: r}
+}
+
+type mockBlobStore struct {
+	distribution.BlobStore
+
+	blobs map[godigest.Digest][]byte
+
+	statErr, serveErr, openErr error
+}
+
+func (r *mockBlobStore) Stat(ctx context.Context, dgst godigest.Digest) (distribution.Descriptor, error) {
+	return distribution.Descriptor{}, r.statErr
+}
+
+func (r *mockBlobStore) ServeBlob(ctx context.Context, w http.ResponseWriter, req *http.Request, dgst godigest.Digest) error {
+	return r.serveErr
+}
+
+func (r *mockBlobStore) Open(ctx context.Context, dgst godigest.Digest) (distribution.ReadSeekCloser, error) {
+	return nil, r.openErr
+}
+
+func (r *mockBlobStore) Get(ctx context.Context, dgst godigest.Digest) ([]byte, error) {
+	b, exists := r.blobs[dgst]
+	if !exists {
+		return nil, distribution.ErrBlobUnknown
+	}
+	return b, nil
+}
+
+type mockTagService struct {
+	distribution.TagService
+
+	repo *mockRepository
+}
+
+func (r *mockTagService) Get(ctx context.Context, tag string) (distribution.Descriptor, error) {
+	v, ok := r.repo.tags[tag]
+	if !ok {
+		return distribution.Descriptor{}, r.repo.getTagErr
+	}
+	dgst, err := godigest.Parse(v)
+	if err != nil {
+		panic(err)
+	}
+	return distribution.Descriptor{Digest: dgst}, r.repo.getTagErr
+}
+
+func (r *mockTagService) Tag(ctx context.Context, tag string, desc distribution.Descriptor) error {
+	r.repo.tags[tag] = desc.Digest.String()
+	return r.repo.tagErr
+}
+
+func (r *mockTagService) Untag(ctx context.Context, tag string) error {
+	if _, ok := r.repo.tags[tag]; ok {
+		delete(r.repo.tags, tag)
+	}
+	return r.repo.untagErr
+}
+
+func (r *mockTagService) All(ctx context.Context) (res []string, err error) {
+	err = r.repo.allTagErr
+	for tag := range r.repo.tags {
+		res = append(res, tag)
+	}
+	return
+}
+
+func (r *mockTagService) Lookup(ctx context.Context, digest distribution.Descriptor) ([]string, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func TestSchema1ToImage(t *testing.T) {
+	m := &schema1.SignedManifest{}
+	if err := json.Unmarshal([]byte(etcdManifest), m); err != nil {
+		t.Fatal(err)
+	}
+	image, err := schema1ToImage(m, godigest.Digest("sha256:test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if image.DockerImageMetadata.ID != "sha256:test" {
+		t.Errorf("unexpected image: %#v", image.DockerImageMetadata.ID)
+	}
+}
+
+func TestDockerV1Fallback(t *testing.T) {
+	var uri *url.URL
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Docker-Endpoints", uri.Host)
+
+		// get all tags
+		if strings.HasSuffix(r.URL.Path, "/tags") {
+			fmt.Fprintln(w, `{"tag1":"image1", "test":"image2"}`)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/images") {
+			fmt.Fprintln(w, `{"tag1":"image1", "test":"image2"}`)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/json") {
+			fmt.Fprintln(w, `{"ID":"image2"}`)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		t.Logf("tried to access %s", r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+
+	client := dockerregistry.NewClient(10*time.Second, false)
+	ctx := gocontext.WithValue(gocontext.Background(), ContextKeyV1RegistryClient, client)
+
+	uri, _ = url.Parse(server.URL)
+	isi := &imageapi.ImageStreamImport{
+		Spec: imageapi.ImageStreamImportSpec{
+			Repository: &imageapi.RepositoryImportSpec{
+				From:         kapi.ObjectReference{Kind: "DockerImage", Name: uri.Host + "/test:test"},
+				ImportPolicy: imageapi.TagImportPolicy{Insecure: true},
+			},
+		},
+	}
+
+	retriever := &mockRetriever{err: fmt.Errorf("does not support v2 API")}
+	im := NewImageStreamImporter(retriever, 5, nil, nil)
+	if err := im.Import(ctx, isi, nil); err != nil {
+		t.Fatal(err)
+	}
+	if images := isi.Status.Repository.Images; len(images) != 2 || images[0].Tag != "tag1" || images[1].Tag != "test" {
+		t.Errorf("unexpected images: %#v", images)
+	}
+}
+
 func TestImportNothing(t *testing.T) {
-	ctx := NewContext(http.DefaultTransport, http.DefaultTransport).WithCredentials(NoCredentials)
-	isi := &api.ImageStreamImport{}
+	ctx := registryclient.NewContext(http.DefaultTransport, http.DefaultTransport).WithCredentials(registryclient.NoCredentials)
+	isi := &imageapi.ImageStreamImport{}
 	i := NewImageStreamImporter(ctx, 5, nil, nil)
-	if err := i.Import(nil, isi); err != nil {
+	if err := i.Import(nil, isi, nil); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func expectStatusError(status unversioned.Status, message string) bool {
-	if status.Status != unversioned.StatusFailure || status.Message != message {
+func expectStatusError(status metav1.Status, message string) bool {
+	if status.Status != metav1.StatusFailure || status.Message != message {
 		return false
 	}
 	return true
@@ -39,18 +232,18 @@ func TestImport(t *testing.T) {
 	if err := json.Unmarshal([]byte(etcdManifest), etcdManifestSchema1); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("etcd manifest schema 1 digest: %q", digest.FromBytes([]byte(etcdManifest)))
+	t.Logf("etcd manifest schema 1 digest: %q", godigest.FromBytes([]byte(etcdManifest)))
 	busyboxManifestSchema2 := &schema2.DeserializedManifest{}
 	if err := busyboxManifestSchema2.UnmarshalJSON([]byte(busyboxManifest)); err != nil {
 		t.Fatal(err)
 	}
-	busyboxConfigDigest := digest.FromBytes([]byte(busyboxManifestConfig))
+	busyboxConfigDigest := godigest.FromBytes([]byte(busyboxManifestConfig))
 	busyboxManifestSchema2.Config = distribution.Descriptor{
 		Digest:    busyboxConfigDigest,
 		Size:      int64(len(busyboxManifestConfig)),
-		MediaType: schema2.MediaTypeConfig,
+		MediaType: schema2.MediaTypeImageConfig,
 	}
-	t.Logf("busybox manifest schema 2 digest: %q", digest.FromBytes([]byte(busyboxManifest)))
+	t.Logf("busybox manifest schema 2 digest: %q", godigest.FromBytes([]byte(busyboxManifest)))
 
 	insecureRetriever := &mockRetriever{
 		repo: &mockRepository{
@@ -61,19 +254,19 @@ func TestImport(t *testing.T) {
 	}
 	testCases := []struct {
 		retriever RepositoryRetriever
-		isi       api.ImageStreamImport
-		expect    func(*api.ImageStreamImport, *testing.T)
+		isi       imageapi.ImageStreamImport
+		expect    func(*imageapi.ImageStreamImport, *testing.T)
 	}{
 		{
 			retriever: insecureRetriever,
-			isi: api.ImageStreamImport{
-				Spec: api.ImageStreamImportSpec{
-					Images: []api.ImageImportSpec{
-						{From: kapi.ObjectReference{Kind: "DockerImage", Name: "test"}, ImportPolicy: api.TagImportPolicy{Insecure: true}},
+			isi: imageapi.ImageStreamImport{
+				Spec: imageapi.ImageStreamImportSpec{
+					Images: []imageapi.ImageImportSpec{
+						{From: kapi.ObjectReference{Kind: "DockerImage", Name: "test"}, ImportPolicy: imageapi.TagImportPolicy{Insecure: true}},
 					},
 				},
 			},
-			expect: func(isi *api.ImageStreamImport, t *testing.T) {
+			expect: func(isi *imageapi.ImageStreamImport, t *testing.T) {
 				if !insecureRetriever.insecure {
 					t.Errorf("expected retriever to beset insecure: %#v", insecureRetriever)
 				}
@@ -87,9 +280,9 @@ func TestImport(t *testing.T) {
 					getErr:      fmt.Errorf("no such digest"),
 				},
 			},
-			isi: api.ImageStreamImport{
-				Spec: api.ImageStreamImportSpec{
-					Images: []api.ImageImportSpec{
+			isi: imageapi.ImageStreamImport{
+				Spec: imageapi.ImageStreamImportSpec{
+					Images: []imageapi.ImageImportSpec{
 						{From: kapi.ObjectReference{Kind: "DockerImage", Name: "test"}},
 						{From: kapi.ObjectReference{Kind: "DockerImage", Name: "test@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
 						{From: kapi.ObjectReference{Kind: "DockerImage", Name: "test///un/parse/able/image"}},
@@ -97,15 +290,15 @@ func TestImport(t *testing.T) {
 					},
 				},
 			},
-			expect: func(isi *api.ImageStreamImport, t *testing.T) {
+			expect: func(isi *imageapi.ImageStreamImport, t *testing.T) {
 				if !expectStatusError(isi.Status.Images[0].Status, "Internal error occurred: no such manifest tag") {
 					t.Errorf("unexpected status: %#v", isi.Status.Images[0].Status)
 				}
 				if !expectStatusError(isi.Status.Images[1].Status, "Internal error occurred: no such digest") {
 					t.Errorf("unexpected status: %#v", isi.Status.Images[1].Status)
 				}
-				if !expectStatusError(isi.Status.Images[2].Status, " \"\" is invalid: from.name: Invalid value: \"test///un/parse/able/image\": invalid name: invalid reference format") {
-					t.Errorf("unexpected status: %#v", isi.Status.Images[2].Status)
+				if !expectStatusError(isi.Status.Images[2].Status, ` "" is invalid: from.name: Invalid value: "test///un/parse/able/image": invalid name: invalid reference format`) {
+					t.Errorf("unexpected status: %s", isi.Status.Images[2].Status.Message)
 				}
 				// non DockerImage refs are no-ops
 				if status := isi.Status.Images[3].Status; status.Status != "" {
@@ -121,42 +314,42 @@ func TestImport(t *testing.T) {
 		},
 		{
 			retriever: &mockRetriever{err: fmt.Errorf("error")},
-			isi: api.ImageStreamImport{
-				Spec: api.ImageStreamImportSpec{
-					Repository: &api.RepositoryImportSpec{
+			isi: imageapi.ImageStreamImport{
+				Spec: imageapi.ImageStreamImportSpec{
+					Repository: &imageapi.RepositoryImportSpec{
 						From: kapi.ObjectReference{Kind: "DockerImage", Name: "test"},
 					},
 				},
 			},
-			expect: func(isi *api.ImageStreamImport, t *testing.T) {
+			expect: func(isi *imageapi.ImageStreamImport, t *testing.T) {
 				if !reflect.DeepEqual(isi.Status.Repository.AdditionalTags, []string(nil)) {
 					t.Errorf("unexpected additional tags: %#v", isi.Status.Repository)
 				}
 				if len(isi.Status.Repository.Images) != 0 {
 					t.Errorf("unexpected number of images: %#v", isi.Status.Repository.Images)
 				}
-				if isi.Status.Repository.Status.Status != unversioned.StatusFailure || isi.Status.Repository.Status.Message != "Internal error occurred: error" {
+				if isi.Status.Repository.Status.Status != metav1.StatusFailure || isi.Status.Repository.Status.Message != "Internal error occurred: error" {
 					t.Errorf("unexpected status: %#v", isi.Status.Repository.Status)
 				}
 			},
 		},
 		{
 			retriever: &mockRetriever{repo: &mockRepository{manifest: etcdManifestSchema1}},
-			isi: api.ImageStreamImport{
-				Spec: api.ImageStreamImportSpec{
-					Images: []api.ImageImportSpec{
+			isi: imageapi.ImageStreamImport{
+				Spec: imageapi.ImageStreamImportSpec{
+					Images: []imageapi.ImageImportSpec{
 						{From: kapi.ObjectReference{Kind: "DockerImage", Name: "test@sha256:958608f8ecc1dc62c93b6c610f3a834dae4220c9642e6e8b4e0f2b3ad7cbd238"}},
 						{From: kapi.ObjectReference{Kind: "DockerImage", Name: "test:tag"}},
 					},
 				},
 			},
-			expect: func(isi *api.ImageStreamImport, t *testing.T) {
+			expect: func(isi *imageapi.ImageStreamImport, t *testing.T) {
 				if len(isi.Status.Images) != 2 {
 					t.Errorf("unexpected number of images: %#v", isi.Status.Repository.Images)
 				}
 				expectedTags := []string{"", "tag"}
 				for i, image := range isi.Status.Images {
-					if image.Status.Status != unversioned.StatusSuccess {
+					if image.Status.Status != metav1.StatusSuccess {
 						t.Errorf("unexpected status %d: %#v", i, image.Status)
 					}
 					// the image name is always the sha256, and size is calculated
@@ -177,26 +370,26 @@ func TestImport(t *testing.T) {
 			retriever: &mockRetriever{
 				repo: &mockRepository{
 					blobs: &mockBlobStore{
-						blobs: map[digest.Digest][]byte{
+						blobs: map[godigest.Digest][]byte{
 							busyboxConfigDigest: []byte(busyboxManifestConfig),
 						},
 					},
 					manifest: busyboxManifestSchema2,
 				},
 			},
-			isi: api.ImageStreamImport{
-				Spec: api.ImageStreamImportSpec{
-					Images: []api.ImageImportSpec{
+			isi: imageapi.ImageStreamImport{
+				Spec: imageapi.ImageStreamImportSpec{
+					Images: []imageapi.ImageImportSpec{
 						{From: kapi.ObjectReference{Kind: "DockerImage", Name: "test:busybox"}},
 					},
 				},
 			},
-			expect: func(isi *api.ImageStreamImport, t *testing.T) {
+			expect: func(isi *imageapi.ImageStreamImport, t *testing.T) {
 				if len(isi.Status.Images) != 1 {
 					t.Errorf("unexpected number of images: %#v", isi.Status.Repository.Images)
 				}
 				image := isi.Status.Images[0]
-				if image.Status.Status != unversioned.StatusSuccess {
+				if image.Status.Status != metav1.StatusSuccess {
 					t.Errorf("unexpected status: %#v", image.Status)
 				}
 				// the image name is always the sha256, and size is calculated
@@ -231,23 +424,23 @@ func TestImport(t *testing.T) {
 					getByTagErr: fmt.Errorf("no such manifest tag"),
 				},
 			},
-			isi: api.ImageStreamImport{
-				Spec: api.ImageStreamImportSpec{
-					Repository: &api.RepositoryImportSpec{
+			isi: imageapi.ImageStreamImport{
+				Spec: imageapi.ImageStreamImportSpec{
+					Repository: &imageapi.RepositoryImportSpec{
 						From: kapi.ObjectReference{Kind: "DockerImage", Name: "test"},
 					},
 				},
 			},
-			expect: func(isi *api.ImageStreamImport, t *testing.T) {
-				if !reflect.DeepEqual(isi.Status.Repository.AdditionalTags, []string{"other"}) {
+			expect: func(isi *imageapi.ImageStreamImport, t *testing.T) {
+				if !reflect.DeepEqual(isi.Status.Repository.AdditionalTags, []string{"v2"}) {
 					t.Errorf("unexpected additional tags: %#v", isi.Status.Repository)
 				}
 				if len(isi.Status.Repository.Images) != 5 {
 					t.Errorf("unexpected number of images: %#v", isi.Status.Repository.Images)
 				}
-				expectedTags := []string{"3", "v2", "v1", "3.1", "abc"}
+				expectedTags := []string{"3.1", "3", "abc", "other", "v1"}
 				for i, image := range isi.Status.Repository.Images {
-					if image.Status.Status != unversioned.StatusFailure || image.Status.Message != "Internal error occurred: no such manifest tag" {
+					if image.Status.Status != metav1.StatusFailure || image.Status.Message != "Internal error occurred: no such manifest tag" {
 						t.Errorf("unexpected status %d: %#v", i, isi.Status.Repository.Images)
 					}
 					if image.Tag != expectedTags[i] {
@@ -259,7 +452,7 @@ func TestImport(t *testing.T) {
 	}
 	for i, test := range testCases {
 		im := NewImageStreamImporter(test.retriever, 5, nil, nil)
-		if err := im.Import(nil, &test.isi); err != nil {
+		if err := im.Import(nil, &test.isi, &imageapi.ImageStream{}); err != nil {
 			t.Errorf("%d: %v", i, err)
 		}
 		if test.expect != nil {

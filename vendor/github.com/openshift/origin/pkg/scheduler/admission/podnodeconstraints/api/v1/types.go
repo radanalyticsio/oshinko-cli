@@ -1,8 +1,10 @@
 package v1
 
 import (
-	"k8s.io/kubernetes/pkg/api/unversioned"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // PodNodeConstraintsConfig is the configuration for the pod node name
 // and node selector constraint plug-in. For accounts, serviceaccounts
@@ -11,8 +13,8 @@ import (
 // setting NodeSelectors whose labels appear in the blacklist field
 // "NodeSelectorLabelBlacklist"
 type PodNodeConstraintsConfig struct {
-	unversioned.TypeMeta `json:",inline"`
+	metav1.TypeMeta `json:",inline"`
 
 	// NodeSelectorLabelBlacklist specifies a list of labels which cannot be set by entities without the "pods/binding" permission
-	NodeSelectorLabelBlacklist []string `json:"nodeSelectorLabelBlacklist",description:"list of labels which cannot be set by entities without the 'pods/binding' permission"`
+	NodeSelectorLabelBlacklist []string `json:"nodeSelectorLabelBlacklist" description:"list of labels which cannot be set by entities without the 'pods/binding' permission"`
 }

@@ -1,30 +1,32 @@
 package rules
 
 import (
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/labels"
-	"k8s.io/kubernetes/pkg/util/sets"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/openshift/origin/pkg/image/admission/imagepolicy/api"
-	imageapi "github.com/openshift/origin/pkg/image/api"
+	imageapi "github.com/openshift/origin/pkg/image/apis/image"
 )
 
 type ImagePolicyAttributes struct {
-	Resource           unversioned.GroupResource
+	Resource           schema.GroupResource
 	Name               imageapi.DockerImageReference
 	Image              *imageapi.Image
 	ExcludedRules      sets.String
 	IntegratedRegistry bool
+	LocalRewrite       bool
 }
 
 type RegistryMatcher interface {
 	Matches(name string) bool
 }
 
-type RegistryNameMatcher imageapi.DefaultRegistryFunc
+type RegistryNameMatcher func() (string, bool)
 
 func (m RegistryNameMatcher) Matches(name string) bool {
-	current, ok := imageapi.DefaultRegistryFunc(m)()
+	current, ok := m()
 	if !ok {
 		return false
 	}
@@ -46,13 +48,7 @@ func NewRegistryMatcher(names []string) RegistryMatcher {
 	return nameSet(names)
 }
 
-type resourceSet map[unversioned.GroupResource]struct{}
-
-func (s resourceSet) addAll(other resourceSet) {
-	for k := range other {
-		s[k] = struct{}{}
-	}
-}
+type resourceSet map[schema.GroupResource]struct{}
 
 func imageConditionInfo(rule *api.ImageCondition) (covers resourceSet, selectors []labels.Selector, err error) {
 	covers = make(resourceSet)
@@ -61,7 +57,7 @@ func imageConditionInfo(rule *api.ImageCondition) (covers resourceSet, selectors
 	}
 
 	for i := range rule.MatchImageLabels {
-		s, err := unversioned.LabelSelectorAsSelector(&rule.MatchImageLabels[i])
+		s, err := metav1.LabelSelectorAsSelector(&rule.MatchImageLabels[i])
 		if err != nil {
 			return nil, nil, err
 		}

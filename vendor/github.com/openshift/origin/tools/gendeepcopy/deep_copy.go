@@ -1,19 +1,3 @@
-/*
-Copyright 2015 The Kubernetes Authors All rights reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 // deepcopy-gen is a tool for auto-generating DeepCopy functions.
 //
 // Structs in the input directories with the below line in their comments
@@ -26,9 +10,9 @@ import (
 
 	"github.com/golang/glog"
 
-	"k8s.io/kubernetes/cmd/libs/go2idl/args"
-	"k8s.io/kubernetes/cmd/libs/go2idl/deepcopy-gen/generators"
-	"k8s.io/kubernetes/cmd/libs/go2idl/generator"
+	"k8s.io/gengo/args"
+	"k8s.io/gengo/examples/deepcopy-gen/generators"
+	"k8s.io/gengo/generator"
 )
 
 func main() {
@@ -36,46 +20,46 @@ func main() {
 
 	// Override defaults. These are Kubernetes specific input locations.
 	arguments.InputDirs = []string{
-		"k8s.io/kubernetes/pkg/api",
-		"k8s.io/kubernetes/pkg/api/unversioned",
-		"k8s.io/kubernetes/pkg/api/v1",
-		"k8s.io/kubernetes/pkg/apis/authorization",
-		"k8s.io/kubernetes/pkg/apis/authorization/v1beta1",
-		"k8s.io/kubernetes/pkg/apis/autoscaling",
-		"k8s.io/kubernetes/pkg/apis/autoscaling/v1",
-		"k8s.io/kubernetes/pkg/apis/batch",
-		"k8s.io/kubernetes/pkg/apis/batch/v1",
-		"k8s.io/kubernetes/pkg/apis/componentconfig",
-		"k8s.io/kubernetes/pkg/apis/componentconfig/v1alpha1",
-		"k8s.io/kubernetes/pkg/apis/extensions",
-		"k8s.io/kubernetes/pkg/apis/extensions/v1beta1",
-		"k8s.io/kubernetes/pkg/runtime",
-		"k8s.io/kubernetes/pkg/util/intstr",
-		"k8s.io/kubernetes/pkg/util/sets",
-		"github.com/openshift/origin/pkg/authorization/api/v1",
-		"github.com/openshift/origin/pkg/authorization/api",
-		"github.com/openshift/origin/pkg/build/api/v1",
-		"github.com/openshift/origin/pkg/build/api",
-		"github.com/openshift/origin/pkg/deploy/api/v1",
-		"github.com/openshift/origin/pkg/deploy/api",
-		"github.com/openshift/origin/pkg/image/api/v1",
-		"github.com/openshift/origin/pkg/image/api",
-		"github.com/openshift/origin/pkg/oauth/api/v1",
-		"github.com/openshift/origin/pkg/oauth/api",
-		"github.com/openshift/origin/pkg/project/api/v1",
-		"github.com/openshift/origin/pkg/project/api",
-		"github.com/openshift/origin/pkg/quota/api/v1",
-		"github.com/openshift/origin/pkg/quota/api",
-		"github.com/openshift/origin/pkg/route/api/v1",
-		"github.com/openshift/origin/pkg/route/api",
-		"github.com/openshift/origin/pkg/sdn/api/v1",
-		"github.com/openshift/origin/pkg/sdn/api",
-		"github.com/openshift/origin/pkg/template/api/v1",
-		"github.com/openshift/origin/pkg/template/api",
-		"github.com/openshift/origin/pkg/user/api/v1",
-		"github.com/openshift/origin/pkg/user/api",
-		"github.com/openshift/origin/pkg/security/api/v1",
-		"github.com/openshift/origin/pkg/security/api",
+		"github.com/openshift/origin/pkg/build/admission/testing",
+		"github.com/openshift/origin/pkg/build/controller/build/defaults/api",
+		"github.com/openshift/origin/pkg/build/controller/build/defaults/api/v1",
+		"github.com/openshift/origin/pkg/build/controller/build/overrides/api",
+		"github.com/openshift/origin/pkg/build/controller/build/overrides/api/v1",
+		"github.com/openshift/origin/pkg/cmd/server/api",
+		"github.com/openshift/origin/pkg/cmd/server/api/v1",
+		"github.com/openshift/origin/pkg/cmd/server/api/v1/testing",
+		"github.com/openshift/origin/pkg/cmd/util/pluginconfig/testing",
+		"github.com/openshift/origin/pkg/image/admission/imagepolicy/api",
+		"github.com/openshift/origin/pkg/image/admission/imagepolicy/api/v1",
+		"github.com/openshift/origin/pkg/ingress/admission/api",
+		"github.com/openshift/origin/pkg/ingress/admission/api/v1",
+		"github.com/openshift/origin/pkg/project/admission/lifecycle/testing",
+		"github.com/openshift/origin/pkg/project/admission/requestlimit/api",
+		"github.com/openshift/origin/pkg/project/admission/requestlimit/api/v1",
+		"github.com/openshift/origin/pkg/quota/admission/clusterresourceoverride/api",
+		"github.com/openshift/origin/pkg/quota/admission/clusterresourceoverride/api/v1",
+		"github.com/openshift/origin/pkg/quota/admission/runonceduration/api",
+		"github.com/openshift/origin/pkg/quota/admission/runonceduration/api/v1",
+		"github.com/openshift/origin/pkg/router/f5/testing",
+		"github.com/openshift/origin/pkg/scheduler/admission/podnodeconstraints/api",
+		"github.com/openshift/origin/pkg/scheduler/admission/podnodeconstraints/api/v1",
+		"github.com/openshift/origin/pkg/template/servicebroker/apis/config",
+		"github.com/openshift/origin/pkg/template/servicebroker/apis/config/v1",
+		"github.com/openshift/origin/pkg/util/testing",
+		"github.com/openshift/origin/test/integration/testing",
+		// internal apis
+		"github.com/openshift/origin/pkg/apps/apis/apps",
+		"github.com/openshift/origin/pkg/authorization/apis/authorization",
+		"github.com/openshift/origin/pkg/build/apis/build",
+		"github.com/openshift/origin/pkg/image/apis/image",
+		"github.com/openshift/origin/pkg/network/apis/network",
+		"github.com/openshift/origin/pkg/oauth/apis/oauth",
+		"github.com/openshift/origin/pkg/project/apis/project",
+		"github.com/openshift/origin/pkg/quota/apis/quota",
+		"github.com/openshift/origin/pkg/route/apis/route",
+		"github.com/openshift/origin/pkg/security/apis/security",
+		"github.com/openshift/origin/pkg/template/apis/template",
+		"github.com/openshift/origin/pkg/user/apis/user",
 	}
 
 	arguments.GeneratedBuildTag = "ignore_autogenerated_openshift"

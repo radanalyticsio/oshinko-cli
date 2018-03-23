@@ -5,15 +5,16 @@ import (
 	"strings"
 	"testing"
 
-	"k8s.io/kubernetes/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime"
 
-	buildapi "github.com/openshift/origin/pkg/build/api"
-	"github.com/openshift/origin/pkg/client/testclient"
+	buildapi "github.com/openshift/origin/pkg/build/apis/build"
+	buildfake "github.com/openshift/origin/pkg/build/generated/internalclientset/fake"
 )
 
 func bc(name string, annotation string) *buildapi.BuildConfig {
 	obj := &buildapi.BuildConfig{}
 	obj.Name = name
+	obj.Namespace = "test"
 	obj.Annotations = map[string]string{}
 	if len(annotation) > 0 {
 		obj.Annotations[gitRepositoryAnnotationKey] = annotation
@@ -60,7 +61,7 @@ func TestGetRepositoryBuildConfigs(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		client := testclient.NewSimpleFake(test.bcs...)
+		client := buildfake.NewSimpleClientset(test.bcs...)
 		output := &bytes.Buffer{}
 		GetRepositoryBuildConfigs(client, test.searchFor, output)
 		for _, c := range test.shouldContain {

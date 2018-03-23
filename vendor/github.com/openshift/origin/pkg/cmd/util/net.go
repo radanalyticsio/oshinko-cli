@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	knet "k8s.io/kubernetes/pkg/util/net"
-	"k8s.io/kubernetes/pkg/util/sets"
+	knet "k8s.io/apimachinery/pkg/util/net"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/golang/glog"
 )
@@ -19,7 +19,7 @@ import (
 func TryListen(network, hostPort string) (bool, error) {
 	l, err := net.Listen(network, hostPort)
 	if err != nil {
-		glog.V(5).Infof("Failure while checking listen on %s: %v", err)
+		glog.V(5).Infof("Failure while checking listen on %s: %v", hostPort, err)
 		return false, err
 	}
 	defer l.Close()
@@ -42,20 +42,6 @@ func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
 	tc.SetKeepAlive(true)
 	tc.SetKeepAlivePeriod(3 * time.Minute)
 	return tc, nil
-}
-
-// ListenAndServe starts a server that listens on the provided TCP mode (as supported
-// by net.Listen)
-func ListenAndServe(srv *http.Server, network string) error {
-	addr := srv.Addr
-	if addr == "" {
-		addr = ":http"
-	}
-	ln, err := net.Listen(network, addr)
-	if err != nil {
-		return err
-	}
-	return srv.Serve(tcpKeepAliveListener{ln.(*net.TCPListener)})
 }
 
 // ListenAndServeTLS starts a server that listens on the provided TCP mode (as supported

@@ -3,16 +3,29 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"os"
+	"path"
+	goruntime "runtime"
+	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/meta"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/rest"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/kubectl/resource"
-	"k8s.io/kubernetes/pkg/labels"
-	"k8s.io/kubernetes/pkg/runtime"
+
+	"github.com/openshift/origin/pkg/api/latest"
+	"github.com/openshift/origin/pkg/version"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 type Runner interface {
@@ -32,7 +45,7 @@ type RetryFunc func(info *resource.Info, err error) runtime.Object
 // Mapper is an interface testability that is equivalent to resource.Mapper
 type Mapper interface {
 	meta.RESTMapper
-	InfoForObject(obj runtime.Object, preferredGVKs []unversioned.GroupVersionKind) (*resource.Info, error)
+	InfoForObject(obj runtime.Object, preferredGVKs []schema.GroupVersionKind) (*resource.Info, error)
 }
 
 // IgnoreErrorFunc provides a way to filter errors during the Bulk.Run.  If this function returns
@@ -44,7 +57,12 @@ type IgnoreErrorFunc func(e error) bool
 
 // Bulk provides helpers for iterating over a list of items
 type Bulk struct {
-	Mapper Mapper
+	Mapper        Mapper
+	DynamicMapper Mapper
+
+	// PreferredSerializationOrder take a list of GVKs to decide how to serialize out the individual list items
+	// It allows partial values, so you specify just groups or versions as a for instance
+	PreferredSerializationOrder []schema.GroupVersionKind
 
 	Op          OpFunc
 	After       AfterFunc
@@ -52,7 +70,7 @@ type Bulk struct {
 	IgnoreError IgnoreErrorFunc
 }
 
-// Create attempts to create each item generically, gathering all errors in the
+// Run attempts to create each item generically, gathering all errors in the
 // event a failure occurs. The contents of list will be updated to include the
 // version from the server.
 func (b *Bulk) Run(list *kapi.List, namespace string) []error {
@@ -67,7 +85,13 @@ func (b *Bulk) Run(list *kapi.List, namespace string) []error {
 
 	errs := []error{}
 	for i, item := range list.Items {
-		info, err := b.Mapper.InfoForObject(item, nil)
+		var info *resource.Info
+		var err error
+		if _, ok := item.(*unstructured.Unstructured); ok {
+			info, err = b.DynamicMapper.InfoForObject(item, b.getPreferredSerializationOrder())
+		} else {
+			info, err = b.Mapper.InfoForObject(item, b.getPreferredSerializationOrder())
+		}
 		if err != nil {
 			errs = append(errs, err)
 			if after(info, err) {
@@ -99,15 +123,132 @@ func (b *Bulk) Run(list *kapi.List, namespace string) []error {
 	return errs
 }
 
+func (b *Bulk) getPreferredSerializationOrder() []schema.GroupVersionKind {
+	if len(b.PreferredSerializationOrder) > 0 {
+		return b.PreferredSerializationOrder
+	}
+	// it seems that the underlying impl expects to have at least one, even though this
+	// logically means something different.
+	return []schema.GroupVersionKind{{Group: ""}}
+}
+
+// ClientMapperFromConfig returns a ClientMapper suitable for Bulk operations.
+// TODO: copied from
+// pkg/cmd/util/clientcmd/factory_object_mapping.go#ClientForMapping and
+// vendor/k8s.io/kubernetes/pkg/kubectl/cmd/util/factory_object_mapping.go#ClientForMapping
+func ClientMapperFromConfig(config *rest.Config) resource.ClientMapperFunc {
+	return resource.ClientMapperFunc(func(mapping *meta.RESTMapping) (resource.RESTClient, error) {
+		configCopy := *config
+
+		if latest.OriginKind(mapping.GroupVersionKind) {
+			if err := SetLegacyOpenShiftDefaults(&configCopy); err != nil {
+				return nil, err
+			}
+			configCopy.APIPath = "/apis"
+			if mapping.GroupVersionKind.Group == kapi.GroupName {
+				configCopy.APIPath = "/oapi"
+			}
+			gv := mapping.GroupVersionKind.GroupVersion()
+			configCopy.GroupVersion = &gv
+			return rest.RESTClientFor(&configCopy)
+		}
+
+		if err := unversioned.SetKubernetesDefaults(&configCopy); err != nil {
+			return nil, err
+		}
+		gvk := mapping.GroupVersionKind
+		switch gvk.Group {
+		case kapi.GroupName:
+			configCopy.APIPath = "/api"
+		default:
+			configCopy.APIPath = "/apis"
+		}
+		gv := gvk.GroupVersion()
+		configCopy.GroupVersion = &gv
+		return rest.RESTClientFor(&configCopy)
+	})
+}
+
+// PreferredSerializationOrder returns the preferred ordering via discovery. If anything fails, it just
+// returns a list of with the empty (legacy) group
+func PreferredSerializationOrder(client discovery.DiscoveryInterface) []schema.GroupVersionKind {
+	ret := []schema.GroupVersionKind{{Group: ""}}
+	if client == nil {
+		return ret
+	}
+
+	groups, err := client.ServerGroups()
+	if err != nil {
+		return ret
+	}
+
+	resources, err := client.ServerResources()
+	if err != nil {
+		return ret
+	}
+
+	// add resources with kinds first, then groupversions second as a fallback.  Not all server versions provide kinds
+	// we have to specify individual kinds since our local scheme may have kinds not present on the server
+	for _, resourceList := range resources {
+		for _, resource := range resourceList.APIResources {
+			// if this is a sub resource, skip it
+			if strings.Contains(resource.Name, "/") {
+				continue
+			}
+			// if there is no kind, skip it
+			if len(resource.Kind) == 0 {
+				continue
+			}
+			gv, err := schema.ParseGroupVersion(resourceList.GroupVersion)
+			if err != nil {
+				continue
+			}
+			ret = append(ret, gv.WithKind(resource.Kind))
+		}
+	}
+
+	// we actually have to get to the granularity of versions because the server may not support the same versions
+	// in a group that we have locally.
+	for _, group := range groups.Groups {
+		for _, version := range group.Versions {
+			ret = append(ret, schema.GroupVersionKind{Group: group.Name, Version: version.Version})
+		}
+	}
+	return ret
+}
+
 func NewPrintNameOrErrorAfterIndent(mapper meta.RESTMapper, short bool, operation string, out, errs io.Writer, dryRun bool, indent string, prefixForError PrefixForError) AfterFunc {
 	return func(info *resource.Info, err error) bool {
 		if err == nil {
 			fmt.Fprintf(out, indent)
-			cmdutil.PrintSuccess(mapper, short, out, info.Mapping.Resource, info.Name, dryRun, operation)
+			printSuccess(mapper, short, out, info.Mapping.Resource, info.Name, dryRun, operation)
 		} else {
 			fmt.Fprintf(errs, "%s%s: %v\n", indent, prefixForError(err), err)
 		}
 		return false
+	}
+}
+
+func printSuccess(mapper meta.RESTMapper, shortOutput bool, out io.Writer, resource, name string, dryRun bool, operation string) {
+	resource, _ = mapper.ResourceSingularizer(resource)
+	dryRunMsg := ""
+	if dryRun {
+		dryRunMsg = " (dry run)"
+	}
+	if shortOutput {
+		// -o name: prints resource/name
+		if len(resource) > 0 {
+			fmt.Fprintf(out, "%s/%s\n", resource, name)
+		} else {
+			fmt.Fprintf(out, "%s\n", name)
+		}
+	} else {
+		// understandable output by default
+		if len(resource) > 0 {
+			fmt.Fprintf(out, "%s \"%s\" %s%s\n", resource, name, operation, dryRunMsg)
+		} else {
+			fmt.Fprintf(out, "\"%s\" %s%s\n", name, operation, dryRunMsg)
+		}
 	}
 }
 
@@ -131,6 +272,9 @@ func HaltOnError(fn AfterFunc) AfterFunc {
 
 // Create is the default create operation for a generic resource.
 func Create(info *resource.Info, namespace string, obj runtime.Object) (runtime.Object, error) {
+	if len(info.Namespace) > 0 {
+		namespace = info.Namespace
+	}
 	return resource.NewHelper(info.Client, info.Mapping).Create(namespace, false, obj)
 }
 
@@ -172,11 +316,34 @@ func (b *BulkAction) BindForAction(flags *pflag.FlagSet) {
 
 // BindForOutput sets flags on this action for when setting -o will not execute the action (the point of the action is
 // primarily to generate the output). Passing -o is asking for output, not execution.
-func (b *BulkAction) BindForOutput(flags *pflag.FlagSet) {
-	flags.StringVarP(&b.Output, "output", "o", "", "Output results as yaml or json instead of executing, or use name for succint output (resource/name).")
-	flags.BoolVar(&b.DryRun, "dry-run", false, "If true, show the result of the operation without performing it.")
-	flags.Bool("no-headers", false, "Omit table headers for default output.")
-	flags.MarkHidden("no-headers")
+func (b *BulkAction) BindForOutput(flags *pflag.FlagSet, skippedFlags ...string) {
+	skipped := sets.NewString(skippedFlags...)
+
+	if !skipped.Has("output") {
+		flags.StringVarP(&b.Output, "output", "o", "", "Output results as yaml or json instead of executing, or use name for succint output (resource/name).")
+	}
+	if !skipped.Has("dry-run") {
+		flags.BoolVar(&b.DryRun, "dry-run", false, "If true, show the result of the operation without performing it.")
+	}
+	if !skipped.Has("no-headers") {
+		flags.Bool("no-headers", false, "Omit table headers for default output.")
+		flags.MarkHidden("no-headers")
+	}
+
+	// we really want to call the AddNonDeprecatedPrinterFlags method, but that is broken since it doesn't bind vars
+	if !skipped.Has("show-labels") {
+		flags.Bool("show-labels", false, "When printing, show all labels as the last column (default hide labels column)")
+	}
+	if !skipped.Has("template") {
+		flags.String("template", "", "Template string or path to template file to use when -o=go-template, -o=go-template-file. The template format is golang templates [http://golang.org/pkg/text/template/#pkg-overview].")
+		cobra.MarkFlagFilename(flags, "template")
+	}
+	if !skipped.Has("sort-by") {
+		flags.String("sort-by", "", "If non-empty, sort list types using this field specification.  The field specification is expressed as a JSONPath expression (e.g. '{.metadata.name}'). The field in the API resource specified by this JSONPath expression must be an integer or a string.")
+	}
+	if !skipped.Has("show-all") {
+		flags.BoolP("show-all", "a", false, "When printing, show all resources (default hide terminated pods.)")
+	}
 }
 
 // Compact sets the output to a minimal set
@@ -247,4 +414,37 @@ func (b *BulkAction) Run(list *kapi.List, namespace string) []error {
 		}
 	}
 	return errs
+}
+
+// SetLegacyOpenShiftDefaults sets the default settings on the passed client configuration for legacy usage
+func SetLegacyOpenShiftDefaults(config *rest.Config) error {
+	if len(config.UserAgent) == 0 {
+		config.UserAgent = defaultOpenShiftUserAgent()
+	}
+	if config.GroupVersion == nil {
+		// Clients default to the preferred code API version
+		groupVersionCopy := latest.Version
+		config.GroupVersion = &groupVersionCopy
+	}
+	if config.APIPath == "" || config.APIPath == "/api" {
+		config.APIPath = "/oapi"
+	}
+	if config.NegotiatedSerializer == nil {
+		config.NegotiatedSerializer = legacyscheme.Codecs
+	}
+	return nil
+}
+
+func defaultOpenShiftUserAgent() string {
+	commit := version.Get().GitCommit
+	if len(commit) > 7 {
+		commit = commit[:7]
+	}
+	if len(commit) == 0 {
+		commit = "unknown"
+	}
+	version := version.Get().GitVersion
+	seg := strings.SplitN(version, "-", 2)
+	version = seg[0]
+	return fmt.Sprintf("%s/%s (%s/%s) openshift/%s", path.Base(os.Args[0]), version, goruntime.GOOS, goruntime.GOARCH, commit)
 }

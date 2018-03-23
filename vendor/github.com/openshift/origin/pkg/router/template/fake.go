@@ -5,12 +5,22 @@ package templaterouter
 func NewFakeTemplateRouter() *templateRouter {
 	fakeCertManager, _ := newSimpleCertificateManager(newFakeCertificateManagerConfig(), &fakeCertWriter{})
 	return &templateRouter{
-		state:                        map[string]ServiceAliasConfig{},
-		serviceUnits:                 make(map[string]ServiceUnit),
-		certManager:                  fakeCertManager,
-		rateLimitedCommitFunction:    nil,
-		rateLimitedCommitStopChannel: make(chan struct{}),
+		state:                     map[string]ServiceAliasConfig{},
+		serviceUnits:              make(map[string]ServiceUnit),
+		certManager:               fakeCertManager,
+		rateLimitedCommitFunction: nil,
 	}
+}
+
+// FakeReloadHandler implements the minimal changes needed to make the locking behavior work
+// This MUST match the behavior with the stateChanged of commitAndReload
+func (r *templateRouter) FakeReloadHandler() {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	r.stateChanged = false
+
+	return
 }
 
 // fakeCertWriter is a certificate writer that records actions but is a no-op

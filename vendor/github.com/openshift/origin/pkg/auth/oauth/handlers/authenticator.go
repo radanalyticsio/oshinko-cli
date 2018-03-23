@@ -6,9 +6,11 @@ import (
 	"github.com/RangelReale/osin"
 	"github.com/golang/glog"
 
+	"k8s.io/apiserver/pkg/authentication/authenticator"
+	"k8s.io/apiserver/pkg/authentication/user"
+
 	"github.com/openshift/origin/pkg/auth/api"
-	"github.com/openshift/origin/pkg/auth/authenticator"
-	"k8s.io/kubernetes/pkg/auth/user"
+	openshiftauthenticator "github.com/openshift/origin/pkg/auth/authenticator"
 )
 
 // AuthorizeAuthenticator implements osinserver.AuthorizeHandler to ensure requests are authenticated
@@ -21,6 +23,20 @@ type AuthorizeAuthenticator struct {
 // NewAuthorizeAuthenticator returns a new Authenticator
 func NewAuthorizeAuthenticator(request authenticator.Request, handler AuthenticationHandler, errorHandler AuthenticationErrorHandler) *AuthorizeAuthenticator {
 	return &AuthorizeAuthenticator{request, handler, errorHandler}
+}
+
+type TokenMaxAgeSeconds interface {
+	// GetTokenMaxAgeSeconds returns the max age of the token in seconds.
+	// 0 means no expiration.
+	// nil means to use the default expiration.
+	GetTokenMaxAgeSeconds() *int32
+}
+
+type TokenTimeoutSeconds interface {
+	// GetAccessTokenInactivityTimeoutSeconds returns the inactivity timeout
+	// for the token in seconds. 0 means no timeout.
+	// nil means to use the default expiration.
+	GetAccessTokenInactivityTimeoutSeconds() *int32
 }
 
 // HandleAuthorize implements osinserver.AuthorizeHandler to ensure the AuthorizeRequest is authenticated.
@@ -38,18 +54,28 @@ func (h *AuthorizeAuthenticator) HandleAuthorize(ar *osin.AuthorizeRequest, resp
 	glog.V(4).Infof("OAuth authentication succeeded: %#v", info)
 	ar.UserData = info
 	ar.Authorized = true
+
+	// If requesting a token directly, optionally override the expiration
+	if ar.Type == osin.TOKEN {
+		if e, ok := ar.Client.(TokenMaxAgeSeconds); ok {
+			if maxAge := e.GetTokenMaxAgeSeconds(); maxAge != nil {
+				ar.Expiration = *maxAge
+			}
+		}
+	}
+
 	return false, nil
 }
 
 // AccessAuthenticator implements osinserver.AccessHandler to ensure non-token requests are authenticated
 type AccessAuthenticator struct {
 	password  authenticator.Password
-	assertion authenticator.Assertion
-	client    authenticator.Client
+	assertion openshiftauthenticator.Assertion
+	client    openshiftauthenticator.Client
 }
 
 // NewAccessAuthenticator returns a new AccessAuthenticator
-func NewAccessAuthenticator(password authenticator.Password, assertion authenticator.Assertion, client authenticator.Client) *AccessAuthenticator {
+func NewAccessAuthenticator(password authenticator.Password, assertion openshiftauthenticator.Assertion, client openshiftauthenticator.Client) *AccessAuthenticator {
 	return &AccessAuthenticator{password, assertion, client}
 }
 
@@ -87,7 +113,14 @@ func (h *AccessAuthenticator) HandleAccess(ar *osin.AccessRequest, w http.Respon
 		if info != nil {
 			ar.AccessData.UserData = info
 		}
+
+		if e, ok := ar.Client.(TokenMaxAgeSeconds); ok {
+			if maxAge := e.GetTokenMaxAgeSeconds(); maxAge != nil {
+				ar.Expiration = *maxAge
+			}
+		}
 	}
+
 	return nil
 }
 

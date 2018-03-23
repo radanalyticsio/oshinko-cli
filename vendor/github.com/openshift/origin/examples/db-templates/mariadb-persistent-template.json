@@ -4,22 +4,48 @@
   "metadata": {
     "name": "mariadb-persistent",
     "annotations": {
-      "openshift.io/display-name": "MariaDB (Persistent)",
-      "description": "MariaDB database service, with persistent storage. For more information about using this template, including OpenShift considerations, see https://github.com/sclorg/mariadb-container/blob/master/10.1/README.md.\n\nNOTE: Scaling to more than one replica is not supported. You must have persistent volumes available in your cluster to use this template.",
+      "openshift.io/display-name": "MariaDB",
+      "description": "MariaDB database service, with persistent storage. For more information about using this template, including OpenShift considerations, see https://github.com/sclorg/mariadb-container/blob/master/10.2/root/usr/share/container-scripts/mysql/README.md.\n\nNOTE: Scaling to more than one replica is not supported. You must have persistent volumes available in your cluster to use this template.",
       "iconClass": "icon-mariadb",
-      "tags": "database,mariadb"
+      "tags": "database,mariadb",
+      "openshift.io/long-description": "This template provides a standalone MariaDB server with a database created.  The database is stored on persistent storage.  The database name, username, and password are chosen via parameters when provisioning this service.",
+      "openshift.io/provider-display-name": "Red Hat, Inc.",
+      "openshift.io/documentation-url": "https://github.com/sclorg/mariadb-container/blob/master/10.2/root/usr/share/container-scripts/mysql/README.md",
+      "openshift.io/support-url": "https://access.redhat.com"
     }
   },
-  "message": "The following service(s) have been created in your project: ${DATABASE_SERVICE_NAME}.\n\n       Username: ${MYSQL_USER}\n       Password: ${MYSQL_PASSWORD}\n  Database Name: ${MYSQL_DATABASE}\n Connection URL: mysql://${DATABASE_SERVICE_NAME}:3306/\n\nFor more information about using this template, including OpenShift considerations, see https://github.com/sclorg/mariadb-container/blob/master/10.1/README.md.",
+  "message": "The following service(s) have been created in your project: ${DATABASE_SERVICE_NAME}.\n\n       Username: ${MYSQL_USER}\n       Password: ${MYSQL_PASSWORD}\n  Database Name: ${MYSQL_DATABASE}\n Connection URL: mysql://${DATABASE_SERVICE_NAME}:3306/\n\nFor more information about using this template, including OpenShift considerations, see https://github.com/sclorg/mariadb-container/blob/master/10.2/root/usr/share/container-scripts/mysql/README.md.",
   "labels": {
     "template": "mariadb-persistent-template"
   },
   "objects": [
     {
+      "kind": "Secret",
+      "apiVersion": "v1",
+      "metadata": {
+        "name": "${DATABASE_SERVICE_NAME}",
+        "annotations": {
+          "template.openshift.io/expose-username": "{.data['database-user']}",
+          "template.openshift.io/expose-password": "{.data['database-password']}",
+          "template.openshift.io/expose-root_password": "{.data['database-root-password']}",
+          "template.openshift.io/expose-database_name": "{.data['database-name']}"
+        }
+      },
+      "stringData" : {
+        "database-user" : "${MYSQL_USER}",
+        "database-password" : "${MYSQL_PASSWORD}",
+        "database-root-password" : "${MYSQL_ROOT_PASSWORD}",
+        "database-name" : "${MYSQL_DATABASE}"
+      }
+    },
+    {
       "kind": "Service",
       "apiVersion": "v1",
       "metadata": {
-        "name": "${DATABASE_SERVICE_NAME}"
+        "name": "${DATABASE_SERVICE_NAME}",
+        "annotations": {
+          "template.openshift.io/expose-uri": "mysql://{.spec.clusterIP}:{.spec.ports[?(.name==\"mariadb\")].port}"
+        }
       },
       "spec": {
         "ports": [
@@ -54,7 +80,10 @@
       "kind": "DeploymentConfig",
       "apiVersion": "v1",
       "metadata": {
-        "name": "${DATABASE_SERVICE_NAME}"
+        "name": "${DATABASE_SERVICE_NAME}",
+        "annotations": {
+          "template.alpha.openshift.io/wait-for-ready": "true"
+        }
       },
       "spec": {
         "strategy": {
@@ -70,7 +99,7 @@
               ],
               "from": {
                 "kind": "ImageStreamTag",
-                "name": "mariadb:10.1",
+                "name": "mariadb:${MARIADB_VERSION}",
                 "namespace": "${NAMESPACE}"
               }
             }
@@ -117,15 +146,39 @@
                 "env": [
                   {
                     "name": "MYSQL_USER",
-                    "value": "${MYSQL_USER}"
+                    "valueFrom": {
+                      "secretKeyRef" : {
+                        "name" : "${DATABASE_SERVICE_NAME}",
+                        "key" : "database-user"
+                      }
+                    }
                   },
                   {
                     "name": "MYSQL_PASSWORD",
-                    "value": "${MYSQL_PASSWORD}"
+                    "valueFrom": {
+                      "secretKeyRef" : {
+                        "name" : "${DATABASE_SERVICE_NAME}",
+                        "key" : "database-password"
+                      }
+                    }
+                  },
+                  {
+                    "name": "MYSQL_ROOT_PASSWORD",
+                    "valueFrom": {
+                      "secretKeyRef" : {
+                        "name" : "${DATABASE_SERVICE_NAME}",
+                        "key" : "database-root-password"
+                      }
+                    }
                   },
                   {
                     "name": "MYSQL_DATABASE",
-                    "value": "${MYSQL_DATABASE}"
+                    "valueFrom": {
+                      "secretKeyRef" : {
+                        "name" : "${DATABASE_SERVICE_NAME}",
+                        "key" : "database-name"
+                      }
+                    }
                   }
                 ],
                 "resources": {
@@ -193,10 +246,25 @@
       "required": true
     },
     {
+      "name": "MYSQL_ROOT_PASSWORD",
+      "displayName": "MariaDB root Password",
+      "description": "Password for the MariaDB root user.",
+      "generate": "expression",
+      "from": "[a-zA-Z0-9]{16}",
+      "required": true
+    },
+    {
       "name": "MYSQL_DATABASE",
       "displayName": "MariaDB Database Name",
       "description": "Name of the MariaDB database accessed.",
       "value": "sampledb",
+      "required": true
+    },
+    {
+      "name": "MARIADB_VERSION",
+      "displayName": "Version of MariaDB Image",
+      "description": "Version of MariaDB image to be used (10.0, 10.1, 10.2 or latest).",
+      "value": "10.2",
       "required": true
     },
     {

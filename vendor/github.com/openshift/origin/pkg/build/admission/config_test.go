@@ -4,56 +4,26 @@ import (
 	"reflect"
 	"testing"
 
-	"k8s.io/kubernetes/pkg/api/unversioned"
-
+	testtypes "github.com/openshift/origin/pkg/build/admission/testing"
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
 	configapiv1 "github.com/openshift/origin/pkg/cmd/server/api/v1"
 
 	_ "github.com/openshift/origin/pkg/api/install"
 )
 
-type TestConfig struct {
-	unversioned.TypeMeta
-
-	Item1 string   `json:"item1"`
-	Item2 []string `json:"item2"`
-}
-
-type TestConfigV1 struct {
-	unversioned.TypeMeta
-
-	Item1 string   `json:"item1"`
-	Item2 []string `json:"item2"`
-}
-
-type OtherTestConfig2 struct {
-	unversioned.TypeMeta
-	Thing string `json:"thing"`
-}
-
-type OtherTestConfig2V2 struct {
-	unversioned.TypeMeta
-	Thing string `json:"thing"`
-}
-
-func (obj *TestConfig) GetObjectKind() unversioned.ObjectKind         { return &obj.TypeMeta }
-func (obj *TestConfigV1) GetObjectKind() unversioned.ObjectKind       { return &obj.TypeMeta }
-func (obj *OtherTestConfig2) GetObjectKind() unversioned.ObjectKind   { return &obj.TypeMeta }
-func (obj *OtherTestConfig2V2) GetObjectKind() unversioned.ObjectKind { return &obj.TypeMeta }
-
 func TestReadPluginConfig(t *testing.T) {
-	configapi.Scheme.AddKnownTypes(configapi.SchemeGroupVersion, &TestConfig{})
-	configapi.Scheme.AddKnownTypeWithName(configapiv1.SchemeGroupVersion.WithKind("TestConfig"), &TestConfigV1{})
-	configapi.Scheme.AddKnownTypes(configapi.SchemeGroupVersion, &OtherTestConfig2{})
-	configapi.Scheme.AddKnownTypeWithName(configapiv1.SchemeGroupVersion.WithKind("OtherTestConfig2"), &OtherTestConfig2V2{})
+	configapi.Scheme.AddKnownTypes(configapi.SchemeGroupVersion, &testtypes.TestConfig{})
+	configapi.Scheme.AddKnownTypeWithName(configapiv1.SchemeGroupVersion.WithKind("TestConfig"), &testtypes.TestConfigV1{})
+	configapi.Scheme.AddKnownTypes(configapi.SchemeGroupVersion, &testtypes.OtherTestConfig2{})
+	configapi.Scheme.AddKnownTypeWithName(configapiv1.SchemeGroupVersion.WithKind("OtherTestConfig2"), &testtypes.OtherTestConfig2V2{})
 
-	config := &TestConfig{}
+	config := &testtypes.TestConfig{}
 
-	expected := &TestConfig{
+	expected := &testtypes.TestConfig{
 		Item1: "hello",
 		Item2: []string{"foo", "bar"},
 	}
-	pluginCfg := map[string]configapi.AdmissionPluginConfig{"testconfig": {"", expected}}
+	pluginCfg := map[string]*configapi.AdmissionPluginConfig{"testconfig": {Location: "", Configuration: expected}}
 	// The config should match the expected config object
 	err := ReadPluginConfig(pluginCfg, "testconfig", config)
 	if err != nil {
@@ -64,15 +34,15 @@ func TestReadPluginConfig(t *testing.T) {
 	}
 
 	// Passing a nil cfg, should not get an error
-	pluginCfg = map[string]configapi.AdmissionPluginConfig{}
-	err = ReadPluginConfig(pluginCfg, "testconfig", &TestConfig{})
+	pluginCfg = map[string]*configapi.AdmissionPluginConfig{}
+	err = ReadPluginConfig(pluginCfg, "testconfig", &testtypes.TestConfig{})
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
 
 	// Passing the wrong type of destination object should result in an error
-	config2 := &OtherTestConfig2{}
-	pluginCfg = map[string]configapi.AdmissionPluginConfig{"testconfig": {"", expected}}
+	config2 := &testtypes.OtherTestConfig2{}
+	pluginCfg = map[string]*configapi.AdmissionPluginConfig{"testconfig": {Location: "", Configuration: expected}}
 	err = ReadPluginConfig(pluginCfg, "testconfig", config2)
 	if err == nil {
 		t.Fatalf("expected error")

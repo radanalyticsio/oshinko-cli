@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/openshift/origin/pkg/cmd/templates"
 	"github.com/spf13/cobra"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 
 	"github.com/openshift/origin/pkg/gitserver"
@@ -33,8 +33,7 @@ var (
 		This command lists build configurations in the current namespace that correspond to a given git repository.`)
 )
 
-// CommandFor returns the appropriate command for this base name,
-// or the global OpenShift command
+// CommandFor returns gitrepo-buildconfigs command or gitserver command
 func CommandFor(basename string) *cobra.Command {
 	var cmd *cobra.Command
 
@@ -97,7 +96,7 @@ func NewCommandRepositoryBuildConfigs(name string, out io.Writer) *cobra.Command
 		Long:  repositoryBuildConfigsDesc,
 		Run: func(c *cobra.Command, args []string) {
 			if len(args) != 1 {
-				err := cmdutil.UsageError(c, "This command takes a single argument - the name of the repository")
+				err := cmdutil.UsageErrorf(c, "This command takes a single argument - the name of the repository")
 				cmdutil.CheckErr(err)
 			}
 			repoName := args[0]

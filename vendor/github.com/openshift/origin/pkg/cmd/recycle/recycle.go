@@ -7,9 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-
-	"github.com/openshift/origin/pkg/cmd/templates"
 )
 
 var (
@@ -27,9 +26,16 @@ func NewCommandRecycle(name string, out io.Writer) *cobra.Command {
 		Long:  recyclerLong,
 		Run: func(c *cobra.Command, args []string) {
 			if len(args) != 1 {
-				kcmdutil.CheckErr(kcmdutil.UsageError(c, "a directory to recycle is required as the only argument"))
+				kcmdutil.CheckErr(kcmdutil.UsageErrorf(c, "a directory to recycle is required as the only argument"))
 			}
 			if err := Recycle(args[0]); err != nil {
+				kcmdutil.CheckErr(fmt.Errorf("recycle failed: %v", err))
+			}
+			if err := CheckEmpty(args[0]); err != nil {
+				// Recycler did not delete everything, some other pod has
+				// probably written some data there. Report an error and
+				// Kubernetes will try to recycle the volume again in few
+				// seconds.
 				kcmdutil.CheckErr(fmt.Errorf("recycle failed: %v", err))
 			}
 			fmt.Fprintln(out, "Scrub ok")
@@ -48,5 +54,17 @@ func Recycle(dir string) error {
 
 		// Delete all subfiles/subdirs
 		return os.Remove(path)
+	}).Walk(dir)
+}
+
+// CheckEmpty returns error if specified directory is not empty.
+func CheckEmpty(dir string) error {
+	return newWalker(func(path string, info os.FileInfo) error {
+		// Leave the root dir alone
+		if path == dir {
+			return nil
+		}
+		// Report any other existing file as error
+		return fmt.Errorf("Recycled volume is not empty")
 	}).Walk(dir)
 }

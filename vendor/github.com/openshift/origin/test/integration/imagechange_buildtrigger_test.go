@@ -1,17 +1,24 @@
 package integration
 
 import (
-	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
-	buildapi "github.com/openshift/origin/pkg/build/api"
-	"github.com/openshift/origin/pkg/client"
-	"github.com/openshift/origin/pkg/cmd/admin/policy"
+	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	watchapi "k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/rest"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	kclientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
+
+	authorizationapi "github.com/openshift/origin/pkg/authorization/apis/authorization"
+	authorizationclient "github.com/openshift/origin/pkg/authorization/generated/internalclientset"
+	buildapi "github.com/openshift/origin/pkg/build/apis/build"
+	buildclient "github.com/openshift/origin/pkg/build/generated/internalclientset"
 	"github.com/openshift/origin/pkg/cmd/server/bootstrappolicy"
-	imageapi "github.com/openshift/origin/pkg/image/api"
+	imageapi "github.com/openshift/origin/pkg/image/apis/image"
+	imageclient "github.com/openshift/origin/pkg/image/generated/internalclientset"
+	"github.com/openshift/origin/pkg/oc/admin/policy"
 	testutil "github.com/openshift/origin/test/util"
 	testserver "github.com/openshift/origin/test/util/server"
-	kapi "k8s.io/kubernetes/pkg/api"
-	watchapi "k8s.io/kubernetes/pkg/watch"
-	"testing"
 )
 
 const (
@@ -20,50 +27,50 @@ const (
 )
 
 func TestSimpleImageChangeBuildTriggerFromImageStreamTagSTI(t *testing.T) {
-	defer testutil.DumpEtcdOnFailure(t)
-	projectAdminClient, _ := setup(t)
+	_, _, projectAdminConfig, fn := setup(t)
+	defer fn()
 	imageStream := mockImageStream2(tag)
 	imageStreamMapping := mockImageStreamMapping(imageStream.Name, "someimage", tag, "registry:8080/openshift/test-image-trigger:"+tag)
 	strategy := stiStrategy("ImageStreamTag", streamName+":"+tag)
 	config := imageChangeBuildConfig("sti-imagestreamtag", strategy)
-	runTest(t, "SimpleImageChangeBuildTriggerFromImageStreamTagSTI", projectAdminClient, imageStream, imageStreamMapping, config, tag)
+	runTest(t, "SimpleImageChangeBuildTriggerFromImageStreamTagSTI", projectAdminConfig, imageStream, imageStreamMapping, config, tag)
 }
 
 func TestSimpleImageChangeBuildTriggerFromImageStreamTagSTIWithConfigChange(t *testing.T) {
-	defer testutil.DumpEtcdOnFailure(t)
-	projectAdminClient, _ := setup(t)
+	_, _, projectAdminConfig, fn := setup(t)
+	defer fn()
 	imageStream := mockImageStream2(tag)
 	imageStreamMapping := mockImageStreamMapping(imageStream.Name, "someimage", tag, "registry:8080/openshift/test-image-trigger:"+tag)
 	strategy := stiStrategy("ImageStreamTag", streamName+":"+tag)
 	config := imageChangeBuildConfigWithConfigChange("sti-imagestreamtag", strategy)
-	runTest(t, "SimpleImageChangeBuildTriggerFromImageStreamTagSTI", projectAdminClient, imageStream, imageStreamMapping, config, tag)
+	runTest(t, "SimpleImageChangeBuildTriggerFromImageStreamTagSTI", projectAdminConfig, imageStream, imageStreamMapping, config, tag)
 }
 
 func TestSimpleImageChangeBuildTriggerFromImageStreamTagDocker(t *testing.T) {
-	defer testutil.DumpEtcdOnFailure(t)
-	projectAdminClient, _ := setup(t)
+	_, _, projectAdminConfig, fn := setup(t)
+	defer fn()
 	imageStream := mockImageStream2(tag)
 	imageStreamMapping := mockImageStreamMapping(imageStream.Name, "someimage", tag, "registry:8080/openshift/test-image-trigger:"+tag)
 	strategy := dockerStrategy("ImageStreamTag", streamName+":"+tag)
 	config := imageChangeBuildConfig("docker-imagestreamtag", strategy)
-	runTest(t, "SimpleImageChangeBuildTriggerFromImageStreamTagDocker", projectAdminClient, imageStream, imageStreamMapping, config, tag)
+	runTest(t, "SimpleImageChangeBuildTriggerFromImageStreamTagDocker", projectAdminConfig, imageStream, imageStreamMapping, config, tag)
 }
 
 func TestSimpleImageChangeBuildTriggerFromImageStreamTagDockerWithConfigChange(t *testing.T) {
-	defer testutil.DumpEtcdOnFailure(t)
-	projectAdminClient, _ := setup(t)
+	_, _, projectAdminConfig, fn := setup(t)
+	defer fn()
 	imageStream := mockImageStream2(tag)
 	imageStreamMapping := mockImageStreamMapping(imageStream.Name, "someimage", tag, "registry:8080/openshift/test-image-trigger:"+tag)
 	strategy := dockerStrategy("ImageStreamTag", streamName+":"+tag)
 	config := imageChangeBuildConfigWithConfigChange("docker-imagestreamtag", strategy)
-	runTest(t, "SimpleImageChangeBuildTriggerFromImageStreamTagDocker", projectAdminClient, imageStream, imageStreamMapping, config, tag)
+	runTest(t, "SimpleImageChangeBuildTriggerFromImageStreamTagDocker", projectAdminConfig, imageStream, imageStreamMapping, config, tag)
 }
 
 func TestSimpleImageChangeBuildTriggerFromImageStreamTagCustom(t *testing.T) {
-	defer testutil.DumpEtcdOnFailure(t)
-	projectAdminClient, clusterAdminClient := setup(t)
+	clusterAdminClientConfig, projectAdminKubeClient, projectAdminConfig, fn := setup(t)
+	defer fn()
 
-	clusterRoleBindingAccessor := policy.NewClusterRoleBindingAccessor(clusterAdminClient)
+	clusterRoleBindingAccessor := policy.NewClusterRoleBindingAccessor(authorizationclient.NewForConfigOrDie(clusterAdminClientConfig).Authorization())
 	subjects := []kapi.ObjectReference{
 		{
 			Kind: authorizationapi.SystemGroupKind,
@@ -78,7 +85,7 @@ func TestSimpleImageChangeBuildTriggerFromImageStreamTagCustom(t *testing.T) {
 	}
 	options.AddRole()
 
-	if err := testutil.WaitForPolicyUpdate(projectAdminClient, testutil.Namespace(), "create", buildapi.Resource(authorizationapi.CustomBuildResource), true); err != nil {
+	if err := testutil.WaitForPolicyUpdate(projectAdminKubeClient.Authorization(), testutil.Namespace(), "create", buildapi.Resource(authorizationapi.CustomBuildResource), true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -86,18 +93,14 @@ func TestSimpleImageChangeBuildTriggerFromImageStreamTagCustom(t *testing.T) {
 	imageStreamMapping := mockImageStreamMapping(imageStream.Name, "someimage", tag, "registry:8080/openshift/test-image-trigger:"+tag)
 	strategy := customStrategy("ImageStreamTag", streamName+":"+tag)
 	config := imageChangeBuildConfig("custom-imagestreamtag", strategy)
-	runTest(t, "SimpleImageChangeBuildTriggerFromImageStreamTagCustom", projectAdminClient, imageStream, imageStreamMapping, config, tag)
+	runTest(t, "SimpleImageChangeBuildTriggerFromImageStreamTagCustom", projectAdminConfig, imageStream, imageStreamMapping, config, tag)
 }
 
 func TestSimpleImageChangeBuildTriggerFromImageStreamTagCustomWithConfigChange(t *testing.T) {
-	defer testutil.DumpEtcdOnFailure(t)
-	projectAdminClient, _ := setup(t)
+	clusterAdminClientConfig, projectAdminKubeClient, projectAdminConfig, fn := setup(t)
+	defer fn()
 
-	clusterAdminClient, err := testutil.GetClusterAdminClient(testutil.GetBaseDir() + "/openshift.local.config/master/admin.kubeconfig")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	clusterRoleBindingAccessor := policy.NewClusterRoleBindingAccessor(clusterAdminClient)
+	clusterRoleBindingAccessor := policy.NewClusterRoleBindingAccessor(authorizationclient.NewForConfigOrDie(clusterAdminClientConfig).Authorization())
 	subjects := []kapi.ObjectReference{
 		{
 			Kind: authorizationapi.SystemGroupKind,
@@ -112,7 +115,7 @@ func TestSimpleImageChangeBuildTriggerFromImageStreamTagCustomWithConfigChange(t
 	}
 	options.AddRole()
 
-	if err := testutil.WaitForPolicyUpdate(projectAdminClient, testutil.Namespace(), "create", buildapi.Resource(authorizationapi.CustomBuildResource), true); err != nil {
+	if err := testutil.WaitForPolicyUpdate(projectAdminKubeClient.Authorization(), testutil.Namespace(), "create", buildapi.Resource(authorizationapi.CustomBuildResource), true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -120,7 +123,7 @@ func TestSimpleImageChangeBuildTriggerFromImageStreamTagCustomWithConfigChange(t
 	imageStreamMapping := mockImageStreamMapping(imageStream.Name, "someimage", tag, "registry:8080/openshift/test-image-trigger:"+tag)
 	strategy := customStrategy("ImageStreamTag", streamName+":"+tag)
 	config := imageChangeBuildConfigWithConfigChange("custom-imagestreamtag", strategy)
-	runTest(t, "SimpleImageChangeBuildTriggerFromImageStreamTagCustom", projectAdminClient, imageStream, imageStreamMapping, config, tag)
+	runTest(t, "SimpleImageChangeBuildTriggerFromImageStreamTagCustom", projectAdminConfig, imageStream, imageStreamMapping, config, tag)
 }
 
 func dockerStrategy(kind, name string) buildapi.BuildStrategy {
@@ -156,7 +159,7 @@ func customStrategy(kind, name string) buildapi.BuildStrategy {
 
 func imageChangeBuildConfig(name string, strategy buildapi.BuildStrategy) *buildapi.BuildConfig {
 	return &buildapi.BuildConfig{
-		ObjectMeta: kapi.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: testutil.Namespace(),
 			Labels:    map[string]string{"testlabel": "testvalue"},
@@ -196,7 +199,7 @@ func imageChangeBuildConfigWithConfigChange(name string, strategy buildapi.Build
 
 func mockImageStream2(tag string) *imageapi.ImageStream {
 	return &imageapi.ImageStream{
-		ObjectMeta: kapi.ObjectMeta{Name: "test-image-trigger-repo"},
+		ObjectMeta: metav1.ObjectMeta{Name: "test-image-trigger-repo"},
 
 		Spec: imageapi.ImageStreamSpec{
 			DockerImageRepository: "registry:8080/openshift/test-image-trigger",
@@ -215,10 +218,10 @@ func mockImageStream2(tag string) *imageapi.ImageStream {
 func mockImageStreamMapping(stream, image, tag, reference string) *imageapi.ImageStreamMapping {
 	// create a mapping to an image that doesn't exist
 	return &imageapi.ImageStreamMapping{
-		ObjectMeta: kapi.ObjectMeta{Name: stream},
+		ObjectMeta: metav1.ObjectMeta{Name: stream},
 		Tag:        tag,
 		Image: imageapi.Image{
-			ObjectMeta: kapi.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: image,
 			},
 			DockerImageReference: reference,
@@ -226,14 +229,8 @@ func mockImageStreamMapping(stream, image, tag, reference string) *imageapi.Imag
 	}
 }
 
-func setup(t *testing.T) (*client.Client, *client.Client) {
-	testutil.RequireEtcd(t)
-	_, clusterAdminKubeConfigFile, err := testserver.StartTestMaster()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	clusterAdminClient, err := testutil.GetClusterAdminClient(clusterAdminKubeConfigFile)
+func setup(t *testing.T) (*rest.Config, kclientset.Interface, *rest.Config, func()) {
+	masterConfig, clusterAdminKubeConfigFile, err := testserver.StartTestMaster()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -243,38 +240,43 @@ func setup(t *testing.T) (*client.Client, *client.Client) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	projectAdminClient, err := testserver.CreateNewProject(clusterAdminClient, *clusterAdminKubeConfig, testutil.Namespace(), testutil.Namespace())
+	projectKubeAdminClient, projectAdminConfig, err := testserver.CreateNewProject(clusterAdminKubeConfig, testutil.Namespace(), testutil.Namespace())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	return projectAdminClient, clusterAdminClient
+	return clusterAdminKubeConfig, projectKubeAdminClient, projectAdminConfig, func() {
+		testserver.CleanupMasterEtcd(t, masterConfig)
+	}
 }
 
-func runTest(t *testing.T, testname string, projectAdminClient *client.Client, imageStream *imageapi.ImageStream, imageStreamMapping *imageapi.ImageStreamMapping, config *buildapi.BuildConfig, tag string) {
-	created, err := projectAdminClient.BuildConfigs(testutil.Namespace()).Create(config)
+func runTest(t *testing.T, testname string, projectAdminClientConfig *rest.Config, imageStream *imageapi.ImageStream, imageStreamMapping *imageapi.ImageStreamMapping, config *buildapi.BuildConfig, tag string) {
+	projectAdminBuildClient := buildclient.NewForConfigOrDie(projectAdminClientConfig).Build()
+	projectAdminImageClient := imageclient.NewForConfigOrDie(projectAdminClientConfig).Image()
+
+	created, err := projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Create(config)
 	if err != nil {
 		t.Fatalf("Couldn't create BuildConfig: %v", err)
 	}
 
-	buildWatch, err := projectAdminClient.Builds(testutil.Namespace()).Watch(kapi.ListOptions{ResourceVersion: created.ResourceVersion})
+	buildWatch, err := projectAdminBuildClient.Builds(testutil.Namespace()).Watch(metav1.ListOptions{ResourceVersion: created.ResourceVersion})
 	if err != nil {
 		t.Fatalf("Couldn't subscribe to Builds %v", err)
 	}
 	defer buildWatch.Stop()
 
-	buildConfigWatch, err := projectAdminClient.BuildConfigs(testutil.Namespace()).Watch(kapi.ListOptions{ResourceVersion: created.ResourceVersion})
+	buildConfigWatch, err := projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Watch(metav1.ListOptions{ResourceVersion: created.ResourceVersion})
 	if err != nil {
 		t.Fatalf("Couldn't subscribe to BuildConfigs %v", err)
 	}
 	defer buildConfigWatch.Stop()
 
-	imageStream, err = projectAdminClient.ImageStreams(testutil.Namespace()).Create(imageStream)
+	imageStream, err = projectAdminImageClient.ImageStreams(testutil.Namespace()).Create(imageStream)
 	if err != nil {
 		t.Fatalf("Couldn't create ImageStream: %v", err)
 	}
 
-	err = projectAdminClient.ImageStreamMappings(testutil.Namespace()).Create(imageStreamMapping)
+	_, err = projectAdminImageClient.ImageStreamMappings(testutil.Namespace()).Create(imageStreamMapping)
 	if err != nil {
 		t.Fatalf("Couldn't create Image: %v", err)
 	}
@@ -290,26 +292,26 @@ func runTest(t *testing.T, testname string, projectAdminClient *client.Client, i
 	switch {
 	case strategy.SourceStrategy != nil:
 		if strategy.SourceStrategy.From.Name != "registry:8080/openshift/test-image-trigger:"+tag {
-			i, _ := projectAdminClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name)
-			bc, _ := projectAdminClient.BuildConfigs(testutil.Namespace()).Get(config.Name)
+			i, _ := projectAdminImageClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name, metav1.GetOptions{})
+			bc, _ := projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Get(config.Name, metav1.GetOptions{})
 			t.Fatalf("Expected build with base image %s, got %s\n, imagerepo is %v\ntrigger is %s\n", "registry:8080/openshift/test-image-trigger:"+tag, strategy.SourceStrategy.From.Name, i, bc.Spec.Triggers[0].ImageChange)
 		}
 	case strategy.DockerStrategy != nil:
 		if strategy.DockerStrategy.From.Name != "registry:8080/openshift/test-image-trigger:"+tag {
-			i, _ := projectAdminClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name)
-			bc, _ := projectAdminClient.BuildConfigs(testutil.Namespace()).Get(config.Name)
+			i, _ := projectAdminImageClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name, metav1.GetOptions{})
+			bc, _ := projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Get(config.Name, metav1.GetOptions{})
 			t.Fatalf("Expected build with base image %s, got %s\n, imagerepo is %v\ntrigger is %s\n", "registry:8080/openshift/test-image-trigger:"+tag, strategy.DockerStrategy.From.Name, i, bc.Spec.Triggers[0].ImageChange)
 		}
 	case strategy.CustomStrategy != nil:
 		if strategy.CustomStrategy.From.Name != "registry:8080/openshift/test-image-trigger:"+tag {
-			i, _ := projectAdminClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name)
-			bc, _ := projectAdminClient.BuildConfigs(testutil.Namespace()).Get(config.Name)
+			i, _ := projectAdminImageClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name, metav1.GetOptions{})
+			bc, _ := projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Get(config.Name, metav1.GetOptions{})
 			t.Fatalf("Expected build with base image %s, got %s\n, imagerepo is %v\ntrigger is %s\n", "registry:8080/openshift/test-image-trigger:"+tag, strategy.CustomStrategy.From.Name, i, bc.Spec.Triggers[0].ImageChange)
 		}
 	}
 	event = <-buildWatch.ResultChan()
 	if e, a := watchapi.Modified, event.Type; e != a {
-		t.Fatalf("expected watch event type %s, got %s", e, a)
+		t.Fatalf("expected watch event type %s, got %s: %#v", e, a, event.Object)
 	}
 	newBuild = event.Object.(*buildapi.Build)
 	// Make sure the resolution of the build's docker image pushspec didn't mutate the persisted API object
@@ -322,7 +324,7 @@ func runTest(t *testing.T, testname string, projectAdminClient *client.Client, i
 
 	// wait for build config to be updated
 	<-buildConfigWatch.ResultChan()
-	updatedConfig, err := projectAdminClient.BuildConfigs(testutil.Namespace()).Get(config.Name)
+	updatedConfig, err := projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Get(config.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Couldn't get BuildConfig: %v", err)
 	}
@@ -332,14 +334,14 @@ func runTest(t *testing.T, testname string, projectAdminClient *client.Client, i
 	}
 
 	// trigger a build by posting a new image
-	if err := projectAdminClient.ImageStreamMappings(testutil.Namespace()).Create(&imageapi.ImageStreamMapping{
-		ObjectMeta: kapi.ObjectMeta{
+	if _, err := projectAdminImageClient.ImageStreamMappings(testutil.Namespace()).Create(&imageapi.ImageStreamMapping{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: testutil.Namespace(),
 			Name:      imageStream.Name,
 		},
 		Tag: tag,
 		Image: imageapi.Image{
-			ObjectMeta: kapi.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "ref-2-random",
 			},
 			DockerImageReference: "registry:8080/openshift/test-image-trigger:ref-2-random",
@@ -364,20 +366,20 @@ func runTest(t *testing.T, testname string, projectAdminClient *client.Client, i
 	switch {
 	case strategy.SourceStrategy != nil:
 		if strategy.SourceStrategy.From.Name != "registry:8080/openshift/test-image-trigger:ref-2-random" {
-			i, _ := projectAdminClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name)
-			bc, _ := projectAdminClient.BuildConfigs(testutil.Namespace()).Get(config.Name)
+			i, _ := projectAdminImageClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name, metav1.GetOptions{})
+			bc, _ := projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Get(config.Name, metav1.GetOptions{})
 			t.Fatalf("Expected build with base image %s, got %s\n, imagerepo is %v\trigger is %s\n", "registry:8080/openshift/test-image-trigger:ref-2-random", strategy.SourceStrategy.From.Name, i, bc.Spec.Triggers[3].ImageChange)
 		}
 	case strategy.DockerStrategy != nil:
 		if strategy.DockerStrategy.From.Name != "registry:8080/openshift/test-image-trigger:ref-2-random" {
-			i, _ := projectAdminClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name)
-			bc, _ := projectAdminClient.BuildConfigs(testutil.Namespace()).Get(config.Name)
+			i, _ := projectAdminImageClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name, metav1.GetOptions{})
+			bc, _ := projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Get(config.Name, metav1.GetOptions{})
 			t.Fatalf("Expected build with base image %s, got %s\n, imagerepo is %v\trigger is %s\n", "registry:8080/openshift/test-image-trigger:ref-2-random", strategy.DockerStrategy.From.Name, i, bc.Spec.Triggers[3].ImageChange)
 		}
 	case strategy.CustomStrategy != nil:
 		if strategy.CustomStrategy.From.Name != "registry:8080/openshift/test-image-trigger:ref-2-random" {
-			i, _ := projectAdminClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name)
-			bc, _ := projectAdminClient.BuildConfigs(testutil.Namespace()).Get(config.Name)
+			i, _ := projectAdminImageClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name, metav1.GetOptions{})
+			bc, _ := projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Get(config.Name, metav1.GetOptions{})
 			t.Fatalf("Expected build with base image %s, got %s\n, imagerepo is %v\trigger is %s\n", "registry:8080/openshift/test-image-trigger:ref-2-random", strategy.CustomStrategy.From.Name, i, bc.Spec.Triggers[3].ImageChange)
 		}
 	}
@@ -403,7 +405,7 @@ func runTest(t *testing.T, testname string, projectAdminClient *client.Client, i
 	}
 
 	<-buildConfigWatch.ResultChan()
-	updatedConfig, err = projectAdminClient.BuildConfigs(testutil.Namespace()).Get(config.Name)
+	updatedConfig, err = projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Get(config.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Couldn't get BuildConfig: %v", err)
 	}
@@ -413,10 +415,9 @@ func runTest(t *testing.T, testname string, projectAdminClient *client.Client, i
 }
 
 func TestMultipleImageChangeBuildTriggers(t *testing.T) {
-	defer testutil.DumpEtcdOnFailure(t)
 	mockImageStream := func(name, tag string) *imageapi.ImageStream {
 		return &imageapi.ImageStream{
-			ObjectMeta: kapi.ObjectMeta{Name: name},
+			ObjectMeta: metav1.ObjectMeta{Name: name},
 			Spec: imageapi.ImageStreamSpec{
 				DockerImageRepository: "registry:5000/openshift/" + name,
 				Tags: map[string]imageapi.TagReference{
@@ -433,10 +434,10 @@ func TestMultipleImageChangeBuildTriggers(t *testing.T) {
 	}
 	mockStreamMapping := func(name, tag string) *imageapi.ImageStreamMapping {
 		return &imageapi.ImageStreamMapping{
-			ObjectMeta: kapi.ObjectMeta{Name: name},
+			ObjectMeta: metav1.ObjectMeta{Name: name},
 			Tag:        tag,
 			Image: imageapi.Image{
-				ObjectMeta: kapi.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Name: name,
 				},
 				DockerImageReference: "registry:5000/openshift/" + name + ":" + tag,
@@ -474,7 +475,8 @@ func TestMultipleImageChangeBuildTriggers(t *testing.T) {
 		}
 		return bc
 	}
-	projectAdminClient, _ := setup(t)
+	_, _, projectAdminConfig, fn := setup(t)
+	defer fn()
 	config := multipleImageChangeBuildConfig()
 	triggersToTest := []struct {
 		triggerIndex int
@@ -497,18 +499,20 @@ func TestMultipleImageChangeBuildTriggers(t *testing.T) {
 			tag:          "tag3",
 		},
 	}
+	projectAdminBuildClient := buildclient.NewForConfigOrDie(projectAdminConfig).Build()
+	projectAdminImageClient := imageclient.NewForConfigOrDie(projectAdminConfig).Image()
 
-	created, err := projectAdminClient.BuildConfigs(testutil.Namespace()).Create(config)
+	created, err := projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Create(config)
 	if err != nil {
 		t.Fatalf("Couldn't create BuildConfig: %v", err)
 	}
-	buildWatch, err := projectAdminClient.Builds(testutil.Namespace()).Watch(kapi.ListOptions{ResourceVersion: created.ResourceVersion})
+	buildWatch, err := projectAdminBuildClient.Builds(testutil.Namespace()).Watch(metav1.ListOptions{ResourceVersion: created.ResourceVersion})
 	if err != nil {
 		t.Fatalf("Couldn't subscribe to Builds %v", err)
 	}
 	defer buildWatch.Stop()
 
-	buildConfigWatch, err := projectAdminClient.BuildConfigs(testutil.Namespace()).Watch(kapi.ListOptions{ResourceVersion: created.ResourceVersion})
+	buildConfigWatch, err := projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Watch(metav1.ListOptions{ResourceVersion: created.ResourceVersion})
 	if err != nil {
 		t.Fatalf("Couldn't subscribe to BuildConfigs %v", err)
 	}
@@ -522,12 +526,12 @@ func TestMultipleImageChangeBuildTriggers(t *testing.T) {
 	for _, tc := range triggersToTest {
 		imageStream := mockImageStream(tc.name, tc.tag)
 		imageStreamMapping := mockStreamMapping(tc.name, tc.tag)
-		imageStream, err = projectAdminClient.ImageStreams(testutil.Namespace()).Create(imageStream)
+		imageStream, err = projectAdminImageClient.ImageStreams(testutil.Namespace()).Create(imageStream)
 		if err != nil {
 			t.Fatalf("Couldn't create ImageStream: %v", err)
 		}
 
-		err = projectAdminClient.ImageStreamMappings(testutil.Namespace()).Create(imageStreamMapping)
+		_, err = projectAdminImageClient.ImageStreamMappings(testutil.Namespace()).Create(imageStreamMapping)
 		if err != nil {
 			t.Fatalf("Couldn't create Image: %v", err)
 		}
@@ -546,20 +550,20 @@ func TestMultipleImageChangeBuildTriggers(t *testing.T) {
 			switch {
 			case strategy.SourceStrategy != nil:
 				if strategy.SourceStrategy.From.Name != "registry:5000/openshift/"+tc.name+":"+tc.tag {
-					i, _ := projectAdminClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name)
-					bc, _ := projectAdminClient.BuildConfigs(testutil.Namespace()).Get(config.Name)
+					i, _ := projectAdminImageClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name, metav1.GetOptions{})
+					bc, _ := projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Get(config.Name, metav1.GetOptions{})
 					t.Fatalf("Expected build with base image %s, got %s\n, imagerepo is %v\ntrigger is %#v", "registry:5000/openshift/"+tc.name+":"+tc.tag, strategy.SourceStrategy.From.Name, i, bc.Spec.Triggers[tc.triggerIndex].ImageChange)
 				}
 			case strategy.DockerStrategy != nil:
 				if strategy.DockerStrategy.From.Name != "registry:8080/openshift/"+tc.name+":"+tc.tag {
-					i, _ := projectAdminClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name)
-					bc, _ := projectAdminClient.BuildConfigs(testutil.Namespace()).Get(config.Name)
+					i, _ := projectAdminImageClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name, metav1.GetOptions{})
+					bc, _ := projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Get(config.Name, metav1.GetOptions{})
 					t.Fatalf("Expected build with base image %s, got %s\n, imagerepo is %v\ntrigger is %#v", "registry:5000/openshift/"+tc.name+":"+tag, strategy.DockerStrategy.From.Name, i, bc.Spec.Triggers[tc.triggerIndex].ImageChange)
 				}
 			case strategy.CustomStrategy != nil:
 				if strategy.CustomStrategy.From.Name != "registry:8080/openshift/"+tc.name+":"+tag {
-					i, _ := projectAdminClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name)
-					bc, _ := projectAdminClient.BuildConfigs(testutil.Namespace()).Get(config.Name)
+					i, _ := projectAdminImageClient.ImageStreams(testutil.Namespace()).Get(imageStream.Name, metav1.GetOptions{})
+					bc, _ := projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Get(config.Name, metav1.GetOptions{})
 					t.Fatalf("Expected build with base image %s, got %s\n, imagerepo is %v\ntrigger is %#v", "registry:5000/openshift/"+tc.name+":"+tag, strategy.CustomStrategy.From.Name, i, bc.Spec.Triggers[tc.triggerIndex].ImageChange)
 				}
 
@@ -576,7 +580,7 @@ func TestMultipleImageChangeBuildTriggers(t *testing.T) {
 
 		// wait for build config to be updated
 		<-buildConfigWatch.ResultChan()
-		updatedConfig, err := projectAdminClient.BuildConfigs(testutil.Namespace()).Get(config.Name)
+		updatedConfig, err := projectAdminBuildClient.BuildConfigs(testutil.Namespace()).Get(config.Name, metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("Couldn't get BuildConfig: %v", err)
 		}

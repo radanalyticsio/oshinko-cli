@@ -18,7 +18,7 @@ os::cmd::expect_success_and_text 'oc get secrets/foo -o jsonpath={.type}' 'blah'
 
 os::cmd::expect_success 'oc secrets new-dockercfg dockercfg --docker-username=sample-user --docker-password=sample-password --docker-email=fake@example.org'
 # can't use a go template here because the output needs to be base64 decoded.  base64 isn't installed by default in all distros
-os::cmd::expect_success "oc describe secrets/dockercfg | grep 'dockercfg:' | awk '{print \$2}' > ${HOME}/dockerconfig"
+os::cmd::expect_success "oc get secrets/dockercfg -o jsonpath='{ .data.\.dockercfg }' | base64 -d > ${HOME}/dockerconfig"
 os::cmd::expect_success 'oc secrets new from-file .dockercfg=${HOME}/dockerconfig'
 # check to make sure the type was correctly auto-detected
 os::cmd::expect_success_and_text 'oc get secret/from-file --template="{{ .type }}"' 'kubernetes.io/dockercfg'
@@ -31,6 +31,8 @@ os::cmd::expect_failure_and_text 'oc secrets new bad-name .docker=cfg=${HOME}/do
 workingdir="$( mktemp -d )"
 os::cmd::try_until_success "oc get secret/dockercfg"
 os::cmd::expect_success_and_text "oc extract secret/dockercfg --to '${workingdir}'" '.dockercfg'
+os::cmd::expect_success_and_text "oc extract secret/dockercfg --to=-" 'sample-user'
+os::cmd::expect_success_and_text "oc extract secret/dockercfg --to=-" 'sample-password'
 os::cmd::expect_success_and_text "cat '${workingdir}/.dockercfg'" 'sample-user'
 os::cmd::expect_failure_and_text "oc extract secret/dockercfg --to '${workingdir}'" 'error: .dockercfg: file exists, pass --confirm to overwrite'
 os::cmd::expect_failure_and_text "oc extract secret/dockercfg secret/dockercfg --to '${workingdir}'" 'error: .dockercfg: file exists, pass --confirm to overwrite'
@@ -83,6 +85,19 @@ os::cmd::expect_success 'oc secrets add deployer basicauth sshauth --for=pull'
 os::cmd::expect_success 'oc secrets add deployer basicauth sshauth --for=pull,mount'
 
 # attach secrets to service account
+# test that those secrets can be unlinked
+# after they have been deleted.
+os::cmd::expect_success 'oc create secret generic deleted-secret'
+os::cmd::expect_success 'oc secrets link deployer deleted-secret'
+# confirm our soon-to-be-deleted secret has been linked
+os::cmd::expect_success_and_text "oc get serviceaccount deployer -o jsonpath='{.secrets[?(@.name==\"deleted-secret\")]}'" 'deleted\-secret'
+# delete "deleted-secret" and attempt to unlink from service account
+os::cmd::expect_success 'oc delete secret deleted-secret'
+os::cmd::expect_failure_and_text 'oc secrets unlink deployer secrets/deleted-secret' 'Unlinked deleted secrets'
+# ensure already-deleted secret has been unlinked
+os::cmd::expect_success_and_not_text "oc get serviceaccount deployer -o jsonpath='{.secrets[?(@.name==\"deleted-secret\")]}'" 'deleted\-secret'
+
+# attach secrets to service account
 # single secret with prefix
 os::cmd::expect_success 'oc secrets link deployer basicauth'
 # don't add the same secret twice
@@ -105,16 +120,16 @@ os::cmd::expect_failure 'oc get serviceaccounts/deployer -o yaml |grep -q basica
 os::cmd::expect_success 'oc secrets link deployer basicauth'
 
 # Removing a non-existent secret should warn but succeed and change nothing
-os::cmd::expect_failure_and_text 'oc secrets unlink deployer foobar' 'secrets "foobar" not found'
+os::cmd::expect_failure_and_text 'oc secrets unlink deployer foobar' 'secret "foobar" not found'
 
 # Make sure that removing an existent and non-existent secret succeeds but warns about the non-existent one
-os::cmd::expect_failure_and_text 'oc secrets unlink deployer foobar basicauth' 'secrets "foobar" not found'
+os::cmd::expect_failure_and_text 'oc secrets unlink deployer foobar basicauth' 'secret "foobar" not found'
 # Make sure that the existing secret is removed
 os::cmd::expect_failure 'oc get serviceaccounts/deployer -o yaml |grep -q basicauth'
 
 # Make sure that removing a real but unlinked secret succeeds
 # https://github.com/openshift/origin/pull/9234#discussion_r70832486
-os::cmd::expect_success 'oc secrets unlink deployer basicauth'
+os::cmd::expect_failure_and_text 'oc secrets unlink deployer basicauth', 'No valid secrets found or secrets not linked to service account'
 
 # Make sure that it succeeds if *any* of the secrets are linked
 # https://github.com/openshift/origin/pull/9234#discussion_r70832486
@@ -134,4 +149,10 @@ os::cmd::expect_success 'oc secret link --help'
 os::cmd::expect_success 'oc secret unlink --help'
 
 echo "secrets: ok"
+os::test::junit::declare_suite_end
+
+os::test::junit::declare_suite_start "cmd/serviceaccounts-create-kubeconfig"
+os::cmd::expect_success "oc serviceaccounts create-kubeconfig default > '${BASETMPDIR}/generated_default.kubeconfig'"
+os::cmd::expect_success_and_text "KUBECONFIG='${BASETMPDIR}/generated_default.kubeconfig' oc whoami" "system:serviceaccount:$(oc project -q):default"
+echo "serviceaccounts: ok"
 os::test::junit::declare_suite_end

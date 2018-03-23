@@ -1,15 +1,17 @@
 package templaterouter
 
 import (
-	routeapi "github.com/openshift/origin/pkg/route/api"
 	"strings"
+
+	routeapi "github.com/openshift/origin/pkg/route/apis/route"
 )
 
-// ServiceUnit is an encapsulation of a service, the endpoints that back that service, and the routes
-// that point to the service.  This is the data that drives the creation of the router configuration files
+// ServiceUnit represents a service and its endpoints.
 type ServiceUnit struct {
 	// Name corresponds to a service name & namespace.  Uniquely identifies the ServiceUnit
 	Name string
+	// Hostname is the name of this service.
+	Hostname string
 	// EndpointTable are endpoints that back the service, this translates into a final backend
 	// implementation for routers.
 	EndpointTable []Endpoint
@@ -29,6 +31,9 @@ type ServiceAliasConfig struct {
 	TLSTermination routeapi.TLSTerminationType
 	// Certificates used for securing this backend.  Keyed by the cert id
 	Certificates map[string]Certificate
+	// VerifyServiceHostname is true if the backend service(s) are expected to have serving certificates that sign for
+	// the name "service.namespace.svc".
+	VerifyServiceHostname bool
 	// Indicates the status of configuration that needs to be persisted.  Right now this only
 	// includes the certificates and is not an indicator of being written to the underlying
 	// router implementation
@@ -49,9 +54,20 @@ type ServiceAliasConfig struct {
 	// Annotations attached to this route
 	Annotations map[string]string
 
-	// ServiceUnitNames is a collection of services that support this route, keyed by service name
-	// and valued on the weight attached to it with respect to other entries in the map
+	// ServiceUnits is the weight for each service assigned to the route keyed by service name.
+	// It is used in calculating the weight for the server that is found in ServiceUnitNames
+	ServiceUnits map[string]int32
+
+	// ServiceUnitNames is the weight to apply to each endpoint of each service supporting this route.
+	// The key is the service name, the value is the scaled portion of the service weight to assign
+	// to each endpoint in the service.
 	ServiceUnitNames map[string]int32
+
+	// ActiveServiceUnits is a count of the service units with a non-zero weight
+	ActiveServiceUnits int
+
+	// ActiveEndpoints is a count of the route endpoints that are part of a service unit with a non-zero weight
+	ActiveEndpoints int
 }
 
 type ServiceAliasConfigStatus string

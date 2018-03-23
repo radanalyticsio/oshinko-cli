@@ -1,9 +1,10 @@
 package util
 
 import (
-	kapi "k8s.io/kubernetes/pkg/api"
+	"k8s.io/api/core/v1"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 
-	"github.com/openshift/origin/pkg/util/namer"
+	"github.com/openshift/origin/pkg/api/apihelpers"
 )
 
 const (
@@ -14,7 +15,7 @@ const (
 )
 
 func GetDockercfgSecretNamePrefix(serviceAccount *kapi.ServiceAccount) string {
-	return namer.GetName(serviceAccount.Name, "dockercfg-", maxSecretPrefixNameLength)
+	return apihelpers.GetName(serviceAccount.Name, "dockercfg-", maxSecretPrefixNameLength)
 }
 
 // GetTokenSecretNamePrefix creates the prefix used for the generated SA token secret. This is compatible with kube up until
@@ -22,5 +23,17 @@ func GetDockercfgSecretNamePrefix(serviceAccount *kapi.ServiceAccount) string {
 // string.
 // TODO fix the upstream implementation to be more like this.
 func GetTokenSecretNamePrefix(serviceAccount *kapi.ServiceAccount) string {
-	return namer.GetName(serviceAccount.Name, "token-", maxSecretPrefixNameLength)
+	return apihelpers.GetName(serviceAccount.Name, "token-", maxSecretPrefixNameLength)
+}
+
+func GetDockercfgSecretNamePrefixV1(serviceAccount *v1.ServiceAccount) string {
+	return apihelpers.GetName(serviceAccount.Name, "dockercfg-", maxSecretPrefixNameLength)
+}
+
+// GetTokenSecretNamePrefix creates the prefix used for the generated SA token secret. This is compatible with kube up until
+// long names, at which point we hash the SA name and leave the "token-" intact.  Upstream clips the value and generates a random
+// string.
+// TODO fix the upstream implementation to be more like this.
+func GetTokenSecretNamePrefixV1(serviceAccount *v1.ServiceAccount) string {
+	return apihelpers.GetName(serviceAccount.Name, "token-", maxSecretPrefixNameLength)
 }

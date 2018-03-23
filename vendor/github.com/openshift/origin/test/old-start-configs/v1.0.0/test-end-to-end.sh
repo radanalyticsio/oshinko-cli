@@ -275,8 +275,8 @@ wait_for_url "${API_SCHEME}://${API_HOST}:${API_PORT}/healthz/ready" "apiserver(
 wait_for_url "${API_SCHEME}://${API_HOST}:${API_PORT}/api/v1/nodes/${KUBELET_HOST}" "apiserver(nodes): " 0.25 80
 
 # COMPATIBILITY update the cluster roles and role bindings so that new images can be used.
-oadm policy reconcile-cluster-roles --confirm
-oadm policy reconcile-cluster-role-bindings --confirm
+oc adm policy reconcile-cluster-roles --confirm
+oc adm policy reconcile-cluster-role-bindings --confirm
 # COMPATIBILITY create a service account for the router
 echo '{"kind":"ServiceAccount","apiVersion":"v1","metadata":{"name":"router"}}' | oc create -f -
 # COMPATIBILITY add the router SA to the privileged SCC so that it can be use to create the router
@@ -296,12 +296,13 @@ echo "Log in as 'e2e-user' to see the 'test' project."
 
 # install the router
 echo "[INFO] Installing the router"
-# COMPATIBILITY add --service-account parameter
-openshift admin router --create --credentials="${MASTER_CONFIG_DIR}/openshift-router.kubeconfig" --images="${USE_IMAGES}" --service-account=router
+# COMPATIBILITY remove --credentials parameter
+openshift admin router --create --images="${USE_IMAGES}"
 
 # install the registry. The --mount-host option is provided to reuse local storage.
 echo "[INFO] Installing the registry"
-openshift admin registry --create --credentials="${MASTER_CONFIG_DIR}/openshift-registry.kubeconfig" --images="${USE_IMAGES}"
+# COMPATIBILITY remove --credentials parameter
+openshift admin registry --create --images="${USE_IMAGES}"
 
 echo "[INFO] Pre-pulling and pushing ruby-22-centos7"
 docker pull centos/ruby-22-centos7:latest

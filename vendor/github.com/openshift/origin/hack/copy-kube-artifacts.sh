@@ -16,15 +16,20 @@ fi
 # Copy special files.
 rsync -av \
   --exclude='BUILD' \
+  --exclude='OWNERS' \
   --include-from=- \
   --include='*/' \
   --exclude='*' \
   --prune-empty-dirs \
   $KUBE_ROOT/ $KUBE_GODEP_ROOT <<EOF
 /api/swagger-spec/*.json
+/api/openapi-spec/*.json
 /examples/***
+/staging/src/k8s.io/***
 /test/e2e/***
+/test/e2e_node/***
 /test/fixtures/***
+/test/e2e/generated/bindata.go
 /test/integration/***
 /third_party/protobuf/***
 /README.md
@@ -41,4 +46,5 @@ rsync -av \
   $KUBE_ROOT/ $KUBE_GODEP_ROOT <<EOF
 /pkg/***
 /plugin/***
+/staging/***
 EOF

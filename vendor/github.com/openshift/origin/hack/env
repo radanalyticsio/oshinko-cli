@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# This starts a Docker container using the release image (openshift/origin-release:golang-1.6)
+# This starts a Docker container using the release image (openshift/origin-release:golang-1.8)
 # and syncs the local directory into that image. The default mode performs a 'git archive' of
 # the current HEAD, so you get a reproducible environment. You can also set
 # OS_BUILD_ENV_REUSE_VOLUME to a docker volume name to rsync (or docker cp) the contents of
@@ -32,5 +32,11 @@
 
 # NOTE:   only committed code is built.
 source "$(dirname "${BASH_SOURCE}")/lib/init.sh"
+
+relative_bin_path="$( os::util::repository_relative_path "${OS_OUTPUT_BINPATH}" )"
+relative_release_path="$( os::util::repository_relative_path "${OS_OUTPUT_RELEASEPATH}" )"
+relative_script_path="$( os::util::repository_relative_path "${OS_OUTPUT_SCRIPTPATH}" )"
+default_preserve_paths="${relative_bin_path}:${relative_release_path}:${relative_script_path}"
+export OS_BUILD_ENV_PRESERVE="${OS_BUILD_ENV_PRESERVE:-"${default_preserve_paths}"}"
 
 os::build::environment::run "$@"

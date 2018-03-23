@@ -7,11 +7,11 @@ export to=$3
 release="_output/local/releases/CHANGELOG.md"
 
 t="patch"
-if [[ "${to}" == *".0" ]]; then
+if [[ "${to}" == *".0-"* || "${to}" == *".0" ]]; then
   t="feature"
-  v="${to/%.0/}"
+  v="$( echo "${to}" | cut -f1 -d'-' )"
+  v="${v/%.0/}"
   v="${v/#v/}"
-  v+=2
 fi
 
 # NAME FORK PACKAGE PATH
@@ -28,13 +28,21 @@ function component() {
     if [[ "${new}" != "${old}" ]]; then
       version=$(go run tools/godepversion/godepversion.go /tmp/godeps.new $3 comment)
       echo "- Updated to $1 [$version + patches](https://github.com/$2/commits/$new)"
-      git log --grep=UPSTREAM --no-merges --pretty='tformat:%H' $from..$to -- vendor/$4 | \
-        xargs -L 1 /bin/sh -c 'echo "  - $( git show -s --pretty=tformat:%s $1 | cut -f 2- -d " " ) [\\$( git log $to ^$1 --merges --ancestry-path --pretty="tformat:%s" | tail -1 | cut -f 4 -d " " )](https://github.com/$repo/pull/$( git log $to ^$1 --merges --ancestry-path --pretty="tformat:%s" | tail -1 | cut -f 4 -d " " | cut -c 2- ))"' '' | sort -n
+    else
+      echo "- Updates to $1"
     fi
+    git log --grep=UPSTREAM --no-merges --pretty='tformat:%H' $from..$to -- vendor/$4 | \
+      xargs -L 1 /bin/sh -c 'echo "  - $( git show -s --pretty=tformat:%s $1 | cut -f 2- -d " " ) [\\$( git log $to ^$1 --merges --ancestry-path --pretty="tformat:%s" | tail -1 | cut -f 4 -d " " )](https://github.com/$repo/pull/$( git log $to ^$1 --merges --ancestry-path --pretty="tformat:%s" | tail -1 | cut -f 4 -d " " | cut -c 2- ))"' '' | sort -n
   fi
 }
 
+function issues() {
+  go run tools/changelog/changelog.go "$from" "$to"
+}
+
 cat << EOF
+${to}
+
 This is a ${t} release of OpenShift Origin.
 
 ## Backwards Compatibility
@@ -87,7 +95,7 @@ MOVE FROM BUGS
 
 ### Bugs
 
-$( git log --merges --pretty='tformat:%p %s' --reverse "$from..$to" | cut -f 2,6 -d ' ' | xargs -L 1 /bin/sh -c 'echo "- $(git show -s --pretty=tformat:%s $1) [\\$2](https://github.com/$repo/pull/${2:1})"' '' | grep -vE "UPSTREAM|bump" )
+$( issues )
 
 
 ## Release SHA256 Checksums

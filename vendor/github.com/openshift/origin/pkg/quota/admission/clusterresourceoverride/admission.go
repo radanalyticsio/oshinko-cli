@@ -3,19 +3,23 @@ package clusterresourceoverride
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/golang/glog"
 
-	"k8s.io/kubernetes/pkg/admission"
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/resource"
-	clientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
-	"k8s.io/kubernetes/pkg/runtime"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apiserver/pkg/admission"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
+	kclientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
+	informers "k8s.io/kubernetes/pkg/client/informers/informers_generated/internalversion"
+	kadmission "k8s.io/kubernetes/pkg/kubeapiserver/admission"
 	"k8s.io/kubernetes/plugin/pkg/admission/limitranger"
 
 	oadmission "github.com/openshift/origin/pkg/cmd/server/admission"
 	configlatest "github.com/openshift/origin/pkg/cmd/server/api/latest"
 	"github.com/openshift/origin/pkg/project/cache"
+	"github.com/openshift/origin/pkg/project/registry/projectrequest/delegated"
 	"github.com/openshift/origin/pkg/quota/admission/clusterresourceoverride/api"
 	"github.com/openshift/origin/pkg/quota/admission/clusterresourceoverride/api/validation"
 )
@@ -30,18 +34,19 @@ var (
 	memFloor = resource.MustParse("1Mi")
 )
 
-func init() {
-	admission.RegisterPlugin(api.PluginName, func(client clientset.Interface, config io.Reader) (admission.Interface, error) {
-		pluginConfig, err := ReadConfig(config)
-		if err != nil {
-			return nil, err
-		}
-		if pluginConfig == nil {
-			glog.Infof("Admission plugin %q is not configured so it will be disabled.", api.PluginName)
-			return nil, nil
-		}
-		return newClusterResourceOverride(client, pluginConfig)
-	})
+func Register(plugins *admission.Plugins) {
+	plugins.Register(api.PluginName,
+		func(config io.Reader) (admission.Interface, error) {
+			pluginConfig, err := ReadConfig(config)
+			if err != nil {
+				return nil, err
+			}
+			if pluginConfig == nil {
+				glog.Infof("Admission plugin %q is not configured so it will be disabled.", api.PluginName)
+				return nil, nil
+			}
+			return newClusterResourceOverride(pluginConfig)
+		})
 }
 
 type internalConfig struct {
@@ -58,12 +63,13 @@ type clusterResourceOverridePlugin struct {
 type limitRangerActions struct{}
 
 var _ = oadmission.WantsProjectCache(&clusterResourceOverridePlugin{})
-var _ = oadmission.Validator(&clusterResourceOverridePlugin{})
 var _ = limitranger.LimitRangerActions(&limitRangerActions{})
+var _ = kadmission.WantsInternalKubeInformerFactory(&clusterResourceOverridePlugin{})
+var _ = kadmission.WantsInternalKubeClientSet(&clusterResourceOverridePlugin{})
 
 // newClusterResourceOverride returns an admission controller for containers that
 // configurably overrides container resource request/limits
-func newClusterResourceOverride(client clientset.Interface, config *api.ClusterResourceOverrideConfig) (admission.Interface, error) {
+func newClusterResourceOverride(config *api.ClusterResourceOverrideConfig) (admission.Interface, error) {
 	glog.V(2).Infof("%s admission controller loaded with config: %v", api.PluginName, config)
 	var internal *internalConfig
 	if config != nil {
@@ -74,7 +80,7 @@ func newClusterResourceOverride(client clientset.Interface, config *api.ClusterR
 		}
 	}
 
-	limitRanger, err := limitranger.NewLimitRanger(client, nil)
+	limitRanger, err := limitranger.NewLimitRanger(nil)
 	if err != nil {
 		return nil, err
 	}
@@ -86,6 +92,14 @@ func newClusterResourceOverride(client clientset.Interface, config *api.ClusterR
 	}, nil
 }
 
+func (d *clusterResourceOverridePlugin) SetInternalKubeInformerFactory(i informers.SharedInformerFactory) {
+	d.LimitRanger.(kadmission.WantsInternalKubeInformerFactory).SetInternalKubeInformerFactory(i)
+}
+
+func (d *clusterResourceOverridePlugin) SetInternalKubeClientSet(c kclientset.Interface) {
+	d.LimitRanger.(kadmission.WantsInternalKubeClientSet).SetInternalKubeClientSet(c)
+}
+
 // these serve to satisfy the interface so that our kept LimitRanger limits nothing and only provides defaults.
 func (d *limitRangerActions) SupportsAttributes(a admission.Attributes) bool {
 	return true
@@ -93,7 +107,10 @@ func (d *limitRangerActions) SupportsAttributes(a admission.Attributes) bool {
 func (d *limitRangerActions) SupportsLimit(limitRange *kapi.LimitRange) bool {
 	return true
 }
-func (d *limitRangerActions) Limit(limitRange *kapi.LimitRange, resourceName string, obj runtime.Object) error {
+func (d *limitRangerActions) MutateLimit(limitRange *kapi.LimitRange, resourceName string, obj runtime.Object) error {
+	return nil
+}
+func (d *limitRangerActions) ValidateLimit(limitRange *kapi.LimitRange, resourceName string, obj runtime.Object) error {
 	return nil
 }
 
@@ -122,11 +139,29 @@ func ReadConfig(configFile io.Reader) (*api.ClusterResourceOverrideConfig, error
 	return config, nil
 }
 
-func (a *clusterResourceOverridePlugin) Validate() error {
+func (a *clusterResourceOverridePlugin) ValidateInitialization() error {
 	if a.ProjectCache == nil {
 		return fmt.Errorf("%s did not get a project cache", api.PluginName)
 	}
-	return nil
+	v, ok := a.LimitRanger.(admission.InitializationValidator)
+	if !ok {
+		return fmt.Errorf("LimitRanger does not implement kadmission.Validator")
+	}
+	return v.ValidateInitialization()
+}
+
+func isExemptedNamespace(name string) bool {
+	for _, s := range delegated.ForbiddenNames {
+		if name == s {
+			return true
+		}
+	}
+	for _, s := range delegated.ForbiddenPrefixes {
+		if strings.HasPrefix(name, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // TODO this will need to update when we have pod requests/limits
@@ -142,21 +177,27 @@ func (a *clusterResourceOverridePlugin) Admit(attr admission.Attributes) error {
 	glog.V(5).Infof("%s is looking at creating pod %s in project %s", api.PluginName, pod.Name, attr.GetNamespace())
 
 	// allow annotations on project to override
-	if ns, err := a.ProjectCache.GetNamespace(attr.GetNamespace()); err != nil {
+	ns, err := a.ProjectCache.GetNamespace(attr.GetNamespace())
+	if err != nil {
 		glog.Warningf("%s got an error retrieving namespace: %v", api.PluginName, err)
 		return admission.NewForbidden(attr, err) // this should not happen though
-	} else {
-		projectEnabledPlugin, exists := ns.Annotations[clusterResourceOverrideAnnotation]
-		if exists && projectEnabledPlugin != "true" {
-			glog.V(5).Infof("%s is disabled for project %s", api.PluginName, attr.GetNamespace())
-			return nil // disabled for this project, do nothing
-		}
+	}
+
+	projectEnabledPlugin, exists := ns.Annotations[clusterResourceOverrideAnnotation]
+	if exists && projectEnabledPlugin != "true" {
+		glog.V(5).Infof("%s is disabled for project %s", api.PluginName, attr.GetNamespace())
+		return nil // disabled for this project, do nothing
+	}
+
+	if isExemptedNamespace(ns.Name) {
+		glog.V(5).Infof("%s is skipping exempted project %s", api.PluginName, attr.GetNamespace())
+		return nil // project is exempted, do nothing
 	}
 
 	// Reuse LimitRanger logic to apply limit/req defaults from the project. Ignore validation
 	// errors, assume that LimitRanger will run after this plugin to validate.
 	glog.V(5).Infof("%s: initial pod limits are: %#v", api.PluginName, pod.Spec)
-	if err := a.LimitRanger.Admit(attr); err != nil {
+	if err := a.LimitRanger.(admission.MutationInterface).Admit(attr); err != nil {
 		glog.V(5).Infof("%s: error from LimitRanger: %#v", api.PluginName, err)
 	}
 	glog.V(5).Infof("%s: pod limits after LimitRanger: %#v", api.PluginName, pod.Spec)

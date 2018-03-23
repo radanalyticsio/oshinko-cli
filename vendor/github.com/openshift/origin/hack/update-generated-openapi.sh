@@ -13,14 +13,18 @@ INPUT_DIRS=(
     grep --color=never -rl '+k8s:openapi-gen=' vendor/k8s.io/kubernetes | \
     xargs -n1 dirname | \
     sed "s,^vendor/,," | \
-    sort -u
+    sort -u | \
+    sed '/^k8s\.io\/kubernetes\/build\/root$/d' | \
+    sed '/^k8s\.io\/kubernetes$/d' | \
+    sed '/^k8s\.io\/kubernetes\/staging$/d' | \
+    sed 's,k8s\.io/kubernetes/staging/src/,,'
   )
 
   # origin apis
   $(
-    grep --color=never -rl '+k8s:openapi-gen=' pkg | \
+    grep --color=never -rl '+k8s:openapi-gen=' vendor/github.com/openshift/api | \
     xargs -n1 dirname | \
-    sed "s,^,${ORIGIN_PREFIX}," | \
+    sed "s,^vendor/,," | \
     sort -u
   )
 )
@@ -33,3 +37,4 @@ genopenapi \
   --input-dirs "${INPUT_DIRS}" \
   --output-package "${ORIGIN_PREFIX}pkg/openapi" \
   "$@"
+

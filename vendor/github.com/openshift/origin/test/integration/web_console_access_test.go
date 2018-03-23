@@ -3,7 +3,6 @@ package integration
 import (
 	"bytes"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"html/template"
 	"io/ioutil"
@@ -14,10 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	knet "k8s.io/kubernetes/pkg/util/net"
+	knet "k8s.io/apimachinery/pkg/util/net"
 
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
-	testutil "github.com/openshift/origin/test/util"
 	testserver "github.com/openshift/origin/test/util/server"
 )
 
@@ -81,76 +79,7 @@ func tryAccessURL(t *testing.T, url string, expectedStatus int, expectedRedirect
 	return resp
 }
 
-func TestAccessOriginWebConsole(t *testing.T) {
-	testutil.RequireEtcd(t)
-	defer testutil.DumpEtcdOnFailure(t)
-	masterOptions, err := testserver.DefaultMasterOptions()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, err = testserver.StartConfiguredMaster(masterOptions); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	for endpoint, exp := range map[string]struct {
-		statusCode int
-		location   string
-	}{
-		"":                    {http.StatusFound, masterOptions.AssetConfig.PublicURL},
-		"healthz":             {http.StatusOK, ""},
-		"login":               {http.StatusOK, ""},
-		"oauth/token/request": {http.StatusFound, masterOptions.AssetConfig.MasterPublicURL + "/oauth/authorize"},
-		"console":             {http.StatusMovedPermanently, "/console/"},
-		"console/":            {http.StatusOK, ""},
-		"console/java":        {http.StatusOK, ""},
-	} {
-		url := masterOptions.AssetConfig.MasterPublicURL + "/" + endpoint
-		tryAccessURL(t, url, exp.statusCode, exp.location, nil)
-	}
-}
-
-func TestAccessDisabledWebConsole(t *testing.T) {
-	testutil.RequireEtcd(t)
-	defer testutil.DumpEtcdOnFailure(t)
-	masterOptions, err := testserver.DefaultMasterOptions()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	masterOptions.DisabledFeatures.Add(configapi.FeatureWebConsole)
-	if _, err := testserver.StartConfiguredMaster(masterOptions); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	resp := tryAccessURL(t, masterOptions.AssetConfig.MasterPublicURL+"/", http.StatusOK, "", nil)
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		t.Errorf("failed to read reposponse's body: %v", err)
-	} else {
-		var value interface{}
-		if err = json.Unmarshal(body, &value); err != nil {
-			t.Errorf("expected json body which couldn't be parsed: %v, got: %s", err, body)
-		}
-	}
-
-	for endpoint, exp := range map[string]struct {
-		statusCode int
-		location   string
-	}{
-		"healthz":             {http.StatusOK, ""},
-		"login":               {http.StatusOK, ""},
-		"oauth/token/request": {http.StatusFound, masterOptions.AssetConfig.MasterPublicURL + "/oauth/authorize"},
-		"console":             {http.StatusForbidden, ""},
-		"console/":            {http.StatusForbidden, ""},
-		"console/java":        {http.StatusForbidden, ""},
-	} {
-		url := masterOptions.AssetConfig.MasterPublicURL + "/" + endpoint
-		tryAccessURL(t, url, exp.statusCode, exp.location, nil)
-	}
-}
-
 func TestAccessOriginWebConsoleMultipleIdentityProviders(t *testing.T) {
-	testutil.RequireEtcd(t)
-	defer testutil.DumpEtcdOnFailure(t)
 	masterOptions, err := testserver.DefaultMasterOptions()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -184,9 +113,10 @@ func TestAccessOriginWebConsoleMultipleIdentityProviders(t *testing.T) {
 	})
 
 	// Launch the configured server
-	if _, err = testserver.StartConfiguredMaster(masterOptions); err != nil {
+	if _, err := testserver.StartConfiguredMaster(masterOptions); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	defer testserver.CleanupMasterEtcd(t, masterOptions)
 
 	// Create a map of URLs to test
 	type urlResults struct {
@@ -198,7 +128,7 @@ func TestAccessOriginWebConsoleMultipleIdentityProviders(t *testing.T) {
 	linkRegexps := make([]string, 0)
 
 	// Verify that the plain /login URI is unavailable when multiple IDPs are in use.
-	urlMap["/login"] = urlResults{http.StatusForbidden, ""}
+	urlMap["/login"] = urlResults{http.StatusNotFound, ""}
 
 	// Create the common base URLs
 	escapedPublicURL := url.QueryEscape(masterOptions.OAuthConfig.AssetPublicURL)
@@ -220,8 +150,8 @@ func TestAccessOriginWebConsoleMultipleIdentityProviders(t *testing.T) {
 
 		// Expect the providerSelectionURL to redirect to the loginURL
 		urlMap[providerSelectionURL] = urlResults{http.StatusFound, loginURL}
-		// Expect the loginURL to be valid
-		urlMap[loginURL] = urlResults{http.StatusOK, ""}
+		// Expect the loginURL to be valid (requires a 'then' param)
+		urlMap[loginURL+"?then=%2F"] = urlResults{http.StatusOK, ""}
 
 		// escape the query param the way the template will
 		templateIDPParam := templateEscapeHref(t, idpQueryParam)

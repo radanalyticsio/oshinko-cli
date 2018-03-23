@@ -7,7 +7,7 @@ import (
 	osgraph "github.com/openshift/origin/pkg/api/graph"
 	osgraphtest "github.com/openshift/origin/pkg/api/graph/test"
 	"github.com/openshift/origin/pkg/api/kubegraph"
-	deploygraph "github.com/openshift/origin/pkg/deploy/graph"
+	appsgraph "github.com/openshift/origin/pkg/apps/graph"
 )
 
 func TestHPAMissingCPUTargetError(t *testing.T) {
@@ -62,7 +62,32 @@ func TestOverlappingHPAsWarning(t *testing.T) {
 	}
 
 	kubegraph.AddHPAScaleRefEdges(g)
-	deploygraph.AddAllDeploymentEdges(g)
+	appsgraph.AddAllDeploymentEdges(g)
+
+	markers := FindOverlappingHPAs(g, osgraph.DefaultNamer)
+	if len(markers) != 8 {
+		t.Fatalf("expected to find eight overlapping HPA markers, got %d", len(markers))
+	}
+
+	for _, marker := range markers {
+		if actual, expected := marker.Severity, osgraph.WarningSeverity; actual != expected {
+			t.Errorf("expected overlapping HPAs to be %v, got %v", expected, actual)
+		}
+
+		if actual, expected := marker.Key, HPAOverlappingScaleRefWarning; actual != expected {
+			t.Errorf("expected marker type %v, got %v", expected, actual)
+		}
+	}
+}
+
+func TestOverlappingLegacyHPAsWarning(t *testing.T) {
+	g, _, err := osgraphtest.BuildGraph("./../../../api/graph/test/overlapping-hpas-legacy.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	kubegraph.AddHPAScaleRefEdges(g)
+	appsgraph.AddAllDeploymentEdges(g)
 
 	markers := FindOverlappingHPAs(g, osgraph.DefaultNamer)
 	if len(markers) != 8 {

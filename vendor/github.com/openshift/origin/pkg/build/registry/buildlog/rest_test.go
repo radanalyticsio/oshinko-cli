@@ -2,27 +2,30 @@ package buildlog
 
 import (
 	"fmt"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/rest"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/watch"
+	apirequest "k8s.io/apiserver/pkg/endpoints/request"
+	genericrest "k8s.io/apiserver/pkg/registry/generic/rest"
+	"k8s.io/apiserver/pkg/registry/rest"
+	clientgotesting "k8s.io/client-go/testing"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 	kubeletclient "k8s.io/kubernetes/pkg/kubelet/client"
-	genericrest "k8s.io/kubernetes/pkg/registry/generic/rest"
-	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/watch"
 
-	"github.com/openshift/origin/pkg/build/api"
-	"github.com/openshift/origin/pkg/build/registry/test"
+	buildapi "github.com/openshift/origin/pkg/build/apis/build"
+	buildfakeclient "github.com/openshift/origin/pkg/build/generated/internalclientset/fake"
 )
 
 type testPodGetter struct{}
 
-func (p *testPodGetter) Get(ctx kapi.Context, name string) (runtime.Object, error) {
+func (p *testPodGetter) Get(ctx apirequest.Context, name string, options *metav1.GetOptions) (runtime.Object, error) {
 	pod := &kapi.Pod{}
 	switch name {
 	case "pending-build":
@@ -39,27 +42,42 @@ func (p *testPodGetter) Get(ctx kapi.Context, name string) (runtime.Object, erro
 	return pod, nil
 }
 
-// TestRegistryResourceLocation tests if proper resource location URL is returner
+type fakeConnectionInfoGetter struct{}
+
+func (*fakeConnectionInfoGetter) GetConnectionInfo(nodeName types.NodeName) (*kubeletclient.ConnectionInfo, error) {
+	rt, err := kubeletclient.MakeTransport(&kubeletclient.KubeletClientConfig{})
+	if err != nil {
+		return nil, err
+	}
+	return &kubeletclient.ConnectionInfo{
+		Scheme:    "https",
+		Hostname:  "foo-host",
+		Port:      "12345",
+		Transport: rt,
+	}, nil
+}
+
+// TestRegistryResourceLocation tests if proper resource location URL is returned
 // for different build states.
 // Note: For this test, the mocked pod is set to "Running" phase, so the test
 // is evaluating the outcome based only on build state.
 func TestRegistryResourceLocation(t *testing.T) {
-	expectedLocations := map[api.BuildPhase]string{
-		api.BuildPhaseComplete:  fmt.Sprintf("https://foo-host:12345/containerLogs/%s/running-build/foo-container", kapi.NamespaceDefault),
-		api.BuildPhaseFailed:    fmt.Sprintf("https://foo-host:12345/containerLogs/%s/running-build/foo-container", kapi.NamespaceDefault),
-		api.BuildPhaseRunning:   fmt.Sprintf("https://foo-host:12345/containerLogs/%s/running-build/foo-container", kapi.NamespaceDefault),
-		api.BuildPhaseNew:       "",
-		api.BuildPhasePending:   "",
-		api.BuildPhaseError:     "",
-		api.BuildPhaseCancelled: "",
+	expectedLocations := map[buildapi.BuildPhase]string{
+		buildapi.BuildPhaseComplete:  fmt.Sprintf("https://foo-host:12345/containerLogs/%s/running-build/foo-container", metav1.NamespaceDefault),
+		buildapi.BuildPhaseFailed:    fmt.Sprintf("https://foo-host:12345/containerLogs/%s/running-build/foo-container", metav1.NamespaceDefault),
+		buildapi.BuildPhaseRunning:   fmt.Sprintf("https://foo-host:12345/containerLogs/%s/running-build/foo-container", metav1.NamespaceDefault),
+		buildapi.BuildPhaseNew:       "",
+		buildapi.BuildPhasePending:   "",
+		buildapi.BuildPhaseError:     "",
+		buildapi.BuildPhaseCancelled: "",
 	}
 
-	ctx := kapi.NewDefaultContext()
+	ctx := apirequest.NewDefaultContext()
 
 	for BuildPhase, expectedLocation := range expectedLocations {
 		location, err := resourceLocationHelper(BuildPhase, "running", ctx, 1)
 		switch BuildPhase {
-		case api.BuildPhaseError, api.BuildPhaseCancelled:
+		case buildapi.BuildPhaseError, buildapi.BuildPhaseCancelled:
 			if err == nil {
 				t.Errorf("Expected error when Build is in %s state, got nothing", BuildPhase)
 			}
@@ -76,74 +94,68 @@ func TestRegistryResourceLocation(t *testing.T) {
 }
 
 func TestWaitForBuild(t *testing.T) {
-	ctx := kapi.NewDefaultContext()
+	ctx := apirequest.NewDefaultContext()
 	tests := []struct {
 		name        string
-		status      []api.BuildPhase
+		status      []buildapi.BuildPhase
 		expectError bool
 	}{
 		{
 			name:        "New -> Running",
-			status:      []api.BuildPhase{api.BuildPhaseNew, api.BuildPhaseRunning},
+			status:      []buildapi.BuildPhase{buildapi.BuildPhaseNew, buildapi.BuildPhaseRunning},
 			expectError: false,
 		},
 		{
 			name:        "New -> Pending -> Complete",
-			status:      []api.BuildPhase{api.BuildPhaseNew, api.BuildPhasePending, api.BuildPhaseComplete},
+			status:      []buildapi.BuildPhase{buildapi.BuildPhaseNew, buildapi.BuildPhasePending, buildapi.BuildPhaseComplete},
 			expectError: false,
 		},
 		{
 			name:        "New -> Pending -> Failed",
-			status:      []api.BuildPhase{api.BuildPhaseNew, api.BuildPhasePending, api.BuildPhaseFailed},
+			status:      []buildapi.BuildPhase{buildapi.BuildPhaseNew, buildapi.BuildPhasePending, buildapi.BuildPhaseFailed},
 			expectError: false,
 		},
 		{
 			name:        "New -> Pending -> Cancelled",
-			status:      []api.BuildPhase{api.BuildPhaseNew, api.BuildPhasePending, api.BuildPhaseCancelled},
+			status:      []buildapi.BuildPhase{buildapi.BuildPhaseNew, buildapi.BuildPhasePending, buildapi.BuildPhaseCancelled},
 			expectError: true,
 		},
 		{
 			name:        "New -> Pending -> Error",
-			status:      []api.BuildPhase{api.BuildPhaseNew, api.BuildPhasePending, api.BuildPhaseError},
+			status:      []buildapi.BuildPhase{buildapi.BuildPhaseNew, buildapi.BuildPhasePending, buildapi.BuildPhaseError},
 			expectError: true,
 		},
 		{
 			name:        "Pending -> Cancelled",
-			status:      []api.BuildPhase{api.BuildPhasePending, api.BuildPhaseCancelled},
+			status:      []buildapi.BuildPhase{buildapi.BuildPhasePending, buildapi.BuildPhaseCancelled},
 			expectError: true,
 		},
 		{
 			name:        "Error",
-			status:      []api.BuildPhase{api.BuildPhaseError},
+			status:      []buildapi.BuildPhase{buildapi.BuildPhaseError},
 			expectError: true,
 		},
 	}
 
 	for _, tt := range tests {
-		build := mockBuild(api.BuildPhasePending, "running", 1)
-		ch := make(chan watch.Event)
-		watcher := &buildWatcher{
-			Build: build,
-			Watcher: &fakeWatch{
-				Channel: ch,
-			},
-		}
+		build := mockBuild(buildapi.BuildPhasePending, "running", 1)
+		buildClient := buildfakeclient.NewSimpleClientset(build)
+		fakeWatcher := watch.NewFake()
+		buildClient.PrependWatchReactor("builds", func(action clientgotesting.Action) (handled bool, ret watch.Interface, err error) {
+			return true, fakeWatcher, nil
+		})
 		storage := REST{
-			Getter:         watcher,
-			Watcher:        watcher,
+			BuildClient:    buildClient.Build(),
 			PodGetter:      &testPodGetter{},
-			ConnectionInfo: &kubeletclient.HTTPKubeletClient{Config: &kubeletclient.KubeletClientConfig{EnableHttps: true, Port: 12345}, Client: &http.Client{}},
+			ConnectionInfo: &fakeConnectionInfoGetter{},
 			Timeout:        defaultTimeout,
 		}
 		go func() {
 			for _, status := range tt.status {
-				ch <- watch.Event{
-					Type:   watch.Modified,
-					Object: mockBuild(status, "running", 1),
-				}
+				fakeWatcher.Modify(mockBuild(status, "running", 1))
 			}
 		}()
-		_, err := storage.Get(ctx, build.Name, &api.BuildLogOptions{})
+		_, err := storage.Get(ctx, build.Name, &buildapi.BuildLogOptions{})
 		if tt.expectError && err == nil {
 			t.Errorf("%s: Expected an error but got nil from waitFromBuild", tt.name)
 		}
@@ -154,66 +166,33 @@ func TestWaitForBuild(t *testing.T) {
 }
 
 func TestWaitForBuildTimeout(t *testing.T) {
-	ctx := kapi.NewDefaultContext()
-	build := mockBuild(api.BuildPhasePending, "running", 1)
-	ch := make(chan watch.Event)
-	watcher := &buildWatcher{
-		Build: build,
-		Watcher: &fakeWatch{
-			Channel: ch,
-		},
-	}
+	build := mockBuild(buildapi.BuildPhasePending, "running", 1)
+	buildClient := buildfakeclient.NewSimpleClientset(build)
+	ctx := apirequest.NewDefaultContext()
 	storage := REST{
-		Getter:         watcher,
-		Watcher:        watcher,
+		BuildClient:    buildClient.Build(),
 		PodGetter:      &testPodGetter{},
-		ConnectionInfo: &kubeletclient.HTTPKubeletClient{Config: &kubeletclient.KubeletClientConfig{EnableHttps: true, Port: 12345}, Client: &http.Client{}},
+		ConnectionInfo: &fakeConnectionInfoGetter{},
 		Timeout:        100 * time.Millisecond,
 	}
-	_, err := storage.Get(ctx, build.Name, &api.BuildLogOptions{})
+	_, err := storage.Get(ctx, build.Name, &buildapi.BuildLogOptions{})
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Errorf("Unexpected error result from waitForBuild: %v\n", err)
 	}
 }
 
-type buildWatcher struct {
-	Build   *api.Build
-	Watcher watch.Interface
-	Err     error
-}
-
-func (r *buildWatcher) Get(ctx kapi.Context, name string) (runtime.Object, error) {
-	return r.Build, nil
-}
-
-func (r *buildWatcher) Watch(ctx kapi.Context, options *kapi.ListOptions) (watch.Interface, error) {
-	return r.Watcher, r.Err
-}
-
-type fakeWatch struct {
-	Channel chan watch.Event
-}
-
-func (w *fakeWatch) Stop() {
-	close(w.Channel)
-}
-
-func (w *fakeWatch) ResultChan() <-chan watch.Event {
-	return w.Channel
-}
-
-func resourceLocationHelper(BuildPhase api.BuildPhase, podPhase string, ctx kapi.Context, version int) (string, error) {
+func resourceLocationHelper(BuildPhase buildapi.BuildPhase, podPhase string, ctx apirequest.Context, version int) (string, error) {
 	expectedBuild := mockBuild(BuildPhase, podPhase, version)
-	internal := &test.BuildStorage{Build: expectedBuild}
+	buildClient := buildfakeclient.NewSimpleClientset(expectedBuild)
 
 	storage := &REST{
-		Getter:         internal,
+		BuildClient:    buildClient.Build(),
 		PodGetter:      &testPodGetter{},
-		ConnectionInfo: &kubeletclient.HTTPKubeletClient{Config: &kubeletclient.KubeletClientConfig{EnableHttps: true, Port: 12345}, Client: &http.Client{}},
+		ConnectionInfo: &fakeConnectionInfoGetter{},
 		Timeout:        defaultTimeout,
 	}
 	getter := rest.GetterWithOptions(storage)
-	obj, err := getter.Get(ctx, "foo-build", &api.BuildLogOptions{NoWait: true})
+	obj, err := getter.Get(ctx, expectedBuild.Name, &buildapi.BuildLogOptions{NoWait: true})
 	if err != nil {
 		return "", err
 	}
@@ -230,9 +209,9 @@ func resourceLocationHelper(BuildPhase api.BuildPhase, podPhase string, ctx kapi
 
 func mockPod(podPhase kapi.PodPhase, podName string) *kapi.Pod {
 	return &kapi.Pod{
-		ObjectMeta: kapi.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
-			Namespace: kapi.NamespaceDefault,
+			Namespace: metav1.NamespaceDefault,
 		},
 		Spec: kapi.PodSpec{
 			Containers: []kapi.Container{
@@ -248,18 +227,19 @@ func mockPod(podPhase kapi.PodPhase, podName string) *kapi.Pod {
 	}
 }
 
-func mockBuild(status api.BuildPhase, podName string, version int) *api.Build {
-	return &api.Build{
-		ObjectMeta: kapi.ObjectMeta{
-			Name: podName,
+func mockBuild(status buildapi.BuildPhase, podName string, version int) *buildapi.Build {
+	return &buildapi.Build{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      podName,
 			Annotations: map[string]string{
-				api.BuildNumberAnnotation: strconv.Itoa(version),
+				buildapi.BuildNumberAnnotation: strconv.Itoa(version),
 			},
 			Labels: map[string]string{
-				api.BuildConfigLabel: "bc",
+				buildapi.BuildConfigLabel: "bc",
 			},
 		},
-		Status: api.BuildStatus{
+		Status: buildapi.BuildStatus{
 			Phase: status,
 		},
 	}
@@ -267,7 +247,7 @@ func mockBuild(status api.BuildPhase, podName string, version int) *api.Build {
 
 type anotherTestPodGetter struct{}
 
-func (p *anotherTestPodGetter) Get(ctx kapi.Context, name string) (runtime.Object, error) {
+func (p *anotherTestPodGetter) Get(ctx apirequest.Context, name string, options *metav1.GetOptions) (runtime.Object, error) {
 	pod := &kapi.Pod{}
 	switch name {
 	case "bc-1-build":
@@ -281,21 +261,21 @@ func (p *anotherTestPodGetter) Get(ctx kapi.Context, name string) (runtime.Objec
 }
 
 func TestPreviousBuildLogs(t *testing.T) {
-	ctx := kapi.NewDefaultContext()
-	first := mockBuild(api.BuildPhaseComplete, "bc-1", 1)
-	second := mockBuild(api.BuildPhaseComplete, "bc-2", 2)
-	third := mockBuild(api.BuildPhaseComplete, "bc-3", 3)
-	internal := &test.BuildStorage{Builds: &api.BuildList{Items: []api.Build{*first, *second, *third}}}
+	ctx := apirequest.NewDefaultContext()
+	first := mockBuild(buildapi.BuildPhaseComplete, "bc-1", 1)
+	second := mockBuild(buildapi.BuildPhaseComplete, "bc-2", 2)
+	third := mockBuild(buildapi.BuildPhaseComplete, "bc-3", 3)
+	buildClient := buildfakeclient.NewSimpleClientset(first, second, third)
 
 	storage := &REST{
-		Getter:         internal,
+		BuildClient:    buildClient.Build(),
 		PodGetter:      &anotherTestPodGetter{},
-		ConnectionInfo: &kubeletclient.HTTPKubeletClient{Config: &kubeletclient.KubeletClientConfig{EnableHttps: true, Port: 12345}, Client: &http.Client{}},
+		ConnectionInfo: &fakeConnectionInfoGetter{},
 		Timeout:        defaultTimeout,
 	}
 	getter := rest.GetterWithOptions(storage)
 	// Will expect the previous from bc-3 aka bc-2
-	obj, err := getter.Get(ctx, "bc-3", &api.BuildLogOptions{NoWait: true, Previous: true})
+	obj, err := getter.Get(ctx, "bc-3", &buildapi.BuildLogOptions{NoWait: true, Previous: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

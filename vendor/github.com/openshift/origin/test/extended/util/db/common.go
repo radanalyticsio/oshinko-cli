@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/openshift/origin/test/extended/util"
-	kclient "k8s.io/kubernetes/pkg/client/unversioned"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kcoreclient "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
 // PodConfig holds configuration for a pod.
@@ -15,8 +16,8 @@ type PodConfig struct {
 	Env       map[string]string
 }
 
-func getPodConfig(c kclient.PodInterface, podName string) (conf *PodConfig, err error) {
-	pod, err := c.Get(podName)
+func getPodConfig(c kcoreclient.PodInterface, podName string) (conf *PodConfig, err error) {
+	pod, err := c.Get(podName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -29,8 +30,8 @@ func getPodConfig(c kclient.PodInterface, podName string) (conf *PodConfig, err 
 	return &PodConfig{pod.Spec.Containers[0].Name, env}, nil
 }
 
-func firstContainerName(c kclient.PodInterface, podName string) (string, error) {
-	pod, err := c.Get(podName)
+func firstContainerName(c kcoreclient.PodInterface, podName string) (string, error) {
+	pod, err := c.Get(podName, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}

@@ -3,17 +3,20 @@ package etcd
 import (
 	"testing"
 
-	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/errors"
-	"k8s.io/kubernetes/pkg/auth/user"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apiserver/pkg/authentication/user"
+	apirequest "k8s.io/apiserver/pkg/endpoints/request"
+	genericregistrytest "k8s.io/apiserver/pkg/registry/generic/testing"
+	"k8s.io/apiserver/pkg/registry/rest"
+	etcdtesting "k8s.io/apiserver/pkg/storage/etcd/testing"
+	authorizationapi "k8s.io/kubernetes/pkg/apis/authorization"
+	kapihelper "k8s.io/kubernetes/pkg/apis/core/helper"
 	"k8s.io/kubernetes/pkg/registry/registrytest"
-	etcdtesting "k8s.io/kubernetes/pkg/storage/etcd/testing"
 
 	"github.com/openshift/origin/pkg/api/latest"
-	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
-	"github.com/openshift/origin/pkg/authorization/registry/subjectaccessreview"
 	"github.com/openshift/origin/pkg/image/admission/testutil"
-	"github.com/openshift/origin/pkg/image/api"
+	imageapi "github.com/openshift/origin/pkg/image/apis/image"
 	"github.com/openshift/origin/pkg/util/restoptions"
 
 	// install all APIs
@@ -25,8 +28,8 @@ const (
 )
 
 var (
-	testDefaultRegistry = api.DefaultRegistryFunc(func() (string, bool) { return "test", true })
-	noDefaultRegistry   = api.DefaultRegistryFunc(func() (string, bool) { return "", false })
+	testDefaultRegistry = func() (string, bool) { return "test", true }
+	noDefaultRegistry   = func() (string, bool) { return "", false }
 )
 
 type fakeSubjectAccessReviewRegistry struct {
@@ -36,51 +39,58 @@ type fakeSubjectAccessReviewRegistry struct {
 	requestNamespace string
 }
 
-var _ subjectaccessreview.Registry = &fakeSubjectAccessReviewRegistry{}
-
-func (f *fakeSubjectAccessReviewRegistry) CreateSubjectAccessReview(ctx kapi.Context, subjectAccessReview *authorizationapi.SubjectAccessReview) (*authorizationapi.SubjectAccessReviewResponse, error) {
+func (f *fakeSubjectAccessReviewRegistry) Create(subjectAccessReview *authorizationapi.SubjectAccessReview) (*authorizationapi.SubjectAccessReview, error) {
 	f.request = subjectAccessReview
-	f.requestNamespace = kapi.NamespaceValue(ctx)
-	return &authorizationapi.SubjectAccessReviewResponse{Allowed: f.allow}, f.err
+	f.requestNamespace = subjectAccessReview.Spec.ResourceAttributes.Namespace
+	return &authorizationapi.SubjectAccessReview{
+		Status: authorizationapi.SubjectAccessReviewStatus{
+			Allowed: f.allow,
+		},
+	}, f.err
 }
 
 func newStorage(t *testing.T) (*REST, *StatusREST, *InternalREST, *etcdtesting.EtcdTestServer) {
 	etcdStorage, server := registrytest.NewEtcdStorage(t, latest.Version.Group)
-	imageStorage, statusStorage, internalStorage, err := NewREST(restoptions.NewSimpleGetter(etcdStorage), noDefaultRegistry, &fakeSubjectAccessReviewRegistry{}, &testutil.FakeImageStreamLimitVerifier{})
+	registry := imageapi.DefaultRegistryHostnameRetriever(noDefaultRegistry, "", "")
+	imageStorage, statusStorage, internalStorage, err := NewREST(restoptions.NewSimpleGetter(etcdStorage), registry, &fakeSubjectAccessReviewRegistry{}, &testutil.FakeImageStreamLimitVerifier{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return imageStorage, statusStorage, internalStorage, server
 }
 
-func validImageStream() *api.ImageStream {
-	return &api.ImageStream{
-		ObjectMeta: kapi.ObjectMeta{
+func validImageStream() *imageapi.ImageStream {
+	return &imageapi.ImageStream{
+		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
 	}
 }
 
-func create(t *testing.T, storage *REST, obj *api.ImageStream) *api.ImageStream {
-	ctx := kapi.WithUser(kapi.NewDefaultContext(), &fakeUser{})
-	newObj, err := storage.Create(ctx, obj)
+func create(t *testing.T, storage *REST, obj *imageapi.ImageStream) *imageapi.ImageStream {
+	ctx := apirequest.WithUser(apirequest.NewDefaultContext(), &fakeUser{})
+	newObj, err := storage.Create(ctx, obj, rest.ValidateAllObjectFunc, false)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	return newObj.(*api.ImageStream)
+	return newObj.(*imageapi.ImageStream)
 }
 
 func TestCreate(t *testing.T) {
 	storage, _, _, server := newStorage(t)
 	defer server.Terminate(t)
+	defer storage.Store.DestroyFunc()
 
+	// TODO switch to upstream testing suite, when there will be possibility
+	// to inject context with user, needed for these tests
 	create(t, storage, validImageStream())
 }
 
 func TestList(t *testing.T) {
 	storage, _, _, server := newStorage(t)
 	defer server.Terminate(t)
-	test := registrytest.New(t, storage.Store)
+	defer storage.Store.DestroyFunc()
+	test := genericregistrytest.New(t, storage.Store)
 	test.TestList(
 		validImageStream(),
 	)
@@ -89,8 +99,9 @@ func TestList(t *testing.T) {
 func TestGetImageStreamError(t *testing.T) {
 	storage, _, _, server := newStorage(t)
 	defer server.Terminate(t)
+	defer storage.Store.DestroyFunc()
 
-	image, err := storage.Get(kapi.NewDefaultContext(), "image1")
+	image, err := storage.Get(apirequest.NewDefaultContext(), "image1", &metav1.GetOptions{})
 	if !errors.IsNotFound(err) {
 		t.Errorf("Expected not-found error, got %v", err)
 	}
@@ -102,19 +113,20 @@ func TestGetImageStreamError(t *testing.T) {
 func TestGetImageStreamOK(t *testing.T) {
 	storage, _, _, server := newStorage(t)
 	defer server.Terminate(t)
+	defer storage.Store.DestroyFunc()
 
 	image := create(t, storage, validImageStream())
 
-	obj, err := storage.Get(kapi.NewDefaultContext(), name)
+	obj, err := storage.Get(apirequest.NewDefaultContext(), name, &metav1.GetOptions{})
 	if err != nil {
 		t.Errorf("Unexpected error: %#v", err)
 	}
 	if obj == nil {
 		t.Fatalf("Unexpected nil stream")
 	}
-	got := obj.(*api.ImageStream)
+	got := obj.(*imageapi.ImageStream)
 	got.ResourceVersion = image.ResourceVersion
-	if !kapi.Semantic.DeepEqual(image, got) {
+	if !kapihelper.Semantic.DeepEqual(image, got) {
 		t.Errorf("Expected %#v, got %#v", image, got)
 	}
 }

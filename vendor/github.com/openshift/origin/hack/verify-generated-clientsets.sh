@@ -1,13 +1,14 @@
 #!/bin/bash
 source "$(dirname "${BASH_SOURCE}")/lib/init.sh"
 
-echo "===== Verifying Generated Client sets ====="
-output=$(VERIFY=true ${OS_ROOT}/hack/update-generated-clientsets.sh)
+function cleanup() {
+    return_code=$?
+    os::test::junit::generate_report
+    os::util::describe_return_code "${return_code}"
+    exit "${return_code}"
+}
+trap "cleanup" EXIT
 
-if [[ "$?" == "0" ]]; then
-  echo "SUCCESS: Generated client sets up to date."
-else
-  echo  $output
-  echo "FAILURE: Generated client sets out of date. Please run hack/update-generated-clientsets.sh"
-  exit 1
-fi
+os::test::junit::declare_suite_start "verify/clientsets"
+os::cmd::expect_success "VERIFY=--verify-only ${OS_ROOT}/hack/update-generated-clientsets.sh"
+os::test::junit::declare_suite_end

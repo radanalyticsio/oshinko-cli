@@ -13,12 +13,7 @@
 #  None
 function os::util::describe_return_code() {
 	local return_code=$1
-
-	if [[ "${return_code}" = "0" ]]; then
-		echo -n "[INFO] $0 succeeded "
-	else
-		echo -n "[ERROR] $0 failed "
-	fi
+	local message="$( os::util::repository_relative_path $0 ) exited with code ${return_code} "
 
 	if [[ -n "${OS_SCRIPT_START_TIME:-}" ]]; then
 		local end_time
@@ -27,9 +22,13 @@ function os::util::describe_return_code() {
         elapsed_time="$(( end_time - OS_SCRIPT_START_TIME ))"
 		local formatted_time
         formatted_time="$( os::util::format_seconds "${elapsed_time}" )"
-		echo "after ${formatted_time}"
+		message+="after ${formatted_time}"
+	fi
+
+	if [[ "${return_code}" = "0" ]]; then
+		os::log::info "${message}"
 	else
-		echo
+		os::log::error "${message}"
 	fi
 }
 readonly -f os::util::describe_return_code
@@ -120,10 +119,11 @@ readonly -f os::util::format_seconds
 # Return:
 #  None
 function os::util::sed() {
+	local sudo="${USE_SUDO:+sudo}"
 	if LANG=C sed --help 2>&1 | grep -q "GNU sed"; then
-		sed -i'' "$@"
+		${sudo} sed -i'' "$@"
 	else
-		sed -i '' "$@"
+		${sudo} sed -i '' "$@"
 	fi
 }
 readonly -f os::util::sed
@@ -189,18 +189,3 @@ function os::util::curl_etcd() {
 		     --cert "${etcd_client_cert}" --key "${etcd_client_key}" "${full_url}"
 	fi
 }
-
-# os::util::host_platform determines what the host OS and architecture
-# are, as Golang sees it. The go tool chain does some slightly different
-# things when the target platform matches the host platform.
-#
-# Globals:
-#  None
-# Arguments:
-#  None
-# Returns:
-#  None
-function os::util::host_platform() {
-	echo "$(go env GOHOSTOS)/$(go env GOHOSTARCH)"
-}
-readonly -f os::util::host_platform
