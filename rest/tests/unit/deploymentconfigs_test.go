@@ -1,10 +1,10 @@
 package unittest
 
 import (
-	"github.com/openshift/origin/pkg/deploy/api"
 	"gopkg.in/check.v1"
-	kapi "k8s.io/kubernetes/pkg/api"
+	kapi "k8s.io/api/core/v1"
 
+	api  "github.com/openshift/api/apps/v1"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters/deploymentconfigs"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters/podtemplates"
 )

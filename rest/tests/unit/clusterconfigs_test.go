@@ -7,8 +7,10 @@ import (
 	"github.com/radanalyticsio/oshinko-cli/core/clusters"
 	//"github.com/radanalyticsio/oshinko-cli/rest/models"
 	"fmt"
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/watch"
+	api "k8s.io/api/core/v1"
+	//"k8s.io/kubernetes/pkg/api"
+	"k8s.io/apimachinery/pkg/watch"
+	//"k8s.io/kubernetes/pkg/watch"
 )
 
 var tiny clusters.ClusterConfig = clusters.ClusterConfig{
@@ -107,14 +109,15 @@ func (s *OshinkoUnitTestSuite) TestNoLocalDefault(c *check.C) {
 	// get an error if there is no local override of default.
 	// For all other named configs, an error is returned if the local
 	// definition is not found.
-        var cm *FakeConfigMapsClient = &FakeConfigMapsClient{}
+	var cm *FakeConfigMapsClient = &FakeConfigMapsClient{}
+	var cm1 *FakeConfigMapsClient = &FakeConfigMapsClient{}
 
 	defconfig := clusters.GetDefaultConfig()
 	configarg := clusters.ClusterConfig{
 		Name: clusters.Defaultname,
 		WorkerCount: clusters.SentinelCountValue,
 		MasterCount: clusters.SentinelCountValue}
-	myconfig, err := clusters.GetClusterConfig(&configarg, cm)
+	myconfig, err := clusters.GetClusterConfig(&configarg, cm1, cm)
 
 	c.Assert(err, check.IsNil)
 	c.Assert(myconfig.MasterCount, check.Equals, defconfig.MasterCount)

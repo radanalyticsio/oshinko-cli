@@ -4,17 +4,20 @@ import (
 	"net"
 
 	_ "github.com/openshift/origin/pkg/api/install"
-	"github.com/openshift/origin/pkg/client"
-	oclient "github.com/openshift/origin/pkg/client"
-	serverapi "github.com/openshift/origin/pkg/cmd/server/api"
-	"k8s.io/kubernetes/pkg/client/restclient"
-	kclient "k8s.io/kubernetes/pkg/client/unversioned"
-	"k8s.io/kubernetes/pkg/util/crypto"
-
+	restclient "k8s.io/client-go/rest"
+	kclientcmd "k8s.io/client-go/tools/clientcmd"
+	certutil "k8s.io/client-go/util/cert"
 	"github.com/radanalyticsio/oshinko-cli/rest/helpers/info"
 )
 
-func SAConfig() (*restclient.Config, error) {
+func GetConfig() (*restclient.Config, error) {
+
+	credentials, err := kclientcmd.NewDefaultClientConfigLoadingRules().Load()
+	clusterConfig, err := kclientcmd.NewDefaultClientConfig(*credentials, &kclientcmd.ConfigOverrides{}).ClientConfig()
+	if err == nil  {
+		return clusterConfig, nil
+	}
+
 	//fetch proxy IP + port
 	host, err := info.GetKubeProxyAddress()
 	if err != nil {
@@ -30,8 +33,7 @@ func SAConfig() (*restclient.Config, error) {
 	}
 	tlsClientConfig := restclient.TLSClientConfig{}
 	CAFile := info.GetServiceAccountCAPath()
-	_, err = crypto.CertPoolFromFile(CAFile)
-	if err != nil {
+	if _, err := certutil.NewPool(CAFile); err != nil {
 		return nil, err
 	} else {
 		tlsClientConfig.CAFile = CAFile
@@ -44,38 +46,3 @@ func SAConfig() (*restclient.Config, error) {
 	}, nil
 }
 
-func GetKubeClient() (*kclient.Client, error) {
-
-	if info.InAPod() {
-		saConfig, err := SAConfig()
-		if err != nil {
-			return nil, err
-		}
-		client, err := kclient.New(saConfig)
-		if err != nil {
-			return nil, err
-		}
-		return client, err
-	} else {
-		client, _, err := serverapi.GetKubeClient(info.GetKubeConfigPath(), nil)
-		return client, err
-	}
-}
-
-func GetOpenShiftClient() (*client.Client, error) {
-
-	if info.InAPod() {
-		saConfig, err := SAConfig()
-		if err != nil {
-			return nil, err
-		}
-		client, err := oclient.New(saConfig)
-		if err != nil {
-			return nil, err
-		}
-		return client, err
-	} else {
-		client, _, err := serverapi.GetOpenShiftClient(info.GetKubeConfigPath(), nil)
-		return client, err
-	}
-}
