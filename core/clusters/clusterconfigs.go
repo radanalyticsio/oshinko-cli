@@ -2,9 +2,10 @@ package clusters
 
 import (
 	"fmt"
-	kclient "k8s.io/kubernetes/pkg/client/unversioned"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"strconv"
 	"strings"
+	"k8s.io/client-go/rest"
 )
 
 type ClusterConfig struct {
@@ -151,10 +152,10 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 	return err
 }
 
-func readConfig(name string, res *ClusterConfig, failOnMissing bool, cm kclient.ConfigMapsInterface) (found bool, err error) {
+func readConfig(name string, res *ClusterConfig, failOnMissing bool, restconfig *rest.Config, namespace string) (found bool, err error) {
 
 	found = false
-	cmap, err := cm.Get(name)
+	cmap, err := getKubeClient(restconfig).CoreV1().ConfigMaps(namespace).Get(name, metav1.GetOptions{})
 	if err != nil {
 		if strings.Index(err.Error(), "not found") != -1 {
 			if !failOnMissing {
@@ -180,13 +181,13 @@ func readConfig(name string, res *ClusterConfig, failOnMissing bool, cm kclient.
 	return found, err
 }
 
-func loadConfig(name string, cm kclient.ConfigMapsInterface) (res ClusterConfig, err error) {
+func loadConfig(name string, restconfig *rest.Config, namespace string) (res ClusterConfig, err error) {
 	// If the default config has been modified use those mods.
 	res = defaultConfig
-	found, err := readConfig(Defaultname, &res, allowMissing, cm)
+	found, err := readConfig(Defaultname, &res, allowMissing, restconfig, namespace)
 	if err == nil {
 		if name != "" && name != Defaultname {
-			_, err = readConfig(name, &res, failOnMissing, cm)
+			_, err = readConfig(name, &res, failOnMissing, restconfig, namespace)
 		} else if found {
 			res.Name = Defaultname
 		}
@@ -194,12 +195,13 @@ func loadConfig(name string, cm kclient.ConfigMapsInterface) (res ClusterConfig,
 	return res, err
 }
 
-func GetClusterConfig(config *ClusterConfig, cm kclient.ConfigMapsInterface) (res ClusterConfig, err error) {
+func GetClusterConfig(config *ClusterConfig, restconfig *rest.Config, namespace string) (res ClusterConfig, err error) {
+
 	var name string = ""
 	if config != nil {
 		name = config.Name
 	}
-	res, err = loadConfig(name, cm)
+	res, err = loadConfig(name, restconfig, namespace)
 	if err == nil && config != nil {
 		assignConfig(&res, *config)
 	}
