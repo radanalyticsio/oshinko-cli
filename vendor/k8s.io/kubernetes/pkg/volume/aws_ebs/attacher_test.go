@@ -20,50 +20,51 @@ import (
 	"errors"
 	"testing"
 
-	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/api/core/v1"
 	"k8s.io/kubernetes/pkg/cloudprovider/providers/aws"
 	"k8s.io/kubernetes/pkg/volume"
 	volumetest "k8s.io/kubernetes/pkg/volume/testing"
 
 	"github.com/golang/glog"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/types"
 )
 
-func TestGetDeviceName_Volume(t *testing.T) {
+func TestGetVolumeName_Volume(t *testing.T) {
 	plugin := newPlugin()
-	name := "my-aws-volume"
+	name := aws.KubernetesVolumeID("my-aws-volume")
 	spec := createVolSpec(name, false)
 
-	deviceName, err := plugin.GetVolumeName(spec)
+	volumeName, err := plugin.GetVolumeName(spec)
 	if err != nil {
-		t.Errorf("GetDeviceName error: %v", err)
+		t.Errorf("GetVolumeName error: %v", err)
 	}
-	if deviceName != name {
-		t.Errorf("GetDeviceName error: expected %s, got %s", name, deviceName)
+	if volumeName != string(name) {
+		t.Errorf("GetVolumeName error: expected %s, got %s", name, volumeName)
 	}
 }
 
-func TestGetDeviceName_PersistentVolume(t *testing.T) {
+func TestGetVolumeName_PersistentVolume(t *testing.T) {
 	plugin := newPlugin()
-	name := "my-aws-pv"
+	name := aws.KubernetesVolumeID("my-aws-pv")
 	spec := createPVSpec(name, true)
 
-	deviceName, err := plugin.GetVolumeName(spec)
+	volumeName, err := plugin.GetVolumeName(spec)
 	if err != nil {
-		t.Errorf("GetDeviceName error: %v", err)
+		t.Errorf("GetVolumeName error: %v", err)
 	}
-	if deviceName != name {
-		t.Errorf("GetDeviceName error: expected %s, got %s", name, deviceName)
+	if volumeName != string(name) {
+		t.Errorf("GetVolumeName error: expected %s, got %s", name, volumeName)
 	}
 }
 
 // One testcase for TestAttachDetach table test below
 type testcase struct {
-	name string
+	name aws.KubernetesVolumeID
 	// For fake AWS:
-	attach         attachCall
-	detach         detachCall
-	diskIsAttached diskIsAttachedCall
-	t              *testing.T
+	attach attachCall
+	detach detachCall
+	t      *testing.T
 
 	// Actual test to run
 	test func(test *testcase) (string, error)
@@ -73,21 +74,20 @@ type testcase struct {
 }
 
 func TestAttachDetach(t *testing.T) {
-	diskName := "disk"
-	instanceID := "instance"
+	diskName := aws.KubernetesVolumeID("disk")
+	nodeName := types.NodeName("instance")
 	readOnly := false
 	spec := createVolSpec(diskName, readOnly)
 	attachError := errors.New("Fake attach error")
 	detachError := errors.New("Fake detach error")
-	diskCheckError := errors.New("Fake DiskIsAttached error")
 	tests := []testcase{
 		// Successful Attach call
 		{
 			name:   "Attach_Positive",
-			attach: attachCall{diskName, instanceID, readOnly, "/dev/sda", nil},
+			attach: attachCall{diskName, nodeName, readOnly, "/dev/sda", nil},
 			test: func(testcase *testcase) (string, error) {
 				attacher := newAttacher(testcase)
-				return attacher.Attach(spec, instanceID)
+				return attacher.Attach(spec, nodeName)
 			},
 			expectedDevice: "/dev/sda",
 		},
@@ -95,54 +95,32 @@ func TestAttachDetach(t *testing.T) {
 		// Attach call fails
 		{
 			name:   "Attach_Negative",
-			attach: attachCall{diskName, instanceID, readOnly, "", attachError},
+			attach: attachCall{diskName, nodeName, readOnly, "", attachError},
 			test: func(testcase *testcase) (string, error) {
 				attacher := newAttacher(testcase)
-				return attacher.Attach(spec, instanceID)
+				return attacher.Attach(spec, nodeName)
 			},
 			expectedError: attachError,
 		},
 
 		// Detach succeeds
 		{
-			name:           "Detach_Positive",
-			diskIsAttached: diskIsAttachedCall{diskName, instanceID, true, nil},
-			detach:         detachCall{diskName, instanceID, "/dev/sda", nil},
+			name:   "Detach_Positive",
+			detach: detachCall{diskName, nodeName, "/dev/sda", nil},
 			test: func(testcase *testcase) (string, error) {
 				detacher := newDetacher(testcase)
-				return "", detacher.Detach(diskName, instanceID)
+				mountPath := "/mnt/" + string(diskName)
+				return "", detacher.Detach(mountPath, nodeName)
 			},
 		},
-
-		// Disk is already detached
-		{
-			name:           "Detach_Positive_AlreadyDetached",
-			diskIsAttached: diskIsAttachedCall{diskName, instanceID, false, nil},
-			test: func(testcase *testcase) (string, error) {
-				detacher := newDetacher(testcase)
-				return "", detacher.Detach(diskName, instanceID)
-			},
-		},
-
-		// Detach succeeds when DiskIsAttached fails
-		{
-			name:           "Detach_Positive_CheckFails",
-			diskIsAttached: diskIsAttachedCall{diskName, instanceID, false, diskCheckError},
-			detach:         detachCall{diskName, instanceID, "/dev/sda", nil},
-			test: func(testcase *testcase) (string, error) {
-				detacher := newDetacher(testcase)
-				return "", detacher.Detach(diskName, instanceID)
-			},
-		},
-
 		// Detach fails
 		{
-			name:           "Detach_Negative",
-			diskIsAttached: diskIsAttachedCall{diskName, instanceID, false, diskCheckError},
-			detach:         detachCall{diskName, instanceID, "", detachError},
+			name:   "Detach_Negative",
+			detach: detachCall{diskName, nodeName, "", detachError},
 			test: func(testcase *testcase) (string, error) {
 				detacher := newDetacher(testcase)
-				return "", detacher.Detach(diskName, instanceID)
+				mountPath := "/mnt/" + string(diskName)
+				return "", detacher.Detach(mountPath, nodeName)
 			},
 			expectedError: detachError,
 		},
@@ -164,7 +142,7 @@ func TestAttachDetach(t *testing.T) {
 // newPlugin creates a new gcePersistentDiskPlugin with fake cloud, NewAttacher
 // and NewDetacher won't work.
 func newPlugin() *awsElasticBlockStorePlugin {
-	host := volumetest.NewFakeVolumeHost("/tmp", nil, nil, "")
+	host := volumetest.NewFakeVolumeHost("/tmp", nil, nil)
 	plugins := ProbeVolumePlugins()
 	plugin := plugins[0]
 	plugin.Init(host)
@@ -184,12 +162,12 @@ func newDetacher(testcase *testcase) *awsElasticBlockStoreDetacher {
 	}
 }
 
-func createVolSpec(name string, readOnly bool) *volume.Spec {
+func createVolSpec(name aws.KubernetesVolumeID, readOnly bool) *volume.Spec {
 	return &volume.Spec{
-		Volume: &api.Volume{
-			VolumeSource: api.VolumeSource{
-				AWSElasticBlockStore: &api.AWSElasticBlockStoreVolumeSource{
-					VolumeID: name,
+		Volume: &v1.Volume{
+			VolumeSource: v1.VolumeSource{
+				AWSElasticBlockStore: &v1.AWSElasticBlockStoreVolumeSource{
+					VolumeID: string(name),
 					ReadOnly: readOnly,
 				},
 			},
@@ -197,13 +175,13 @@ func createVolSpec(name string, readOnly bool) *volume.Spec {
 	}
 }
 
-func createPVSpec(name string, readOnly bool) *volume.Spec {
+func createPVSpec(name aws.KubernetesVolumeID, readOnly bool) *volume.Spec {
 	return &volume.Spec{
-		PersistentVolume: &api.PersistentVolume{
-			Spec: api.PersistentVolumeSpec{
-				PersistentVolumeSource: api.PersistentVolumeSource{
-					AWSElasticBlockStore: &api.AWSElasticBlockStoreVolumeSource{
-						VolumeID: name,
+		PersistentVolume: &v1.PersistentVolume{
+			Spec: v1.PersistentVolumeSpec{
+				PersistentVolumeSource: v1.PersistentVolumeSource{
+					AWSElasticBlockStore: &v1.AWSElasticBlockStoreVolumeSource{
+						VolumeID: string(name),
 						ReadOnly: readOnly,
 					},
 				},
@@ -215,30 +193,31 @@ func createPVSpec(name string, readOnly bool) *volume.Spec {
 // Fake AWS implementation
 
 type attachCall struct {
-	diskName      string
-	instanceID    string
+	diskName      aws.KubernetesVolumeID
+	nodeName      types.NodeName
 	readOnly      bool
 	retDeviceName string
 	ret           error
 }
 
 type detachCall struct {
-	diskName      string
-	instanceID    string
+	diskName      aws.KubernetesVolumeID
+	nodeName      types.NodeName
 	retDeviceName string
 	ret           error
 }
 
 type diskIsAttachedCall struct {
-	diskName, instanceID string
-	isAttached           bool
-	ret                  error
+	diskName   aws.KubernetesVolumeID
+	nodeName   types.NodeName
+	isAttached bool
+	ret        error
 }
 
-func (testcase *testcase) AttachDisk(diskName string, instanceID string, readOnly bool) (string, error) {
+func (testcase *testcase) AttachDisk(diskName aws.KubernetesVolumeID, nodeName types.NodeName, readOnly bool) (string, error) {
 	expected := &testcase.attach
 
-	if expected.diskName == "" && expected.instanceID == "" {
+	if expected.diskName == "" && expected.nodeName == "" {
 		// testcase.attach looks uninitialized, test did not expect to call
 		// AttachDisk
 		testcase.t.Errorf("Unexpected AttachDisk call!")
@@ -250,9 +229,9 @@ func (testcase *testcase) AttachDisk(diskName string, instanceID string, readOnl
 		return "", errors.New("Unexpected AttachDisk call: wrong diskName")
 	}
 
-	if expected.instanceID != instanceID {
-		testcase.t.Errorf("Unexpected AttachDisk call: expected instanceID %s, got %s", expected.instanceID, instanceID)
-		return "", errors.New("Unexpected AttachDisk call: wrong instanceID")
+	if expected.nodeName != nodeName {
+		testcase.t.Errorf("Unexpected AttachDisk call: expected nodeName %s, got %s", expected.nodeName, nodeName)
+		return "", errors.New("Unexpected AttachDisk call: wrong nodeName")
 	}
 
 	if expected.readOnly != readOnly {
@@ -260,15 +239,15 @@ func (testcase *testcase) AttachDisk(diskName string, instanceID string, readOnl
 		return "", errors.New("Unexpected AttachDisk call: wrong readOnly")
 	}
 
-	glog.V(4).Infof("AttachDisk call: %s, %s, %v, returning %q, %v", diskName, instanceID, readOnly, expected.retDeviceName, expected.ret)
+	glog.V(4).Infof("AttachDisk call: %s, %s, %v, returning %q, %v", diskName, nodeName, readOnly, expected.retDeviceName, expected.ret)
 
 	return expected.retDeviceName, expected.ret
 }
 
-func (testcase *testcase) DetachDisk(diskName string, instanceID string) (string, error) {
+func (testcase *testcase) DetachDisk(diskName aws.KubernetesVolumeID, nodeName types.NodeName) (string, error) {
 	expected := &testcase.detach
 
-	if expected.diskName == "" && expected.instanceID == "" {
+	if expected.diskName == "" && expected.nodeName == "" {
 		// testcase.detach looks uninitialized, test did not expect to call
 		// DetachDisk
 		testcase.t.Errorf("Unexpected DetachDisk call!")
@@ -280,53 +259,44 @@ func (testcase *testcase) DetachDisk(diskName string, instanceID string) (string
 		return "", errors.New("Unexpected DetachDisk call: wrong diskName")
 	}
 
-	if expected.instanceID != instanceID {
-		testcase.t.Errorf("Unexpected DetachDisk call: expected instanceID %s, got %s", expected.instanceID, instanceID)
-		return "", errors.New("Unexpected DetachDisk call: wrong instanceID")
+	if expected.nodeName != nodeName {
+		testcase.t.Errorf("Unexpected DetachDisk call: expected nodeName %s, got %s", expected.nodeName, nodeName)
+		return "", errors.New("Unexpected DetachDisk call: wrong nodeName")
 	}
 
-	glog.V(4).Infof("DetachDisk call: %s, %s, returning %q, %v", diskName, instanceID, expected.retDeviceName, expected.ret)
+	glog.V(4).Infof("DetachDisk call: %s, %s, returning %q, %v", diskName, nodeName, expected.retDeviceName, expected.ret)
 
 	return expected.retDeviceName, expected.ret
 }
 
-func (testcase *testcase) DiskIsAttached(diskName, instanceID string) (bool, error) {
-	expected := &testcase.diskIsAttached
-
-	if expected.diskName == "" && expected.instanceID == "" {
-		// testcase.diskIsAttached looks uninitialized, test did not expect to
-		// call DiskIsAttached
-		testcase.t.Errorf("Unexpected DiskIsAttached call!")
-		return false, errors.New("Unexpected DiskIsAttached call!")
-	}
-
-	if expected.diskName != diskName {
-		testcase.t.Errorf("Unexpected DiskIsAttached call: expected diskName %s, got %s", expected.diskName, diskName)
-		return false, errors.New("Unexpected DiskIsAttached call: wrong diskName")
-	}
-
-	if expected.instanceID != instanceID {
-		testcase.t.Errorf("Unexpected DiskIsAttached call: expected instanceID %s, got %s", expected.instanceID, instanceID)
-		return false, errors.New("Unexpected DiskIsAttached call: wrong instanceID")
-	}
-
-	glog.V(4).Infof("DiskIsAttached call: %s, %s, returning %v, %v", diskName, instanceID, expected.isAttached, expected.ret)
-
-	return expected.isAttached, expected.ret
+func (testcase *testcase) DiskIsAttached(diskName aws.KubernetesVolumeID, nodeName types.NodeName) (bool, error) {
+	// DetachDisk no longer relies on DiskIsAttached api call
+	return false, nil
 }
 
-func (testcase *testcase) CreateDisk(volumeOptions *aws.VolumeOptions) (volumeName string, err error) {
+func (testcase *testcase) DisksAreAttached(nodeDisks map[types.NodeName][]aws.KubernetesVolumeID) (map[types.NodeName]map[aws.KubernetesVolumeID]bool, error) {
+	return nil, errors.New("Not implemented")
+}
+
+func (testcase *testcase) CreateDisk(volumeOptions *aws.VolumeOptions) (volumeName aws.KubernetesVolumeID, err error) {
 	return "", errors.New("Not implemented")
 }
 
-func (testcase *testcase) DeleteDisk(volumeName string) (bool, error) {
+func (testcase *testcase) DeleteDisk(volumeName aws.KubernetesVolumeID) (bool, error) {
 	return false, errors.New("Not implemented")
 }
 
-func (testcase *testcase) GetVolumeLabels(volumeName string) (map[string]string, error) {
+func (testcase *testcase) GetVolumeLabels(volumeName aws.KubernetesVolumeID) (map[string]string, error) {
 	return map[string]string{}, errors.New("Not implemented")
 }
 
-func (testcase *testcase) GetDiskPath(volumeName string) (string, error) {
+func (testcase *testcase) GetDiskPath(volumeName aws.KubernetesVolumeID) (string, error) {
 	return "", errors.New("Not implemented")
+}
+
+func (testcase *testcase) ResizeDisk(
+	volumeName aws.KubernetesVolumeID,
+	oldSize resource.Quantity,
+	newSize resource.Quantity) (resource.Quantity, error) {
+	return oldSize, errors.New("Not implemented")
 }

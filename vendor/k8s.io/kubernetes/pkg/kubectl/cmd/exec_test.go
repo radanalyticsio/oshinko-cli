@@ -29,12 +29,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/testapi"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/client/restclient"
-	"k8s.io/kubernetes/pkg/client/unversioned/fake"
-	"k8s.io/kubernetes/pkg/util/term"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	restclient "k8s.io/client-go/rest"
+	"k8s.io/client-go/rest/fake"
+	"k8s.io/client-go/tools/remotecommand"
+	api "k8s.io/kubernetes/pkg/apis/core"
+	cmdtesting "k8s.io/kubernetes/pkg/kubectl/cmd/testing"
+	"k8s.io/kubernetes/pkg/kubectl/util/term"
 )
 
 type fakeRemoteExecutor struct {
@@ -43,7 +44,7 @@ type fakeRemoteExecutor struct {
 	execErr error
 }
 
-func (f *fakeRemoteExecutor) Execute(method string, url *url.URL, config *restclient.Config, stdin io.Reader, stdout, stderr io.Writer, tty bool, terminalSizeQueue term.TerminalSizeQueue) error {
+func (f *fakeRemoteExecutor) Execute(method string, url *url.URL, config *restclient.Config, stdin io.Reader, stdout, stderr io.Writer, tty bool, terminalSizeQueue remotecommand.TerminalSizeQueue) error {
 	f.method = method
 	f.url = url
 	return f.execErr
@@ -127,55 +128,53 @@ func TestPodAndContainer(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		f, tf, _, ns := NewAPIFactory()
+		f, tf, _, ns := cmdtesting.NewAPIFactory()
 		tf.Client = &fake.RESTClient{
 			NegotiatedSerializer: ns,
 			Client:               fake.CreateHTTPClient(func(req *http.Request) (*http.Response, error) { return nil, nil }),
 		}
 		tf.Namespace = "test"
-		tf.ClientConfig = &restclient.Config{}
+		tf.ClientConfig = defaultClientConfig()
 
 		cmd := &cobra.Command{}
 		options := test.p
 		err := options.Complete(f, cmd, test.args, test.argsLenAtDash)
 		if test.expectError && err == nil {
-			t.Errorf("unexpected non-error (%s)", test.name)
+			t.Errorf("%s: unexpected non-error", test.name)
 		}
 		if !test.expectError && err != nil {
-			t.Errorf("unexpected error: %v (%s)", err, test.name)
+			t.Errorf("%s: unexpected error: %v", test.name, err)
 		}
 		if err != nil {
 			continue
 		}
 		if options.PodName != test.expectedPod {
-			t.Errorf("expected: %s, got: %s (%s)", test.expectedPod, options.PodName, test.name)
+			t.Errorf("%s: expected: %s, got: %s", test.name, test.expectedPod, options.PodName)
 		}
 		if options.ContainerName != test.expectedContainer {
-			t.Errorf("expected: %s, got: %s (%s)", test.expectedContainer, options.ContainerName, test.name)
+			t.Errorf("%s: expected: %s, got: %s", test.name, test.expectedContainer, options.ContainerName)
 		}
 		if !reflect.DeepEqual(test.expectedArgs, options.Command) {
-			t.Errorf("expected: %v, got %v (%s)", test.expectedArgs, options.Command, test.name)
+			t.Errorf("%s: expected: %v, got %v", test.name, test.expectedArgs, options.Command)
 		}
 	}
 }
 
 func TestExec(t *testing.T) {
-	version := testapi.Default.GroupVersion().Version
+	version := "v1"
 	tests := []struct {
-		name, version, podPath, execPath, container string
-		pod                                         *api.Pod
-		execErr                                     bool
+		name, podPath, execPath, container string
+		pod                                *api.Pod
+		execErr                            bool
 	}{
 		{
 			name:     "pod exec",
-			version:  version,
 			podPath:  "/api/" + version + "/namespaces/test/pods/foo",
 			execPath: "/api/" + version + "/namespaces/test/pods/foo/exec",
 			pod:      execPod(),
 		},
 		{
 			name:     "pod exec error",
-			version:  version,
 			podPath:  "/api/" + version + "/namespaces/test/pods/foo",
 			execPath: "/api/" + version + "/namespaces/test/pods/foo/exec",
 			pod:      execPod(),
@@ -183,7 +182,7 @@ func TestExec(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		f, tf, codec, ns := NewAPIFactory()
+		f, tf, codec, ns := cmdtesting.NewAPIFactory()
 		tf.Client = &fake.RESTClient{
 			NegotiatedSerializer: ns,
 			Client: fake.CreateHTTPClient(func(req *http.Request) (*http.Response, error) {
@@ -199,7 +198,7 @@ func TestExec(t *testing.T) {
 			}),
 		}
 		tf.Namespace = "test"
-		tf.ClientConfig = &restclient.Config{ContentConfig: restclient.ContentConfig{GroupVersion: &unversioned.GroupVersion{Version: test.version}}}
+		tf.ClientConfig = defaultClientConfig()
 		bufOut := bytes.NewBuffer([]byte{})
 		bufErr := bytes.NewBuffer([]byte{})
 		bufIn := bytes.NewBuffer([]byte{})
@@ -246,7 +245,7 @@ func TestExec(t *testing.T) {
 
 func execPod() *api.Pod {
 	return &api.Pod{
-		ObjectMeta: api.ObjectMeta{Name: "foo", Namespace: "test", ResourceVersion: "10"},
+		ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "test", ResourceVersion: "10"},
 		Spec: api.PodSpec{
 			RestartPolicy: api.RestartPolicyAlways,
 			DNSPolicy:     api.DNSClusterFirst,

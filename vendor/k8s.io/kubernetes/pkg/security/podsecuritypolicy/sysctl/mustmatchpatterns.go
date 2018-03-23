@@ -20,11 +20,12 @@ import (
 	"fmt"
 	"strings"
 
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/util/validation/field"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	api "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/apis/core/helper"
 )
 
-// mustMatchPatterns implements the CapabilitiesStrategy interface
+// mustMatchPatterns implements the SysctlsStrategy interface
 type mustMatchPatterns struct {
 	patterns []string
 }
@@ -35,15 +36,15 @@ var (
 	defaultSysctlsPatterns = []string{"*"}
 )
 
-// NewMustMatchPatterns creates a new mustMatchPattern strategy that will provide validation.
+// NewMustMatchPatterns creates a new mustMatchPatterns strategy that will provide validation.
 // Passing nil means the default pattern, passing an empty list means to disallow all sysctls.
-func NewMustMatchPatterns(patterns []string) (SysctlsStrategy, error) {
+func NewMustMatchPatterns(patterns []string) SysctlsStrategy {
 	if patterns == nil {
 		patterns = defaultSysctlsPatterns
 	}
 	return &mustMatchPatterns{
 		patterns: patterns,
-	}, nil
+	}
 }
 
 // Validate ensures that the specified values fall within the range of the strategy.
@@ -59,7 +60,7 @@ func (s *mustMatchPatterns) validateAnnotation(pod *api.Pod, key string) field.E
 
 	fieldPath := field.NewPath("pod", "metadata", "annotations").Key(key)
 
-	sysctls, err := api.SysctlsFromPodAnnotation(pod.Annotations[key])
+	sysctls, err := helper.SysctlsFromPodAnnotation(pod.Annotations[key])
 	if err != nil {
 		allErrs = append(allErrs, field.Invalid(fieldPath, pod.Annotations[key], err.Error()))
 	}

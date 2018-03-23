@@ -20,21 +20,19 @@ import (
 	"fmt"
 	"strings"
 
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/runtime/serializer"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
 )
-
-func (obj *MetadataOnlyObject) GetObjectKind() unversioned.ObjectKind     { return obj }
-func (obj *MetadataOnlyObjectList) GetObjectKind() unversioned.ObjectKind { return obj }
 
 type metaOnlyJSONScheme struct{}
 
 // This function can be extended to mapping different gvk to different MetadataOnlyObject,
 // which embedded with different version of ObjectMeta. Currently the system
-// only supports v1.ObjectMeta.
-func gvkToMetadataOnlyObject(gvk unversioned.GroupVersionKind) runtime.Object {
+// only supports metav1.ObjectMeta.
+func gvkToMetadataOnlyObject(gvk schema.GroupVersionKind) runtime.Object {
 	if strings.HasSuffix(gvk.Kind, "List") {
 		return &MetadataOnlyObjectList{}
 	} else {
@@ -43,18 +41,22 @@ func gvkToMetadataOnlyObject(gvk unversioned.GroupVersionKind) runtime.Object {
 }
 
 func NewMetadataCodecFactory() serializer.CodecFactory {
-	// populating another scheme from api.Scheme, registering every kind with
+	// populating another scheme from legacyscheme.Scheme, registering every kind with
 	// MetadataOnlyObject (or MetadataOnlyObjectList).
 	scheme := runtime.NewScheme()
-	allTypes := api.Scheme.AllKnownTypes()
+	allTypes := legacyscheme.Scheme.AllKnownTypes()
 	for kind := range allTypes {
 		if kind.Version == runtime.APIVersionInternal {
+			continue
+		}
+		if kind == metav1.Unversioned.WithKind("Status") {
+			// this is added below as unversioned
 			continue
 		}
 		metaOnlyObject := gvkToMetadataOnlyObject(kind)
 		scheme.AddKnownTypeWithName(kind, metaOnlyObject)
 	}
-	scheme.AddUnversionedTypes(api.Unversioned, &unversioned.Status{})
+	scheme.AddUnversionedTypes(metav1.Unversioned, &metav1.Status{})
 	return serializer.NewCodecFactory(scheme)
 }
 

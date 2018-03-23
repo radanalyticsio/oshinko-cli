@@ -22,13 +22,16 @@ import (
 	"io"
 	"time"
 
-	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/metricsutil"
-	"k8s.io/kubernetes/pkg/labels"
+	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 
 	"github.com/golang/glog"
-	"github.com/renstrom/dedent"
 	"github.com/spf13/cobra"
 )
 
@@ -38,6 +41,8 @@ type TopPodOptions struct {
 	Selector        string
 	AllNamespaces   bool
 	PrintContainers bool
+	PodClient       corev1.PodsGetter
+	HeapsterOptions HeapsterTopOptions
 	Client          *metricsutil.HeapsterMetricsClient
 	Printer         *metricsutil.TopCmdPrinter
 }
@@ -45,69 +50,76 @@ type TopPodOptions struct {
 const metricsCreationDelay = 2 * time.Minute
 
 var (
-	topPodLong = dedent.Dedent(`
+	topPodLong = templates.LongDesc(i18n.T(`
 		Display Resource (CPU/Memory/Storage) usage of pods.
 
 		The 'top pod' command allows you to see the resource consumption of pods.
 
 		Due to the metrics pipeline delay, they may be unavailable for a few minutes
-		since pod creation.`)
+		since pod creation.`))
 
-	topPodExample = dedent.Dedent(`
-		  # Show metrics for all pods in the default namespace
-		  kubectl top pod
+	topPodExample = templates.Examples(i18n.T(`
+		# Show metrics for all pods in the default namespace
+		kubectl top pod
 
-		  # Show metrics for all pods in the given namespace
-		  kubectl top pod --namespace=NAMESPACE
+		# Show metrics for all pods in the given namespace
+		kubectl top pod --namespace=NAMESPACE
 
-		  # Show metrics for a given pod and its containers
-		  kubectl top pod POD_NAME --containers
+		# Show metrics for a given pod and its containers
+		kubectl top pod POD_NAME --containers
 
-		  # Show metrics for the pods defined by label name=myLabel
-		  kubectl top pod -l name=myLabel`)
+		# Show metrics for the pods defined by label name=myLabel
+		kubectl top pod -l name=myLabel`))
 )
 
-func NewCmdTopPod(f *cmdutil.Factory, out io.Writer) *cobra.Command {
-	options := &TopPodOptions{}
+func NewCmdTopPod(f cmdutil.Factory, options *TopPodOptions, out io.Writer) *cobra.Command {
+	if options == nil {
+		options = &TopPodOptions{}
+	}
 
 	cmd := &cobra.Command{
 		Use:     "pod [NAME | -l label]",
-		Short:   "Display Resource (CPU/Memory/Storage) usage of pods",
+		Short:   i18n.T("Display Resource (CPU/Memory/Storage) usage of pods"),
 		Long:    topPodLong,
 		Example: topPodExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Complete(f, cmd, args, out); err != nil {
 				cmdutil.CheckErr(err)
 			}
+			if err := options.Validate(); err != nil {
+				cmdutil.CheckErr(cmdutil.UsageErrorf(cmd, "%v", err))
+			}
 			if err := options.RunTopPod(); err != nil {
 				cmdutil.CheckErr(err)
 			}
 		},
-		Aliases: []string{"pods"},
+		Aliases: []string{"pods", "po"},
 	}
-	cmd.Flags().StringVarP(&options.Selector, "selector", "l", "", "Selector (label query) to filter on")
+	cmd.Flags().StringVarP(&options.Selector, "selector", "l", "", "Selector (label query) to filter on, supports '=', '==', and '!='.(e.g. -l key1=value1,key2=value2)")
 	cmd.Flags().BoolVar(&options.PrintContainers, "containers", false, "If present, print usage of containers within a pod.")
 	cmd.Flags().BoolVar(&options.AllNamespaces, "all-namespaces", false, "If present, list the requested object(s) across all namespaces. Namespace in current context is ignored even if specified with --namespace.")
+	options.HeapsterOptions.Bind(cmd.Flags())
 	return cmd
 }
 
-func (o *TopPodOptions) Complete(f *cmdutil.Factory, cmd *cobra.Command, args []string, out io.Writer) error {
+func (o *TopPodOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []string, out io.Writer) error {
 	var err error
 	if len(args) == 1 {
 		o.ResourceName = args[0]
 	} else if len(args) > 1 {
-		return cmdutil.UsageError(cmd, cmd.Use)
+		return cmdutil.UsageErrorf(cmd, "%s", cmd.Use)
 	}
 
 	o.Namespace, _, err = f.DefaultNamespace()
 	if err != nil {
 		return err
 	}
-	cli, err := f.Client()
+	clientset, err := f.KubernetesClientSet()
 	if err != nil {
 		return err
 	}
-	o.Client = metricsutil.DefaultHeapsterMetricsClient(cli)
+	o.PodClient = clientset.Core()
+	o.Client = metricsutil.NewHeapsterMetricsClient(clientset.Core(), o.HeapsterOptions.Namespace, o.HeapsterOptions.Scheme, o.HeapsterOptions.Service, o.HeapsterOptions.Port)
 	o.Printer = metricsutil.NewTopCmdPrinter(out)
 	return nil
 }
@@ -147,7 +159,7 @@ func (o TopPodOptions) RunTopPod() error {
 
 func verifyEmptyMetrics(o TopPodOptions, selector labels.Selector) error {
 	if len(o.ResourceName) > 0 {
-		pod, err := o.Client.Pods(o.Namespace).Get(o.ResourceName)
+		pod, err := o.PodClient.Pods(o.Namespace).Get(o.ResourceName, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -155,8 +167,8 @@ func verifyEmptyMetrics(o TopPodOptions, selector labels.Selector) error {
 			return err
 		}
 	} else {
-		pods, err := o.Client.Pods(o.Namespace).List(api.ListOptions{
-			LabelSelector: selector,
+		pods, err := o.PodClient.Pods(o.Namespace).List(metav1.ListOptions{
+			LabelSelector: selector.String(),
 		})
 		if err != nil {
 			return err
@@ -173,7 +185,7 @@ func verifyEmptyMetrics(o TopPodOptions, selector labels.Selector) error {
 	return errors.New("metrics not available yet")
 }
 
-func checkPodAge(pod *api.Pod) error {
+func checkPodAge(pod *v1.Pod) error {
 	age := time.Since(pod.CreationTimestamp.Time)
 	if age > metricsCreationDelay {
 		message := fmt.Sprintf("Metrics not available for pod %s/%s, age: %s", pod.Namespace, pod.Name, age.String())

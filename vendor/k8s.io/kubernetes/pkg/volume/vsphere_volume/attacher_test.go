@@ -20,11 +20,14 @@ import (
 	"errors"
 	"testing"
 
-	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/api/core/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/vsphere/vclib"
 	"k8s.io/kubernetes/pkg/volume"
 	volumetest "k8s.io/kubernetes/pkg/volume/testing"
 
 	"github.com/golang/glog"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestGetDeviceName_Volume(t *testing.T) {
@@ -74,7 +77,7 @@ type testcase struct {
 func TestAttachDetach(t *testing.T) {
 	uuid := "00000000000000"
 	diskName := "[local] volumes/test"
-	hostName := "host"
+	nodeName := types.NodeName("host")
 	spec := createVolSpec(diskName)
 	attachError := errors.New("Fake attach error")
 	detachError := errors.New("Fake detach error")
@@ -83,10 +86,10 @@ func TestAttachDetach(t *testing.T) {
 		// Successful Attach call
 		{
 			name:   "Attach_Positive",
-			attach: attachCall{diskName, hostName, uuid, nil},
+			attach: attachCall{diskName, nodeName, uuid, nil},
 			test: func(testcase *testcase) (string, error) {
 				attacher := newAttacher(testcase)
-				return attacher.Attach(spec, hostName)
+				return attacher.Attach(spec, nodeName)
 			},
 			expectedDevice: "/dev/disk/by-id/wwn-0x" + uuid,
 		},
@@ -94,10 +97,10 @@ func TestAttachDetach(t *testing.T) {
 		// Attach call fails
 		{
 			name:   "Attach_Negative",
-			attach: attachCall{diskName, hostName, "", attachError},
+			attach: attachCall{diskName, nodeName, "", attachError},
 			test: func(testcase *testcase) (string, error) {
 				attacher := newAttacher(testcase)
-				return attacher.Attach(spec, hostName)
+				return attacher.Attach(spec, nodeName)
 			},
 			expectedError: attachError,
 		},
@@ -105,43 +108,43 @@ func TestAttachDetach(t *testing.T) {
 		// Detach succeeds
 		{
 			name:           "Detach_Positive",
-			diskIsAttached: diskIsAttachedCall{diskName, hostName, true, nil},
-			detach:         detachCall{diskName, hostName, nil},
+			diskIsAttached: diskIsAttachedCall{diskName, nodeName, true, nil},
+			detach:         detachCall{diskName, nodeName, nil},
 			test: func(testcase *testcase) (string, error) {
 				detacher := newDetacher(testcase)
-				return "", detacher.Detach(diskName, hostName)
+				return "", detacher.Detach(diskName, nodeName)
 			},
 		},
 
 		// Disk is already detached
 		{
 			name:           "Detach_Positive_AlreadyDetached",
-			diskIsAttached: diskIsAttachedCall{diskName, hostName, false, nil},
+			diskIsAttached: diskIsAttachedCall{diskName, nodeName, false, nil},
 			test: func(testcase *testcase) (string, error) {
 				detacher := newDetacher(testcase)
-				return "", detacher.Detach(diskName, hostName)
+				return "", detacher.Detach(diskName, nodeName)
 			},
 		},
 
 		// Detach succeeds when DiskIsAttached fails
 		{
 			name:           "Detach_Positive_CheckFails",
-			diskIsAttached: diskIsAttachedCall{diskName, hostName, false, diskCheckError},
-			detach:         detachCall{diskName, hostName, nil},
+			diskIsAttached: diskIsAttachedCall{diskName, nodeName, false, diskCheckError},
+			detach:         detachCall{diskName, nodeName, nil},
 			test: func(testcase *testcase) (string, error) {
 				detacher := newDetacher(testcase)
-				return "", detacher.Detach(diskName, hostName)
+				return "", detacher.Detach(diskName, nodeName)
 			},
 		},
 
 		// Detach fails
 		{
 			name:           "Detach_Negative",
-			diskIsAttached: diskIsAttachedCall{diskName, hostName, false, diskCheckError},
-			detach:         detachCall{diskName, hostName, detachError},
+			diskIsAttached: diskIsAttachedCall{diskName, nodeName, false, diskCheckError},
+			detach:         detachCall{diskName, nodeName, detachError},
 			test: func(testcase *testcase) (string, error) {
 				detacher := newDetacher(testcase)
-				return "", detacher.Detach(diskName, hostName)
+				return "", detacher.Detach(diskName, nodeName)
 			},
 			expectedError: detachError,
 		},
@@ -163,7 +166,7 @@ func TestAttachDetach(t *testing.T) {
 // newPlugin creates a new vsphereVolumePlugin with fake cloud, NewAttacher
 // and NewDetacher won't work.
 func newPlugin() *vsphereVolumePlugin {
-	host := volumetest.NewFakeVolumeHost("/tmp", nil, nil, "")
+	host := volumetest.NewFakeVolumeHost("/tmp", nil, nil)
 	plugins := ProbeVolumePlugins()
 	plugin := plugins[0]
 	plugin.Init(host)
@@ -185,9 +188,9 @@ func newDetacher(testcase *testcase) *vsphereVMDKDetacher {
 
 func createVolSpec(name string) *volume.Spec {
 	return &volume.Spec{
-		Volume: &api.Volume{
-			VolumeSource: api.VolumeSource{
-				VsphereVolume: &api.VsphereVirtualDiskVolumeSource{
+		Volume: &v1.Volume{
+			VolumeSource: v1.VolumeSource{
+				VsphereVolume: &v1.VsphereVirtualDiskVolumeSource{
 					VolumePath: name,
 				},
 			},
@@ -197,10 +200,10 @@ func createVolSpec(name string) *volume.Spec {
 
 func createPVSpec(name string) *volume.Spec {
 	return &volume.Spec{
-		PersistentVolume: &api.PersistentVolume{
-			Spec: api.PersistentVolumeSpec{
-				PersistentVolumeSource: api.PersistentVolumeSource{
-					VsphereVolume: &api.VsphereVirtualDiskVolumeSource{
+		PersistentVolume: &v1.PersistentVolume{
+			Spec: v1.PersistentVolumeSpec{
+				PersistentVolumeSource: v1.PersistentVolumeSource{
+					VsphereVolume: &v1.VsphereVirtualDiskVolumeSource{
 						VolumePath: name,
 					},
 				},
@@ -213,52 +216,53 @@ func createPVSpec(name string) *volume.Spec {
 
 type attachCall struct {
 	diskName      string
-	hostName      string
+	nodeName      types.NodeName
 	retDeviceUUID string
 	ret           error
 }
 
 type detachCall struct {
 	diskName string
-	hostName string
+	nodeName types.NodeName
 	ret      error
 }
 
 type diskIsAttachedCall struct {
-	diskName, hostName string
-	isAttached         bool
-	ret                error
+	diskName   string
+	nodeName   types.NodeName
+	isAttached bool
+	ret        error
 }
 
-func (testcase *testcase) AttachDisk(diskName string, hostName string) (string, string, error) {
+func (testcase *testcase) AttachDisk(diskName string, storagePolicyName string, nodeName types.NodeName) (string, error) {
 	expected := &testcase.attach
 
-	if expected.diskName == "" && expected.hostName == "" {
+	if expected.diskName == "" && expected.nodeName == "" {
 		// testcase.attach looks uninitialized, test did not expect to call
 		// AttachDisk
 		testcase.t.Errorf("Unexpected AttachDisk call!")
-		return "", "", errors.New("Unexpected AttachDisk call!")
+		return "", errors.New("Unexpected AttachDisk call!")
 	}
 
 	if expected.diskName != diskName {
 		testcase.t.Errorf("Unexpected AttachDisk call: expected diskName %s, got %s", expected.diskName, diskName)
-		return "", "", errors.New("Unexpected AttachDisk call: wrong diskName")
+		return "", errors.New("Unexpected AttachDisk call: wrong diskName")
 	}
 
-	if expected.hostName != hostName {
-		testcase.t.Errorf("Unexpected AttachDisk call: expected hostName %s, got %s", expected.hostName, hostName)
-		return "", "", errors.New("Unexpected AttachDisk call: wrong hostName")
+	if expected.nodeName != nodeName {
+		testcase.t.Errorf("Unexpected AttachDisk call: expected nodeName %s, got %s", expected.nodeName, nodeName)
+		return "", errors.New("Unexpected AttachDisk call: wrong nodeName")
 	}
 
-	glog.V(4).Infof("AttachDisk call: %s, %s, returning %q, %v", diskName, hostName, expected.retDeviceUUID, expected.ret)
+	glog.V(4).Infof("AttachDisk call: %s, %s, returning %q, %v", diskName, nodeName, expected.retDeviceUUID, expected.ret)
 
-	return "", expected.retDeviceUUID, expected.ret
+	return expected.retDeviceUUID, expected.ret
 }
 
-func (testcase *testcase) DetachDisk(diskName string, hostName string) error {
+func (testcase *testcase) DetachDisk(diskName string, nodeName types.NodeName) error {
 	expected := &testcase.detach
 
-	if expected.diskName == "" && expected.hostName == "" {
+	if expected.diskName == "" && expected.nodeName == "" {
 		// testcase.detach looks uninitialized, test did not expect to call
 		// DetachDisk
 		testcase.t.Errorf("Unexpected DetachDisk call!")
@@ -270,20 +274,20 @@ func (testcase *testcase) DetachDisk(diskName string, hostName string) error {
 		return errors.New("Unexpected DetachDisk call: wrong diskName")
 	}
 
-	if expected.hostName != hostName {
-		testcase.t.Errorf("Unexpected DetachDisk call: expected hostname %s, got %s", expected.hostName, hostName)
-		return errors.New("Unexpected DetachDisk call: wrong hostname")
+	if expected.nodeName != nodeName {
+		testcase.t.Errorf("Unexpected DetachDisk call: expected nodeName %s, got %s", expected.nodeName, nodeName)
+		return errors.New("Unexpected DetachDisk call: wrong nodeName")
 	}
 
-	glog.V(4).Infof("DetachDisk call: %s, %s, returning %v", diskName, hostName, expected.ret)
+	glog.V(4).Infof("DetachDisk call: %s, %s, returning %v", diskName, nodeName, expected.ret)
 
 	return expected.ret
 }
 
-func (testcase *testcase) DiskIsAttached(diskName, hostName string) (bool, error) {
+func (testcase *testcase) DiskIsAttached(diskName string, nodeName types.NodeName) (bool, error) {
 	expected := &testcase.diskIsAttached
 
-	if expected.diskName == "" && expected.hostName == "" {
+	if expected.diskName == "" && expected.nodeName == "" {
 		// testcase.diskIsAttached looks uninitialized, test did not expect to
 		// call DiskIsAttached
 		testcase.t.Errorf("Unexpected DiskIsAttached call!")
@@ -295,17 +299,21 @@ func (testcase *testcase) DiskIsAttached(diskName, hostName string) (bool, error
 		return false, errors.New("Unexpected DiskIsAttached call: wrong diskName")
 	}
 
-	if expected.hostName != hostName {
-		testcase.t.Errorf("Unexpected DiskIsAttached call: expected hostName %s, got %s", expected.hostName, hostName)
-		return false, errors.New("Unexpected DiskIsAttached call: wrong hostName")
+	if expected.nodeName != nodeName {
+		testcase.t.Errorf("Unexpected DiskIsAttached call: expected nodeName %s, got %s", expected.nodeName, nodeName)
+		return false, errors.New("Unexpected DiskIsAttached call: wrong nodeName")
 	}
 
-	glog.V(4).Infof("DiskIsAttached call: %s, %s, returning %v, %v", diskName, hostName, expected.isAttached, expected.ret)
+	glog.V(4).Infof("DiskIsAttached call: %s, %s, returning %v, %v", diskName, nodeName, expected.isAttached, expected.ret)
 
 	return expected.isAttached, expected.ret
 }
 
-func (testcase *testcase) CreateVolume(name string, size int, tags *map[string]string) (volumePath string, err error) {
+func (testcase *testcase) DisksAreAttached(nodeVolumes map[k8stypes.NodeName][]string) (map[k8stypes.NodeName]map[string]bool, error) {
+	return nil, errors.New("Not implemented")
+}
+
+func (testcase *testcase) CreateVolume(volumeOptions *vclib.VolumeOptions) (volumePath string, err error) {
 	return "", errors.New("Not implemented")
 }
 
