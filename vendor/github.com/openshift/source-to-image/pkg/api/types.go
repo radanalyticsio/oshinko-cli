@@ -1,13 +1,15 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/openshift/source-to-image/pkg/scm/git"
 	utilglog "github.com/openshift/source-to-image/pkg/util/glog"
-
 	"github.com/openshift/source-to-image/pkg/util/user"
 )
 
@@ -21,7 +23,7 @@ const (
 
 // invalidFilenameCharacters contains a list of character we consider malicious
 // when injecting the directories into containers.
-const invalidFilenameCharacters = `\:;*?"<>|%#$!+{}&[],"'` + "`"
+const invalidFilenameCharacters = `;*?"<>|%#$!+{}&[],"'` + "`"
 
 const (
 	// PullAlways means that we always attempt to pull the latest image.
@@ -111,10 +113,7 @@ type Config struct {
 	IgnoreSubmodules bool
 
 	// Source URL describing the location of sources used to build the result image.
-	Source string
-
-	// Ref is a tag/branch to be used for build.
-	Ref string
+	Source *git.URL
 
 	// Tag is a result image tag name.
 	Tag string
@@ -125,12 +124,6 @@ type Config struct {
 	// PreviousImagePullPolicy specifies when to pull the previously build image
 	// when doing incremental build
 	PreviousImagePullPolicy PullPolicy
-
-	// ForcePull defines if the builder image should be always pulled or not.
-	// This is now deprecated by BuilderPullPolicy and will be removed soon.
-	// Setting this to 'true' equals setting BuilderPullPolicy to 'PullAlways'.
-	// Setting this to 'false' equals setting BuilderPullPolicy to 'PullIfNotPresent'
-	ForcePull bool
 
 	// Incremental describes whether to try to perform incremental build.
 	Incremental bool
@@ -231,12 +224,19 @@ type Config struct {
 
 	// BuildVolumes specifies a list of volumes to mount to container running the
 	// build.
-	BuildVolumes VolumeList
+	BuildVolumes []string
 
 	// Labels specify labels and their values to be applied to the resulting image. Label keys
 	// must have non-zero length. The labels defined here override generated labels in case
 	// they have the same name.
 	Labels map[string]string
+
+	// SourceInfo provides the info about the source to be built rather than relying
+	// on the Downloader to retrieve it.
+	SourceInfo *git.SourceInfo
+
+	// SecurityOpt are passed as options to the docker containers launched by s2i.
+	SecurityOpt []string
 }
 
 // EnvironmentSpec specifies a single environment variable.
@@ -261,6 +261,7 @@ type CGroupLimits struct {
 	CPUPeriod        int64
 	CPUQuota         int64
 	MemorySwap       int64
+	Parent           string
 }
 
 // VolumeSpec represents a single volume mount point.
@@ -336,13 +337,91 @@ type Result struct {
 	BuildInfo BuildInfo
 }
 
-// BuildInfo holds information about a particular step in the build process.
+// BuildInfo contains information about the build process.
 type BuildInfo struct {
+	// Stages contains details about each build stage.
+	Stages []StageInfo
+
 	// FailureReason is a camel case reason that is used by the machine to reply
 	// back to the OpenShift builder with information why any of the steps in the
-	// build, failed.
+	// build failed.
 	FailureReason FailureReason
 }
+
+// StageInfo contains details about a build stage.
+type StageInfo struct {
+	// Name is the identifier for each build stage.
+	Name StageName
+
+	// StartTime identifies when this stage started.
+	StartTime time.Time
+
+	// DurationMilliseconds identifies how long this stage ran.
+	DurationMilliseconds int64
+
+	// Steps contains details about each build step within a build stage.
+	Steps []StepInfo
+}
+
+// StageName is the identifier for each build stage.
+type StageName string
+
+// Valid StageNames
+const (
+	// StagePullImages pulls the docker images.
+	StagePullImages StageName = "PullImages"
+
+	//StageAssemble runs the assemble steps.
+	StageAssemble StageName = "Assemble"
+
+	// StageBuild builds the source.
+	StageBuild StageName = "Build"
+
+	// StageCommit commits the container.
+	StageCommit StageName = "CommitContainer"
+
+	// StageRetrieve retrieves artifacts.
+	StageRetrieve StageName = "RetrieveArtifacts"
+)
+
+// StepInfo contains details about a build step.
+type StepInfo struct {
+	// Name is the identifier for each build step.
+	Name StepName
+
+	// StartTime identifies when this step started.
+	StartTime time.Time
+
+	// DurationMilliseconds identifies how long this step ran.
+	DurationMilliseconds int64
+}
+
+// StepName is the identifier for each build step.
+type StepName string
+
+// Valid StepNames
+const (
+	// StepPullBuilderImage pulls the builder image.
+	StepPullBuilderImage StepName = "PullBuilderImage"
+
+	// StepPullPreviousImage pulls the previous image for an incremental build.
+	StepPullPreviousImage StepName = "PullPreviousImage"
+
+	// StepPullRuntimeImage pull the runtime image.
+	StepPullRuntimeImage StepName = "PullRuntimeImage"
+
+	// StepAssembleBuildScripts runs the assemble scripts.
+	StepAssembleBuildScripts StepName = "AssembleBuildScripts"
+
+	// StepBuildDockerImage builds the Docker image for layered builds.
+	StepBuildDockerImage StepName = "BuildDockerImage"
+
+	// StepCommitContainer commits the container to the builder image.
+	StepCommitContainer StepName = "CommitContainer"
+
+	// StepRetrievePreviousArtifacts restores archived artifacts from the previous build.
+	StepRetrievePreviousArtifacts StepName = "RetrievePreviousArtifacts"
+)
 
 // StepFailureReason holds the type of failure that occurred during the build
 // process.
@@ -382,56 +461,6 @@ type InstallResult struct {
 	FailedSources []string
 }
 
-// SourceInfo stores information about the source code
-type SourceInfo struct {
-	// Ref represents a commit SHA-1, valid Git branch name or a Git tag
-	// The output image will contain this information as 'io.openshift.build.commit.ref' label.
-	Ref string
-
-	// CommitID represents an arbitrary extended object reference in Git as SHA-1
-	// The output image will contain this information as 'io.openshift.build.commit.id' label.
-	CommitID string
-
-	// Date contains a date when the committer created the commit.
-	// The output image will contain this information as 'io.openshift.build.commit.date' label.
-	Date string
-
-	// AuthorName contains the name of the author
-	// The output image will contain this information (along with AuthorEmail) as 'io.openshift.build.commit.author' label.
-	AuthorName string
-
-	// AuthorEmail contains the e-mail of the author
-	// The output image will contain this information (along with AuthorName) as 'io.openshift.build.commit.author' lablel.
-	AuthorEmail string
-
-	// CommitterName contains the name of the committer
-	CommitterName string
-
-	// CommitterEmail contains the e-mail of the committer
-	CommitterEmail string
-
-	// Message represents the first 80 characters from the commit message.
-	// The output image will contain this information as 'io.openshift.build.commit.message' label.
-	Message string
-
-	// Location contains a valid URL to the original repository.
-	// The output image will contain this information as 'io.openshift.build.source-location' label.
-	Location string
-
-	// ContextDir contains path inside the Location directory that
-	// contains the application source code.
-	// The output image will contain this information as 'io.openshift.build.source-context-dir'
-	// label.
-	ContextDir string
-}
-
-// CloneConfig specifies the options used when cloning the application source
-// code.
-type CloneConfig struct {
-	Recursive bool
-	Quiet     bool
-}
-
 // DockerNetworkMode specifies the network mode setting for the docker container
 type DockerNetworkMode string
 
@@ -442,6 +471,8 @@ const (
 	DockerNetworkModeBridge DockerNetworkMode = "bridge"
 	// DockerNetworkModeContainerPrefix is the string prefix used by NewDockerNetworkModeContainer.
 	DockerNetworkModeContainerPrefix string = "container:"
+	// DockerNetworkModeNetworkNamespacePrefix is the string prefix used when sharing a namespace from a CRI-O container.
+	DockerNetworkModeNetworkNamespacePrefix string = "netns:"
 )
 
 // NewDockerNetworkModeContainer creates a DockerNetworkMode value which instructs docker to place the container in the network namespace of an existing container.
@@ -497,20 +528,18 @@ func IsInvalidFilename(name string) bool {
 // working directory in container.
 func (l *VolumeList) Set(value string) error {
 	if len(value) == 0 {
-		return fmt.Errorf("invalid format, must be source:destination")
+		return errors.New("invalid format, must be source:destination")
 	}
-	mount := strings.Split(value, ":")
-	switch len(mount) {
-	case 1:
-		mount = append(mount, "")
-		fallthrough
-	case 2:
-		mount[0] = strings.Trim(mount[0], `"'`)
-		mount[1] = strings.Trim(mount[1], `"'`)
-	default:
-		return fmt.Errorf("invalid source:path definition")
+	var mount []string
+	pos := strings.LastIndex(value, ":")
+	if pos == -1 {
+		mount = []string{value, ""}
+	} else {
+		mount = []string{value[:pos], value[pos+1:]}
 	}
-	s := VolumeSpec{Source: filepath.Clean(mount[0]), Destination: filepath.Clean(mount[1])}
+	mount[0] = strings.Trim(mount[0], `"'`)
+	mount[1] = strings.Trim(mount[1], `"'`)
+	s := VolumeSpec{Source: filepath.Clean(mount[0]), Destination: filepath.ToSlash(filepath.Clean(mount[1]))}
 	if IsInvalidFilename(s.Source) || IsInvalidFilename(s.Destination) {
 		return fmt.Errorf("invalid characters in filename: %q", value)
 	}

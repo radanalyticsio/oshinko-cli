@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 
@@ -14,7 +15,7 @@ import (
 )
 
 // Config returns the Config object in nice readable, tabbed format.
-func Config(config *api.Config) string {
+func Config(client docker.Client, config *api.Config) string {
 	out, err := tabbedString(func(out io.Writer) error {
 		if len(config.DisplayName) > 0 {
 			fmt.Fprintf(out, "Application Name:\t%s\n", config.DisplayName)
@@ -22,12 +23,9 @@ func Config(config *api.Config) string {
 		if len(config.Description) > 0 {
 			fmt.Fprintf(out, "Description:\t%s\n", config.Description)
 		}
-		describeBuilderImage(config, config.BuilderImage, out)
+		describeBuilderImage(client, config, config.BuilderImage, out)
 		describeRuntimeImage(config, out)
 		fmt.Fprintf(out, "Source:\t%s\n", config.Source)
-		if len(config.Ref) > 0 {
-			fmt.Fprintf(out, "Source Ref:\t%s\n", config.Ref)
-		}
 		if len(config.ContextDir) > 0 {
 			fmt.Fprintf(out, "Context Directory:\t%s\n", config.ContextDir)
 		}
@@ -78,19 +76,25 @@ func Config(config *api.Config) string {
 		if len(config.BuildVolumes) > 0 {
 			result := []string{}
 			for _, i := range config.BuildVolumes {
-				result = append(result, fmt.Sprintf("%s->%s", i.Source, i.Destination))
+				if runtime.GOOS == "windows" {
+					// We need to avoid the colon in the Windows drive letter
+					result = append(result, i[0:2]+strings.Replace(i[3:], ":", "->", 1))
+				} else {
+					result = append(result, strings.Replace(i, ":", "->", 1))
+				}
 			}
 			fmt.Fprintf(out, "Bind mounts:\t%s\n", strings.Join(result, ","))
 		}
 		return nil
 	})
+
 	if err != nil {
 		fmt.Printf("error: %v", err)
 	}
 	return out
 }
 
-func describeBuilderImage(config *api.Config, image string, out io.Writer) {
+func describeBuilderImage(client docker.Client, config *api.Config, image string, out io.Writer) {
 	c := &api.Config{
 		DockerConfig:       config.DockerConfig,
 		PullAuthentication: config.PullAuthentication,
@@ -99,7 +103,7 @@ func describeBuilderImage(config *api.Config, image string, out io.Writer) {
 		Tag:                config.Tag,
 		IncrementalAuthentication: config.IncrementalAuthentication,
 	}
-	pr, err := docker.GetBuilderImage(c)
+	pr, err := docker.GetBuilderImage(client, c)
 	if err == nil {
 		build.GenerateConfigFromLabels(c, pr)
 		if len(c.DisplayName) > 0 {
@@ -123,12 +127,7 @@ func describeRuntimeImage(config *api.Config, out io.Writer) {
 	}
 
 	fmt.Fprintf(out, "Runtime Image:\t%s\n", config.RuntimeImage)
-
-	pullPolicy := config.RuntimeImagePullPolicy
-	if len(pullPolicy) == 0 {
-		pullPolicy = api.DefaultRuntimeImagePullPolicy
-	}
-	fmt.Fprintf(out, "Runtime Image Pull Policy:\t%s\n", pullPolicy)
+	fmt.Fprintf(out, "Runtime Image Pull Policy:\t%s\n", config.RuntimeImagePullPolicy)
 	if len(config.RuntimeAuthentication.Username) > 0 {
 		fmt.Fprintf(out, "Runtime Image Pull User:\t%s\n", config.RuntimeAuthentication.Username)
 	}
