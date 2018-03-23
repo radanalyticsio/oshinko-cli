@@ -6,18 +6,19 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-
-	utilglog "github.com/openshift/source-to-image/pkg/util/glog"
+	"sync"
 
 	"github.com/openshift/source-to-image/pkg/api"
-	"github.com/openshift/source-to-image/pkg/errors"
+	s2ierr "github.com/openshift/source-to-image/pkg/errors"
+	"github.com/openshift/source-to-image/pkg/scm/git"
+	utilglog "github.com/openshift/source-to-image/pkg/util/glog"
 )
 
 var glog = utilglog.StderrLog
 
 // Downloader downloads the specified URL to the target file location
 type Downloader interface {
-	Download(url *url.URL, target string) (*api.SourceInfo, error)
+	Download(url *url.URL, target string) (*git.SourceInfo, error)
 }
 
 // schemeReader creates an io.Reader from the given url.
@@ -45,12 +46,12 @@ func NewDownloader(proxyConfig *api.ProxyConfig) Downloader {
 // Download downloads the file pointed to by URL into local targetFile
 // Returns information a boolean flag informing whether any download/copy operation
 // happened and an error if there was a problem during that operation
-func (d *downloader) Download(url *url.URL, targetFile string) (*api.SourceInfo, error) {
+func (d *downloader) Download(url *url.URL, targetFile string) (*git.SourceInfo, error) {
 	r := d.schemeReaders[url.Scheme]
-	info := &api.SourceInfo{}
+	info := &git.SourceInfo{}
 	if r == nil {
 		glog.Errorf("No URL handler found for %s", url.String())
-		return nil, errors.NewURLHandlerError(url.String())
+		return nil, s2ierr.NewURLHandlerError(url.String())
 	}
 
 	reader, err := r.Read(url)
@@ -63,13 +64,13 @@ func (d *downloader) Download(url *url.URL, targetFile string) (*api.SourceInfo,
 	defer out.Close()
 
 	if err != nil {
-		glog.Errorf("Unable to create target file %s (%s)", targetFile, err)
+		glog.Errorf("Unable to create target file %s (%v)", targetFile, err)
 		return nil, err
 	}
 
 	if _, err = io.Copy(out, reader); err != nil {
 		os.Remove(targetFile)
-		glog.Warningf("Skipping file %s due to error copying from source: %s", targetFile, err)
+		glog.Warningf("Skipping file %s due to error copying from source: %v", targetFile, err)
 		return nil, err
 	}
 
@@ -83,18 +84,31 @@ type HTTPURLReader struct {
 	Get func(url string) (*http.Response, error)
 }
 
+var transportMap map[api.ProxyConfig]*http.Transport
+var transportMapMutex sync.Mutex
+
+func init() {
+	transportMap = make(map[api.ProxyConfig]*http.Transport)
+}
+
 // NewHTTPURLReader returns a new HTTPURLReader.
 func NewHTTPURLReader(proxyConfig *api.ProxyConfig) *HTTPURLReader {
 	getFunc := http.Get
 	if proxyConfig != nil {
-		transport := &http.Transport{
-			Proxy: func(req *http.Request) (*url.URL, error) {
-				if proxyConfig.HTTPSProxy != nil && req.URL.Scheme == "https" {
-					return proxyConfig.HTTPSProxy, nil
-				}
-				return proxyConfig.HTTPProxy, nil
-			},
+		transportMapMutex.Lock()
+		transport, ok := transportMap[*proxyConfig]
+		if !ok {
+			transport = &http.Transport{
+				Proxy: func(req *http.Request) (*url.URL, error) {
+					if proxyConfig.HTTPSProxy != nil && req.URL.Scheme == "https" {
+						return proxyConfig.HTTPSProxy, nil
+					}
+					return proxyConfig.HTTPProxy, nil
+				},
+			}
+			transportMap[*proxyConfig] = transport
 		}
+		transportMapMutex.Unlock()
 		client := &http.Client{
 			Transport: transport,
 		}
@@ -115,7 +129,7 @@ func (h *HTTPURLReader) Read(url *url.URL) (io.ReadCloser, error) {
 	if resp.StatusCode == 200 || resp.StatusCode == 201 {
 		return resp.Body, nil
 	}
-	return nil, errors.NewDownloadError(url.String(), resp.StatusCode)
+	return nil, s2ierr.NewDownloadError(url.String(), resp.StatusCode)
 }
 
 // FileURLReader opens a specified file and returns its stream
@@ -133,5 +147,5 @@ type ImageReader struct{}
 
 // Read throws Not implemented error
 func (*ImageReader) Read(url *url.URL) (io.ReadCloser, error) {
-	return nil, errors.NewScriptsInsideImageError(url.String())
+	return nil, s2ierr.NewScriptsInsideImageError(url.String())
 }

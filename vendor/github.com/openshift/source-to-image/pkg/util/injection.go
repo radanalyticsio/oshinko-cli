@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/openshift/source-to-image/pkg/api"
+	"github.com/openshift/source-to-image/pkg/util/fs"
 )
 
 // FixInjectionsWithRelativePath fixes the injections that does not specify the
@@ -20,12 +21,12 @@ func FixInjectionsWithRelativePath(workdir string, injections api.VolumeList) ap
 	newList := api.VolumeList{}
 	for _, injection := range injections {
 		changed := false
-		if filepath.Clean(injection.Destination) == "." {
-			injection.Destination = workdir
+		if filepath.Clean(filepath.FromSlash(injection.Destination)) == "." {
+			injection.Destination = filepath.ToSlash(workdir)
 			changed = true
 		}
-		if !filepath.IsAbs(injection.Destination) {
-			injection.Destination = filepath.Join(workdir, injection.Destination)
+		if filepath.ToSlash(injection.Destination)[0] != '/' {
+			injection.Destination = filepath.ToSlash(filepath.Join(workdir, injection.Destination))
 			changed = true
 		}
 		if changed {
@@ -38,13 +39,13 @@ func FixInjectionsWithRelativePath(workdir string, injections api.VolumeList) ap
 
 // ExpandInjectedFiles returns a flat list of all files that are injected into a
 // container. All files from nested directories are returned in the list.
-func ExpandInjectedFiles(injections api.VolumeList) ([]string, error) {
+func ExpandInjectedFiles(fs fs.FileSystem, injections api.VolumeList) ([]string, error) {
 	result := []string{}
 	for _, s := range injections {
 		if _, err := os.Stat(s.Source); err != nil {
 			return nil, err
 		}
-		err := filepath.Walk(s.Source, func(path string, f os.FileInfo, err error) error {
+		err := fs.Walk(s.Source, func(path string, f os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
@@ -70,7 +71,7 @@ func ExpandInjectedFiles(injections api.VolumeList) ([]string, error) {
 				if err != nil {
 					// This is not a fatal error. If AtomicWrite tried multiple times, a symlink might not point
 					// to a valid destination.
-					glog.Warningf("Unable to lstat symlink destination [%v]->[%v]. Partial atomic write?", path, linkDest, err)
+					glog.Warningf("Unable to lstat symlink destination [%s]->[%s]. err: %v. Partial atomic write?", path, linkDest, err)
 					return nil
 				}
 			}
@@ -79,7 +80,7 @@ func ExpandInjectedFiles(injections api.VolumeList) ([]string, error) {
 				return nil
 			}
 
-			newPath := filepath.Join(s.Destination, strings.TrimPrefix(path, s.Source))
+			newPath := filepath.ToSlash(filepath.Join(s.Destination, strings.TrimPrefix(path, s.Source)))
 			result = append(result, newPath)
 			return nil
 		})

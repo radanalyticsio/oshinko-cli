@@ -3,6 +3,8 @@ package sti
 import (
 	"github.com/openshift/source-to-image/pkg/api"
 	"github.com/openshift/source-to-image/pkg/build"
+	"github.com/openshift/source-to-image/pkg/docker"
+	"github.com/openshift/source-to-image/pkg/util/fs"
 )
 
 // UsageHandler handles a config to display usage
@@ -20,8 +22,8 @@ type Usage struct {
 }
 
 // NewUsage creates a new instance of the default Usage implementation
-func NewUsage(config *api.Config) (*Usage, error) {
-	b, err := New(config, build.Overrides{})
+func NewUsage(client docker.Client, config *api.Config) (*Usage, error) {
+	b, err := New(client, config, fs.NewFileSystem(), build.Overrides{})
 	if err != nil {
 		return nil, err
 	}
