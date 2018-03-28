@@ -35,12 +35,12 @@ node('radanalytics-test') {
 
 				// download oc client
 				dir('client') {
-					sh('curl -LO https://github.com/openshift/origin/releases/download/v3.7.0/openshift-origin-client-tools-v3.7.0-7ed6862-linux-64bit.tar.gz')
-					sh('curl -LO https://github.com/openshift/origin/releases/download/v3.7.0/openshift-origin-server-v3.7.0-7ed6862-linux-64bit.tar.gz')
-					sh('tar -xzf openshift-origin-client-tools-v3.7.0-7ed6862-linux-64bit.tar.gz')
-					sh('tar -xzf openshift-origin-server-v3.7.0-7ed6862-linux-64bit.tar.gz')
-					sh('cp openshift-origin-client-tools-v3.7.0-7ed6862-linux-64bit/oc .')
-					sh('cp openshift-origin-server-v3.7.0-7ed6862-linux-64bit/* .')
+					sh('curl -LO https://github.com/openshift/origin/releases/download/v3.7.2/openshift-origin-client-tools-v3.7.2-282e43f-linux-64bit.tar.gz')
+					sh('curl -LO https://github.com/openshift/origin/releases/download/v3.7.2/openshift-origin-server-v3.7.2-282e43f-linux-64bit.tar.gz')
+					sh('tar -xzf openshift-origin-client-tools-v3.7.2-282e43f-linux-64bit.tar.gz')
+					sh('tar -xzf openshift-origin-server-v3.7.2-282e43f-linux-64bit.tar.gz')
+					sh('cp openshift-origin-client-tools-v3.7.2-282e43f-linux-64bit/oc .')
+					sh('cp openshift-origin-server-v3.7.2-282e43f-linux-64bit/* .')
 				}
 
 				// build
