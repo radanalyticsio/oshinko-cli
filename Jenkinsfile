@@ -8,7 +8,7 @@
 // $OCP_USER     -- Openshift user
 // $OCP_PASSWORD -- Openshift user's password
 
-node {
+node('radanalytics-test') {
 	withEnv(["GOPATH=$WORKSPACE", "KUBECONFIG=$WORKSPACE/client/kubeconfig", "PATH+OC_PATH=$WORKSPACE/client", "API_HOST=$OCP_HOSTNAME"]) {
 
 		// generate build url
