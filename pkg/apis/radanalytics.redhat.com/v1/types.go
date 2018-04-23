@@ -36,14 +36,46 @@ type SparkCluster struct {
 	Status            SparkClusterStatus `json:"status,omitempty"`
 }
 
+type SparkPod struct {
+	IP     string `json:"ip"`
+	Status string `json:"status"`
+	Type   string `json:"type"`
+}
+
+type ClusterConfig struct {
+	MasterCount       int `json:"masterCount"`
+	WorkerCount       int `json:"workerCount"`
+	Name              string `json:"name"`
+	SparkMasterConfig string `json:"sparkMasterConfig"`
+	SparkWorkerConfig string `json:"sparkWorkerConfig"`
+	SparkImage        string `json:"sparkImage"`
+	ExposeWebUI       string `json:"exposeWebUI"`
+	Metrics           string `json:"metrics,omitempty"`
+}
+
 // TODO: Following same format as ClusterConfig.go in oshinko-cli
 type SparkClusterSpec struct {
-	SparkMasterName string `json"sparkmastername"`
-	SparkWorkerName string `json"sparkworkername"`
-	Image           string `json"image"`
-	Workers         int32  `json:"workers"`
-	SparkMetrics    string `json:"sparkmetrics"`
-	Alertrules      string `json:"alertrules"`
+	Namespace    string `json:"namespace,omitempty"`
+	//Name         string `json:"name,omitempty"`
+	Href         string `json:"href"`
+	Image        string `json:"image"`
+	MasterURL    string `json:"masterUrl"`
+	MasterWebURL string `json:"masterWebUrl"`
+	MasterWebRoute string `json:"masterWebRoute"`
+	Status       string `json:"status"`
+	WorkerCount  int    `json:"workerCount"`
+	MasterCount  int    `json:"masterCount"`
+	Config       ClusterConfig
+	Ephemeral    string `json:"ephemeral,omitempty"`
+	Pods         []SparkPod
+	Alertrules      string `json:"alertrules,omitempty"`
+
+	//SparkMasterName string `json"sparkmastername"`
+	//SparkWorkerName string `json"sparkworkername"`
+	//Image           string `json"image"`
+	//Workers         int32  `json:"workers"`
+	//SparkMetrics    string `json:"sparkmetrics"`
+	//Alertrules      string `json:"alertrules,omitempty"`
 	//NodeSelector string `json:"nodeselector"`
 }
 
@@ -52,7 +84,7 @@ type SparkClusterStatus struct {
 	Message string `json:"message,omitempty"`
 }
 
-// +genclient
+
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 type SparkClusterList struct {

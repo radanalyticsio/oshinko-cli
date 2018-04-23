@@ -63,9 +63,9 @@ const sparkconfdir = "/etc/oshinko-spark-configs"
 const webServiceSuffix = "-ui"
 
 type SparkPod struct {
-	IP     string
-	Status string
-	Type   string
+	IP     string `json:"ip"`
+	Status string `json:"status"`
+	Type   string `json:"type"`
 }
 
 type SparkCluster struct {
