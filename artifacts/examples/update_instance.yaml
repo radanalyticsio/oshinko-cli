@@ -1,0 +1,12 @@
+apiVersion: radanalytics.redhat.com/v1
+kind: SparkCluster
+metadata:
+  name: "sparkle"
+  labels:
+    radanalytics: sparkcluster
+spec:
+  sparkImage: radanalyticsio/openshift-spark:2.2-latest
+  masterCount: 1
+  workerCount: 3
+
+

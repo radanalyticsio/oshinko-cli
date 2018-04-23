@@ -18,4 +18,7 @@ clean:
 #   make test-cmd
 test-cmd: build
 	hack/test-cmd.sh
+
+crd:
+	scripts/build-crd.sh build
 .PHONY: test-cmd
