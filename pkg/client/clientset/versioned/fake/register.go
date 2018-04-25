@@ -18,7 +18,7 @@ limitations under the License.
 package fake
 
 import (
-	radanalyticsv1 "github.com/radanalyticsio/oshinko-cli/pkg/apis/radanalytics.redhat.com/v1"
+	radanalyticsv1 "github.com/radanalyticsio/oshinko-cli/pkg/apis/radanalytics.io/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"

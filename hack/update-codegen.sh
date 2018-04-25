@@ -28,7 +28,7 @@ CODEGEN_PKG=${CODEGEN_PKG:-$(cd ${SCRIPT_ROOT}; ls -d -1 ./vendor/k8s.io/code-ge
 # "deepcopy,client,informer,lister"
 ${CODEGEN_PKG}/generate-groups.sh all  \
   github.com/radanalyticsio/oshinko-cli/pkg/client github.com/radanalyticsio/oshinko-cli/pkg/apis \
-  radanalytics.redhat.com:v1 \
+  radanalytics.io:v1 \
   --go-header-file ${SCRIPT_ROOT}/hack/boilerplate.txt
 
 #   --output-base "$(dirname ${BASH_SOURCE})/../../.." \

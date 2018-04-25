@@ -21,7 +21,7 @@ package radanalytics
 
 import (
 	internalinterfaces "github.com/radanalyticsio/oshinko-cli/pkg/client/informers/externalversions/internalinterfaces"
-	v1 "github.com/radanalyticsio/oshinko-cli/pkg/client/informers/externalversions/radanalytics.redhat.com/v1"
+	v1 "github.com/radanalyticsio/oshinko-cli/pkg/client/informers/externalversions/radanalytics.io/v1"
 )
 
 // Interface provides access to each of this group's versions.
