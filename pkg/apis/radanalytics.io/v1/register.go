@@ -23,7 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-var SchemeGroupVersion = schema.GroupVersion{Group: "radanalytics.redhat.com", Version: "v1"}
+var SchemeGroupVersion = schema.GroupVersion{Group: "radanalytics.io", Version: "v1"}
 
 var (
 	// TODO: move SchemeBuilder with zz_generated.deepcopy.go to k8s.io/api.

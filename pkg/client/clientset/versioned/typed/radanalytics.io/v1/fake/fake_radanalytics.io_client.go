@@ -18,7 +18,7 @@ limitations under the License.
 package fake
 
 import (
-	v1 "github.com/radanalyticsio/oshinko-cli/pkg/client/clientset/versioned/typed/radanalytics.redhat.com/v1"
+	v1 "github.com/radanalyticsio/oshinko-cli/pkg/client/clientset/versioned/typed/radanalytics.io/v1"
 	rest "k8s.io/client-go/rest"
 	testing "k8s.io/client-go/testing"
 )

@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	GroupName       = "radanalytics.redhat.com"
+	GroupName       = "radanalytics.io"
 	SparkListPlural = "sparkclusters"
 	FullCRDName     = SparkListPlural + "." + GroupName
 )

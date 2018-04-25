@@ -1,4 +1,4 @@
-apiVersion: radanalytics.redhat.com/v1
+apiVersion: radanalytics.io/v1
 kind: SparkCluster
 metadata:
   name: "sparkle"

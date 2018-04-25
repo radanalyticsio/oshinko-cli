@@ -20,10 +20,10 @@ limitations under the License.
 package v1
 
 import (
-	radanalytics_redhat_com_v1 "github.com/radanalyticsio/oshinko-cli/pkg/apis/radanalytics.redhat.com/v1"
+	radanalytics_io_v1 "github.com/radanalyticsio/oshinko-cli/pkg/apis/radanalytics.io/v1"
 	versioned "github.com/radanalyticsio/oshinko-cli/pkg/client/clientset/versioned"
 	internalinterfaces "github.com/radanalyticsio/oshinko-cli/pkg/client/informers/externalversions/internalinterfaces"
-	v1 "github.com/radanalyticsio/oshinko-cli/pkg/client/listers/radanalytics.redhat.com/v1"
+	v1 "github.com/radanalyticsio/oshinko-cli/pkg/client/listers/radanalytics.io/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -70,7 +70,7 @@ func NewFilteredSparkClusterInformer(client versioned.Interface, namespace strin
 				return client.RadanalyticsV1().SparkClusters(namespace).Watch(options)
 			},
 		},
-		&radanalytics_redhat_com_v1.SparkCluster{},
+		&radanalytics_io_v1.SparkCluster{},
 		resyncPeriod,
 		indexers,
 	)
@@ -81,7 +81,7 @@ func (f *sparkClusterInformer) defaultInformer(client versioned.Interface, resyn
 }
 
 func (f *sparkClusterInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&radanalytics_redhat_com_v1.SparkCluster{}, f.defaultInformer)
+	return f.factory.InformerFor(&radanalytics_io_v1.SparkCluster{}, f.defaultInformer)
 }
 
 func (f *sparkClusterInformer) Lister() v1.SparkClusterLister {

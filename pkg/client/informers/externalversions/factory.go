@@ -22,7 +22,7 @@ package externalversions
 import (
 	versioned "github.com/radanalyticsio/oshinko-cli/pkg/client/clientset/versioned"
 	internalinterfaces "github.com/radanalyticsio/oshinko-cli/pkg/client/informers/externalversions/internalinterfaces"
-	radanalytics_redhat_com "github.com/radanalyticsio/oshinko-cli/pkg/client/informers/externalversions/radanalytics.redhat.com"
+	radanalytics_io "github.com/radanalyticsio/oshinko-cli/pkg/client/informers/externalversions/radanalytics.io"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
@@ -123,9 +123,9 @@ type SharedInformerFactory interface {
 	ForResource(resource schema.GroupVersionResource) (GenericInformer, error)
 	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
 
-	Radanalytics() radanalytics_redhat_com.Interface
+	Radanalytics() radanalytics_io.Interface
 }
 
-func (f *sharedInformerFactory) Radanalytics() radanalytics_redhat_com.Interface {
-	return radanalytics_redhat_com.New(f, f.namespace, f.tweakListOptions)
+func (f *sharedInformerFactory) Radanalytics() radanalytics_io.Interface {
+	return radanalytics_io.New(f, f.namespace, f.tweakListOptions)
 }

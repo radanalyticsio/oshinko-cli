@@ -14,6 +14,7 @@ import (
 	"github.com/radanalyticsio/oshinko-cli/pkg/signals"
 	"github.com/radanalyticsio/oshinko-cli/version"
 	"time"
+	//"fmt"
 )
 
 var (

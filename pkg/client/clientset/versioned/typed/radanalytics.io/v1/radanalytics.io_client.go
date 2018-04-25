@@ -18,7 +18,7 @@ limitations under the License.
 package v1
 
 import (
-	v1 "github.com/radanalyticsio/oshinko-cli/pkg/apis/radanalytics.redhat.com/v1"
+	v1 "github.com/radanalyticsio/oshinko-cli/pkg/apis/radanalytics.io/v1"
 	"github.com/radanalyticsio/oshinko-cli/pkg/client/clientset/versioned/scheme"
 	serializer "k8s.io/apimachinery/pkg/runtime/serializer"
 	rest "k8s.io/client-go/rest"
@@ -29,7 +29,7 @@ type RadanalyticsV1Interface interface {
 	SparkClustersGetter
 }
 
-// RadanalyticsV1Client is used to interact with features provided by the radanalytics.redhat.com group.
+// RadanalyticsV1Client is used to interact with features provided by the radanalytics.io group.
 type RadanalyticsV1Client struct {
 	restClient rest.Interface
 }

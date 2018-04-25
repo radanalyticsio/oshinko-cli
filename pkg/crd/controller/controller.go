@@ -3,11 +3,11 @@ package controller
 import (
 	"fmt"
 	"github.com/golang/glog"
-	"github.com/radanalyticsio/oshinko-cli/pkg/apis/radanalytics.redhat.com/v1"
+	"github.com/radanalyticsio/oshinko-cli/pkg/apis/radanalytics.io/v1"
 	rad "github.com/radanalyticsio/oshinko-cli/pkg/client/clientset/versioned"
 	sparkscheme "github.com/radanalyticsio/oshinko-cli/pkg/client/clientset/versioned/scheme"
 	informers "github.com/radanalyticsio/oshinko-cli/pkg/client/informers/externalversions"
-	listers "github.com/radanalyticsio/oshinko-cli/pkg/client/listers/radanalytics.redhat.com/v1"
+	listers "github.com/radanalyticsio/oshinko-cli/pkg/client/listers/radanalytics.io/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/runtime"
