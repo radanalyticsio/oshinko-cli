@@ -1,6 +1,15 @@
 #!/bin/sh
 set -ex
-TOP_DIR=$(readlink -f `dirname "$0"` | grep -o '.*/oshinko-cli')
+if [[ "$OSTYPE" == "darwin"* ]]; then
+        # Mac OSX
+        if ! [ -x "$(greadlink)" ]; then
+          'Error: coreutils is not installed.' >&2
+          exit 1
+        fi
+        TOP_DIR=$(greadlink -f `dirname "$0"` | grep -o '.*/oshinko-cli')
+else
+        TOP_DIR=$(readlink -f `dirname "$0"` | grep -o '.*/oshinko-cli')
+fi
 . $TOP_DIR/sparkimage.sh
 
 go get github.com/renstrom/dedent

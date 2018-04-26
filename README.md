@@ -54,6 +54,24 @@ Assuming a successful build, the output will be stored in the `_output`
 directory. For an `install` target, the binary will be placed in your
 `$GOPATH/bin`.
 
+## Building the oshinko-cli on MacOS
+
+First of all you need to install coreutils - this can be done with brew:
+
+```
+    brew install coreutils
+```
+
+Once you have installed this make sure you have installed go and set your
+$GOPATH to the root of your project directory.
+
+After this you then run:
+
+```
+    make build
+```
+There is no need to set $GOROOT to run this project.
+
 ## Running oshinko-rest
 
 For most functionality an OpenShift cluster will be needed, but the
