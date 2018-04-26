@@ -65,12 +65,12 @@ First of all you need to install coreutils - this can be done with brew:
 Once you have installed this make sure you have installed go and set your
 $GOPATH to the root of your project directory.
 
-After this when you run:
+After this you then run:
 
 ```
     make build
 ```
-These is no need to set $GOROOT to run this project.
+There is no need to set $GOROOT to run this project.
 
 ## Running oshinko-rest
 
