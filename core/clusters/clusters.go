@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
 	ocon "github.com/radanalyticsio/oshinko-cli/core/clusters/containers"
 	odc "github.com/radanalyticsio/oshinko-cli/core/clusters/deploymentconfigs"
 	opt "github.com/radanalyticsio/oshinko-cli/core/clusters/podtemplates"
@@ -13,17 +14,15 @@ import (
 	ort "github.com/radanalyticsio/oshinko-cli/core/clusters/routes"
 	osv "github.com/radanalyticsio/oshinko-cli/core/clusters/services"
 
-	"k8s.io/client-go/rest"
-	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	appsapi "github.com/openshift/api/apps/v1"
-	routeclient "github.com/openshift/client-go/route/clientset/versioned"
 	dclient "github.com/openshift/client-go/apps/clientset/versioned"
+	routeclient "github.com/openshift/client-go/route/clientset/versioned"
+	kapi "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
-
+	"k8s.io/client-go/rest"
 )
-
 
 const clusterConfigMsg = "invalid cluster configuration"
 const missingConfigMsg = "unable to find spark configuration '%s'"
@@ -69,25 +68,25 @@ type SparkPod struct {
 }
 
 type SparkCluster struct {
-	Namespace    string `json:"namespace,omitempty"`
-	Name         string `json:"name,omitempty"`
-	Href         string `json:"href"`
-	Image        string `json:"image"`
-	MasterURL    string `json:"masterUrl"`
-	MasterWebURL string `json:"masterWebUrl"`
+	Namespace      string `json:"namespace,omitempty"`
+	Name           string `json:"name,omitempty"`
+	Href           string `json:"href"`
+	Image          string `json:"image"`
+	MasterURL      string `json:"masterUrl"`
+	MasterWebURL   string `json:"masterWebUrl"`
 	MasterWebRoute string `json:"masterWebRoute"`
-	Status       string `json:"status"`
-	WorkerCount  int    `json:"workerCount"`
-	MasterCount  int    `json:"masterCount"`
-	Config       ClusterConfig
-	Ephemeral    string `json:"ephemeral,omitempty"`
-	Pods         []SparkPod
+	Status         string `json:"status"`
+	WorkerCount    int    `json:"workerCount"`
+	MasterCount    int    `json:"masterCount"`
+	Config         ClusterConfig
+	Ephemeral      string     `json:"ephemeral,omitempty"`
+	Pods           []SparkPod `json:"pods,omitempty"`
 }
 
 func getKubeClient(restconfig *rest.Config) *kubernetes.Clientset {
 	kubecl, _ := kubernetes.NewForConfig(restconfig)
 	return kubecl
-	}
+}
 
 func getRouteClient(restconfig *rest.Config) *routeclient.Clientset {
 	routecl, _ := routeclient.NewForConfig(restconfig)
@@ -119,7 +118,7 @@ func makeSelector(otype string, clustername string) metav1.ListOptions {
 		selector = typeLabel + "=" + otype + ","
 	}
 	if clustername == "" {
-		selector +=  clusterLabel
+		selector += clusterLabel
 	} else {
 		selector += clusterLabel + "=" + clustername
 	}
@@ -141,7 +140,7 @@ func retrieveServiceURL(client *kubernetes.Clientset, stype, clustername, ns str
 	return "<missing>"
 }
 
-func retrieveRouteForService(client *routeclient.Clientset, stype, clustername, namespace string, ) string {
+func retrieveRouteForService(client *routeclient.Clientset, stype, clustername, namespace string) string {
 	selectorlist := makeSelector(stype, clustername)
 	routes, err := client.Route().Routes(namespace).List(selectorlist)
 	if err == nil && len(routes.Items) != 0 {
@@ -334,7 +333,7 @@ func getDriverDeployment(client *kubernetes.Clientset, app, namespace string) st
 // Create a cluster and return the representation
 func CreateCluster(
 	clustername, namespace, sparkimage string,
-	config *ClusterConfig, 	restconfig *rest.Config, app string, ephemeral bool) (SparkCluster, error) {
+	config *ClusterConfig, restconfig *rest.Config, app string, ephemeral bool) (SparkCluster, error) {
 
 	var driverrc string
 	var ephem_val string
@@ -350,7 +349,6 @@ func CreateCluster(
 	}
 
 	masterhost := clustername
-
 
 	// Check to see if a cluster already exists of the same name (complete or incomplete)
 	existing := SparkCluster{}
@@ -431,7 +429,7 @@ func CreateCluster(
 		clustername, webuiType,
 		masterdc.GetPodTemplateSpecLabels())
 
-	webuiroute := ort.NewRoute(websv.GetName() + "-route", websv.GetName(), clustername, "webui")
+	webuiroute := ort.NewRoute(websv.GetName()+"-route", websv.GetName(), clustername, "webui")
 
 	// Create the worker deployment config
 	workerdc := sparkWorker(namespace, sparkimage, workercount, clustername, workerconfdir, finalconfig.SparkWorkerConfig, finalconfig.Metrics)
@@ -456,7 +454,6 @@ func CreateCluster(
 		DeleteCluster(clustername, namespace, restconfig, "", "")
 		return result, generalErr(err, masterSrvMsg, createCode(err))
 	}
-
 
 	_, err = sc.Create(&websv.Service)
 	if err != nil {
@@ -554,7 +551,6 @@ func DeleteCluster(clustername, namespace string, restconfig *rest.Config, app, 
 	info := []string{}
 	rcnames := []string{}
 
-
 	dcc := getDcClient(restconfig).AppsV1().DeploymentConfigs(namespace)
 	rcc := getKubeClient(restconfig).CoreV1().ReplicationControllers(namespace)
 
@@ -616,7 +612,7 @@ func DeleteCluster(clustername, namespace string, restconfig *rest.Config, app, 
 		rcnames = append(rcnames, repls.Items[i].Name)
 		err = rcc.Delete(repls.Items[i].Name, nil)
 		if err != nil {
-			info = append(info, "unable to delete replication controller " + repls.Items[i].Name + " (" + err.Error() + ")")
+			info = append(info, "unable to delete replication controller "+repls.Items[i].Name+" ("+err.Error()+")")
 		} else {
 			foundSomething = true
 		}
@@ -630,9 +626,9 @@ func DeleteCluster(clustername, namespace string, restconfig *rest.Config, app, 
 			for p := range pods.Items {
 				err = pc.Delete(pods.Items[p].Name, nil)
 				if err != nil {
-					info = append(info, "unable to delete deployer pod " + pods.Items[p].Name + " ("+err.Error()+")")
+					info = append(info, "unable to delete deployer pod "+pods.Items[p].Name+" ("+err.Error()+")")
 				} else {
-					info = append(info, "deleted deployer pod " + pods.Items[p].Name)
+					info = append(info, "deleted deployer pod "+pods.Items[p].Name)
 					foundSomething = true
 				}
 			}
@@ -643,7 +639,7 @@ func DeleteCluster(clustername, namespace string, restconfig *rest.Config, app, 
 	for i := range pods.Items {
 		err = pc.Delete(pods.Items[i].Name, nil)
 		if err != nil {
-			info = append(info, "unable to delete pod " + pods.Items[i].Name + " (" + err.Error() + ")")
+			info = append(info, "unable to delete pod "+pods.Items[i].Name+" ("+err.Error()+")")
 		} else {
 			foundSomething = true
 		}
@@ -653,7 +649,7 @@ func DeleteCluster(clustername, namespace string, restconfig *rest.Config, app, 
 	webUIRouteName := clustername + "-ui-route"
 	err = rc.Delete(webUIRouteName, nil)
 	if err != nil {
-		info = append(info, "unable to delete route " + webUIRouteName + " (" + err.Error() + ")")
+		info = append(info, "unable to delete route "+webUIRouteName+" ("+err.Error()+")")
 	}
 
 	// Delete the services
@@ -662,7 +658,7 @@ func DeleteCluster(clustername, namespace string, restconfig *rest.Config, app, 
 	for i := range srvs.Items {
 		err = sc.Delete(srvs.Items[i].Name, nil)
 		if err != nil {
-			info = append(info, "unable to delete service " + srvs.Items[i].Name + " (" + err.Error() + ")")
+			info = append(info, "unable to delete service "+srvs.Items[i].Name+" ("+err.Error()+")")
 		} else {
 			foundSomething = true
 		}
@@ -732,7 +728,7 @@ func CheckNoCluster(cluster *SparkCluster) bool {
 	// we might still have pods but they should be terminating, and even if one is stuck, it bears
 	// a random suffix so not really a problem
 	return cluster.Status == "Incomplete" && cluster.WorkerCount == -1 && cluster.MasterCount == -1 &&
-	       cluster.MasterURL == "<missing>" && cluster.MasterWebURL == "<missing>"
+		cluster.MasterURL == "<missing>" && cluster.MasterWebURL == "<missing>"
 }
 
 // Find a cluster and return its representation
@@ -745,7 +741,7 @@ func FindSingleCluster(name, namespace string, restconfig *rest.Config) (SparkCl
 			Type:   p.Labels[typeLabel],
 		}
 	}
-        var result SparkCluster
+	var result SparkCluster
 	findClusterBody(name, namespace, restconfig, &result)
 
 	pc := getKubeClient(restconfig).CoreV1().Pods(namespace)
@@ -816,7 +812,7 @@ func FindClusters(namespace string, restconfig *rest.Config, app string) ([]Spar
 	return result, nil
 }
 
-func newestRepl(list *kapi.ReplicationControllerList ) *kapi.ReplicationController {
+func newestRepl(list *kapi.ReplicationControllerList) *kapi.ReplicationController {
 	newestRepl := list.Items[0]
 	for i := 0; i < len(list.Items); i++ {
 		if list.Items[i].CreationTimestamp.Unix() > newestRepl.CreationTimestamp.Unix() {
@@ -875,7 +871,7 @@ func scaleDep(client *dclient.Clientset, clustername, namespace string, count in
 		} else {
 			break
 		}
-		time.Sleep(250*time.Millisecond)
+		time.Sleep(250 * time.Millisecond)
 	}
 
 	// if err has a value here then we failed all retries and err is the last message from a failed update
@@ -924,7 +920,7 @@ func updateAnnotation(client *dclient.Clientset, clustername, namespace string, 
 		if err != nil {
 			return err
 		}
-		time.Sleep(250*time.Millisecond)
+		time.Sleep(250 * time.Millisecond)
 	}
 	return updateerr
 }

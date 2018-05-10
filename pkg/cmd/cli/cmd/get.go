@@ -66,7 +66,7 @@ func (o *CmdOptions) RunClusters() error {
 					msg += fmt.Sprintf(linebreak+asterisk+"%-14s\t %d\t %-30s\t %-32s\t %-32s\t %s\t  %s", cluster.Name,
 						cluster.WorkerCount, cluster.MasterURL, cluster.MasterWebURL, cluster.MasterWebRoute, cluster.Status, cluster.Ephemeral)
 				} else if o.NoPods {
-					tmpClusters[c].Pods = []clusters.SparkPod{}
+					tmpClusters[c].Pods = nil
 				}
 			}
 		}
