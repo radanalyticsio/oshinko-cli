@@ -3,14 +3,15 @@ package cmd
 import (
 	"fmt"
 	//osclientcmd "github.com/openshift/origin/pkg/cmd/util/clientcmd"
+	"strconv"
+
 	osclientcmd "github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
+	"github.com/radanalyticsio/oshinko-cli/version"
 	"github.com/spf13/cobra"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"github.com/radanalyticsio/oshinko-cli/version"
-	"strconv"
 )
 
 type CmdOptions struct {
@@ -30,6 +31,7 @@ type CmdOptions struct {
 	Ephemeral      bool
 	NoNameRequired bool
 	Metrics        string
+	NoPods         bool
 	auth.AuthOptions
 }
 
@@ -48,16 +50,16 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	o.Name = currentCluster
 
 	/*
-	#
-	#	Fill AuthOptions
-	#
-	 */
+		#
+		#	Fill AuthOptions
+		#
+	*/
 	if err := o.AuthOptions.Complete(f, cmd, args, "oshinko"); err != nil {
 		return err
 	}
 	/*
-	#
-	 */
+		#
+	*/
 	if err := o.GatherInfo(); err != nil {
 		return err
 	}
@@ -124,6 +126,9 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	}
 	if cmd.Flags().Lookup("directory") != nil {
 		o.Directory = kcmdutil.GetFlagString(cmd, "directory")
+	}
+	if cmd.Flags().Lookup("nopods") != nil {
+		o.NoPods = kcmdutil.GetFlagBool(cmd, "nopods")
 	}
 	return nil
 }
