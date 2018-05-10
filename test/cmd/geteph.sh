@@ -16,7 +16,7 @@ os::cmd::try_until_text "_output/oshinko get_eph abc -o json" '"WorkerCount": 2'
 os::cmd::try_until_text "_output/oshinko get_eph abc -o yaml" 'WorkerCount: 2'
 
 # pods vs nopods
-os::cmd::expect_success_and_text "_output/oshinko get_eph abc -o json" '"pods"'
+os::cmd::try_until_text "_output/oshinko get_eph abc -o json" '"pods"'
 os::cmd::expect_success_and_not_text "_output/oshinko get_eph abc -o json --nopods" '"pods"'
 
 # get all
