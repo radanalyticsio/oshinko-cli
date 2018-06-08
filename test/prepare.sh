@@ -44,6 +44,16 @@ function start_and_verify_openshift() {
   oc project myproject
 }
 
+function fix_travis_path() {
+  # if you're building in travis in your own repo (before a PR, for example)
+  # we need to fix the imports that reference radanalyticsio/oshinko-cli
+  # to point at your current repo
+  if [ "$TRAVIS_REPO_SLUG" != "radanalyticsio/oshinko-cli" ]; then
+    grep -rl "github.com/radanalyticsio/oshinko-cli" . | xargs sed -i "s#github.com/radanalyticsio/oshinko-cli#github.com/$TRAVIS_REPO_SLUG#g"
+  fi
+}
+
 setup_insecure_registry
 download_openshift
 start_and_verify_openshift
+fix_travis_path
