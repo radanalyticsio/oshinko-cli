@@ -1,9 +1,9 @@
 #!/bin/sh
-set -ex
 if [[ "$OSTYPE" == "darwin"* ]]; then
         # Mac OSX
-        if ! [ -x "$(greadlink)" ]; then
-          'Error: coreutils is not installed.' >&2
+	    result=:$(brew ls coreutils)
+        if [ -z "$result" ]; then
+          'Error: coreutils is not installed.'
           exit 1
         fi
         TOP_DIR=$(greadlink -f `dirname "$0"` | grep -o '.*/oshinko-cli')
