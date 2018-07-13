@@ -104,7 +104,7 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 	// the first element in the name
 	switch name {
 	case "mastercount":
-		val, err := getInt(value, configmapname + ".mastercount")
+		val, err := getInt(value, configmapname+".mastercount")
 		if err != nil {
 			return err
 		}
@@ -112,7 +112,7 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 			config.MasterCount = val
 		}
 	case "workercount":
-		val, err := getInt(value, configmapname + ".workercount")
+		val, err := getInt(value, configmapname+".workercount")
 		if err != nil {
 			return err
 		}
@@ -128,6 +128,9 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 	case "exposeui":
 		config.ExposeWebUI = value
 		_, err = strconv.ParseBool(config.ExposeWebUI)
+		if err != nil {
+			return err
+		}
 	case "metrics":
 		// default will be "false" if the string is empty
 		if value != "" {
@@ -148,6 +151,8 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 				config.Metrics = value
 			}
 		}
+	default:
+		err = NewClusterError(fmt.Sprintf(ErrorWhileProcessing, configmapname, "could not parse config fields"), ClusterConfigCode)
 	}
 	return err
 }
@@ -169,12 +174,12 @@ func readConfig(name string, res *ClusterConfig, failOnMissing bool, restconfig 
 	}
 	if err == nil && cmap != nil {
 		// Kube will give us an empty configmap if the named one does not exist,
-		// so we test for a Name to see if we foud it
+		// so we test for a Name to see if we found it
 		found = cmap.Name != ""
 		for n, v := range cmap.Data {
 			err = process(res, strings.Trim(n, "\n"), strings.Trim(v, "\n"), name)
 			if err != nil {
-				break
+				return found, err
 			}
 		}
 	}
@@ -186,8 +191,15 @@ func loadConfig(name string, restconfig *rest.Config, namespace string) (res Clu
 	res = defaultConfig
 	found, err := readConfig(Defaultname, &res, allowMissing, restconfig, namespace)
 	if err == nil {
+		//process config if it is not named default
+		//if there is a newly named config and an error then we create an error
 		if name != "" && name != Defaultname {
-			_, err = readConfig(name, &res, failOnMissing, restconfig, namespace)
+			found, err = readConfig(name, &res, failOnMissing, restconfig, namespace)
+			if !found{
+				//then make an error something has gone wrong with the named config when read
+				err =NewClusterError(fmt.Sprintf(NamedConfigDoesNotExist, name), ClusterConfigCode)
+				return res, err
+			}
 		} else if found {
 			res.Name = Defaultname
 		}
