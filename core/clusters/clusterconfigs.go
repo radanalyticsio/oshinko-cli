@@ -199,6 +199,11 @@ func GetClusterConfig(config *ClusterConfig, restconfig *rest.Config, namespace 
 
 	var name string = ""
 	if config != nil {
+		// If the default name is explicitly set, put it back to empty string
+		// We will record default name in the config only if we found an overriding configmap
+		if config.Name == Defaultname {
+			config.Name = ""
+		}
 		name = config.Name
 	}
 	res, err = loadConfig(name, restconfig, namespace)

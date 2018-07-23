@@ -165,6 +165,23 @@ os::cmd::try_until_text "_output/oshinko get egg -o yaml" "workerCount: 1"
 os::cmd::try_until_text "_output/oshinko get egg -o yaml" "masterCount: 1"
 os::cmd::expect_success "_output/oshinko delete egg"
 
+oc create configmap default-oshinko-cluster-config --from-literal=workercount=2
+os::cmd::expect_success "_output/oshinko create readdefault"
+os::cmd::expect_success_and_text "_output/oshinko get readdefault -o yaml" "Name: default-oshinko-cluster-config"
+os::cmd::expect_success_and_text "_output/oshinko get readdefault -o yaml" "WorkerCount: 2"
+os::cmd::expect_success "_output/oshinko delete readdefault"
+
+os::cmd::expect_success "_output/oshinko create readdefault2 --storedconfig=default-oshinko-cluster-config"
+os::cmd::expect_success_and_text "_output/oshinko get readdefault2 -o yaml" "Name: default-oshinko-cluster-config"
+os::cmd::expect_success_and_text "_output/oshinko get readdefault2 -o yaml" "WorkerCount: 2"
+os::cmd::expect_success "_output/oshinko delete readdefault2"
+
+oc delete configmap default-oshinko-cluster-config
+os::cmd::expect_success "_output/oshinko create readdefault3 --storedconfig=default-oshinko-cluster-config"
+os::cmd::expect_success_and_text "_output/oshinko get readdefault3 -o yaml" "Name: \"\""
+os::cmd::expect_success_and_text "_output/oshinko get readdefault3 -o yaml" "WorkerCount: 1"
+os::cmd::expect_success "_output/oshinko delete readdefault3"
+
 os::cmd::expect_success "_output/oshinko create hawk --workers=1 --masters=1 --storedconfig=clusterconfig"
 os::cmd::expect_success_and_text "_output/oshinko get hawk -o yaml" "WorkerCount: 1"
 os::cmd::expect_success_and_text "_output/oshinko get hawk -o yaml" "MasterCount: 1"
