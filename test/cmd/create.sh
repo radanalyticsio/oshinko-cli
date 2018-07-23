@@ -151,6 +151,9 @@ os::cmd::expect_success "_output/oshinko create chicken3 --storedconfig=clusterc
 os::cmd::expect_success_and_text "_output/oshinko get chicken3 -o yaml" "Metrics: prometheus"
 os::cmd::expect_success "_output/oshinko delete chicken3"
 
+oc create configmap clusterconfig4 --from-literal=bogusfield=bogus
+os::cmd::expect_failure_and_text "_output/oshinko create chicken4 --storedconfig=clusterconfig4" "'clusterconfig4.bogusfield', unrecognized configuration field"
+
 os::cmd::expect_success "_output/oshinko create egg"
 os::cmd::expect_success_and_text "_output/oshinko get egg -o yaml" "WorkerCount: 1"
 os::cmd::expect_success_and_text "_output/oshinko get egg -o yaml" "MasterCount: 1"

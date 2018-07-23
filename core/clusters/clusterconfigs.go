@@ -152,14 +152,13 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 			}
 		}
 	default:
-		err = NewClusterError(fmt.Sprintf(ErrorWhileProcessing, configmapname, "could not parse config fields"), ClusterConfigCode)
+		err = NewClusterError(fmt.Sprintf(ErrorWhileProcessing, configmapname+"."+name, "unrecognized configuration field"), ClusterConfigCode)
 	}
 	return err
 }
 
 func readConfig(name string, res *ClusterConfig, failOnMissing bool, restconfig *rest.Config, namespace string) (found bool, err error) {
 
-	found = false
 	cmap, err := getKubeClient(restconfig).CoreV1().ConfigMaps(namespace).Get(name, metav1.GetOptions{})
 	if err != nil {
 		if strings.Index(err.Error(), "not found") != -1 {
@@ -172,14 +171,14 @@ func readConfig(name string, res *ClusterConfig, failOnMissing bool, restconfig 
 			err = NewClusterError(err.Error(), ClientOperationCode)
 		}
 	}
-	if err == nil && cmap != nil {
-		// Kube will give us an empty configmap if the named one does not exist,
-		// so we test for a Name to see if we found it
-		found = cmap.Name != ""
+
+	// If we actually found a configMap then it will be non-empty
+	found = err == nil && cmap != nil && cmap.Name != ""
+	if found {
 		for n, v := range cmap.Data {
 			err = process(res, strings.Trim(n, "\n"), strings.Trim(v, "\n"), name)
 			if err != nil {
-				return found, err
+				break
 			}
 		}
 	}
@@ -189,18 +188,15 @@ func readConfig(name string, res *ClusterConfig, failOnMissing bool, restconfig 
 func loadConfig(name string, restconfig *rest.Config, namespace string) (res ClusterConfig, err error) {
 	// If the default config has been modified use those mods.
 	res = defaultConfig
-	found, err := readConfig(Defaultname, &res, allowMissing, restconfig, namespace)
+	defaultFound, err := readConfig(Defaultname, &res, allowMissing, restconfig, namespace)
 	if err == nil {
 		//process config if it is not named default
-		//if there is a newly named config and an error then we create an error
 		if name != "" && name != Defaultname {
-			found, err = readConfig(name, &res, failOnMissing, restconfig, namespace)
-			if !found{
-				//then make an error something has gone wrong with the named config when read
-				err =NewClusterError(fmt.Sprintf(NamedConfigDoesNotExist, name), ClusterConfigCode)
-				return res, err
-			}
-		} else if found {
+			_, err = readConfig(name, &res, failOnMissing, restconfig, namespace)
+		} else if defaultFound {
+		        // If the default oshinko cluster config has been overridden by a user with a configMap
+			// named Defaultname, then we want to record the name as non-empty to indicate that
+			// a configmap was actually located and read vs using the hardcoded default
 			res.Name = Defaultname
 		}
 	}
