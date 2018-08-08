@@ -57,14 +57,14 @@ func (o *CmdOptions) RunClusters() error {
 	clusterCount := len(clist)
 	tmpClusters := clist
 	if clusterCount <= 0 {
-		msg += "There are no clusters in any projects. You can create a cluster with the 'create' command."
+		msg += "No clusters found."
 	} else if clusterCount > 0 {
 		sort.Sort(SortByClusterName(tmpClusters))
+		msg += fmt.Sprintf(linebreak+asterisk+"%-20s\t %-20s\t %-20s\t","name", "workers", "status")
 		for c, cluster := range tmpClusters {
 			if o.Name == "" || cluster.Name == o.Name {
 				if o.Output == "" {
-					msg += fmt.Sprintf(linebreak+asterisk+"%-14s\t %d\t %-30s\t %-32s\t %-32s\t %s\t  %s", cluster.Name,
-						cluster.WorkerCount, cluster.MasterURL, cluster.MasterWebURL, cluster.MasterWebRoute, cluster.Status, cluster.Ephemeral)
+					msg += fmt.Sprintf(	linebreak+asterisk+"%-20s\t %-20d\t %-20s\t", cluster.Name, cluster.WorkerCount,  cluster.Status)
 				} else if o.NoPods {
 					tmpClusters[c].Pods = nil
 				}
