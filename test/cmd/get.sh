@@ -5,7 +5,7 @@ trap os::test::junit::reconcile_output EXIT
 os::test::junit::declare_suite_start "cmd/get"
 
 # No clusters notice
-os::cmd::try_until_text "_output/oshinko get" "There are no clusters in any projects. You can create a cluster with the 'create' command."
+os::cmd::try_until_text "_output/oshinko get" "No clusters found."
 
 # Create clusters so we can look at them
 os::cmd::expect_success "_output/oshinko create abc --workers=2"
@@ -24,7 +24,7 @@ os::cmd::expect_success_and_text "_output/oshinko get" "abc"
 os::cmd::expect_success_and_text "_output/oshinko get" "def"
  
 # check for columns
-os::cmd::expect_success '_output/oshinko-cli get abc | grep -e "^abc\s*[012]\s*spark://abc:7077\s*http://abc-ui:8080\s*abc-ui-route.*\s*Running\s*<shared>$"'
+os::cmd::expect_success '_output/oshinko-cli get abc | grep -e "^abc\s*[012]\s*Running$"'
 
 # incomplete clusters
 os::cmd::expect_success "oc delete service abc-ui"
