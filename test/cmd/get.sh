@@ -24,21 +24,14 @@ os::cmd::expect_success_and_text "_output/oshinko get" "abc"
 os::cmd::expect_success_and_text "_output/oshinko get" "def"
  
 # check for columns
-os::cmd::expect_success '_output/oshinko-cli get abc | grep -e "^abc\s*[012]\s*Running$"'
+os::cmd::expect_success '_output/oshinko-cli get abc | grep -e "^abc\s*[012]\s*Running"'
 
 # incomplete clusters
 os::cmd::expect_success "oc delete service abc-ui"
 os::cmd::expect_success_and_text "_output/oshinko-cli get abc" "Incomplete"
-os::cmd::expect_success_and_text "_output/oshinko-cli get abc" "<missing>"
 
 # no such cluster
 os::cmd::expect_failure_and_text "_output/oshinko get nothere" "no such cluster 'nothere'"
-
-# verbose
-os::cmd::expect_success_and_text "_output/oshinko get -v" "You have access to the following projects"
-os::cmd::expect_success_and_text "_output/oshinko get --verbose" "You have access to the following projects"
-os::cmd::expect_success_and_not_text "_output/oshinko get" "You have access to the following projects"
-os::cmd::expect_success_and_not_text "_output/oshinko get --verbose=false" "You have access to the following projects"
 
 # flags for ephemeral not valid
 os::cmd::expect_failure_and_text "_output/oshinko get --app=bill" "unknown flag"
