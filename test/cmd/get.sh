@@ -22,13 +22,14 @@ os::cmd::expect_success_and_not_text "_output/oshinko get abc -o json --nopods" 
 # get all
 os::cmd::expect_success_and_text "_output/oshinko get" "abc"
 os::cmd::expect_success_and_text "_output/oshinko get" "def"
- 
+
 # check for columns
 os::cmd::expect_success '_output/oshinko-cli get abc | grep -e "^abc\s*[012]\s*Running"'
 
-# incomplete clusters
+# incomplete clusters	# incomplete clusters
 os::cmd::expect_success "oc delete service abc-ui"
-os::cmd::expect_success_and_text "_output/oshinko-cli get abc" "Incomplete"
+os::cmd::expect_success_and_text "_output/oshinko-cli get -d abc" "Incomplete"
+os::cmd::expect_success_and_text "_output/oshinko-cli get -d abc" "<missing>"
 
 # no such cluster
 os::cmd::expect_failure_and_text "_output/oshinko get nothere" "no such cluster 'nothere'"

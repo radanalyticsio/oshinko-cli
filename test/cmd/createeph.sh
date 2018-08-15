@@ -59,6 +59,10 @@ os::cmd::expect_failure_and_text "_output/oshinko create_eph sally" "cluster 'sa
 os::cmd::expect_success "oc delete service sally-ui"
 os::cmd::expect_failure_and_text "_output/oshinko create_eph sally" "cluster 'sally' already exists \(incomplete\)"
 
+# exposeui
+os::cmd::expect_success "_output/oshinko create_eph charlie --exposeui=false"
+os::cmd::expect_success_and_text "_output/oshinko get -d charlie" "charlie.*<no route>"
+
 # storedconfig
 oc create configmap clusterconfig --from-literal=workercount=3 --from-literal=mastercount=0 
 os::cmd::expect_failure_and_text "_output/oshinko create_eph chicken --storedconfig=jack" "named config 'jack' does not exist"

@@ -22,7 +22,7 @@ os::cmd::expect_success_and_not_text "_output/oshinko get_eph abc -o json --nopo
 # get all
 os::cmd::try_until_text "_output/oshinko get_eph" "abc"
 os::cmd::try_until_text "_output/oshinko get_eph" "def"
- 
+
 # check for columns
 os::cmd::expect_success '_output/oshinko-cli get_eph abc | grep -e "^abc\s*[012]\s*Running\s"'
 
@@ -32,7 +32,8 @@ os::cmd::expect_success_and_text "_output/oshinko create_eph -e effy --app=abc-m
 
 # incomplete clusters
 os::cmd::expect_success "oc delete service abc-ui"
-os::cmd::expect_success_and_text "_output/oshinko-cli get_eph abc" "Incomplete"
+os::cmd::expect_success_and_text "_output/oshinko-cli get_eph -d abc" "Incomplete"
+os::cmd::expect_success_and_text "_output/oshinko-cli get_eph -d abc" "<missing>"
 
 # no such cluster
 os::cmd::expect_failure_and_text "_output/oshinko get_eph nothere" "no such cluster 'nothere'"
