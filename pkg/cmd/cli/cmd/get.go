@@ -58,20 +58,22 @@ func (o *CmdOptions) RunClusters() error {
 	tmpClusters := clist
 	if clusterCount <= 0 {
 		msg += "No clusters found."
-	} else if clusterCount > 0 {
+	}else if clusterCount > 0 {
 		sort.Sort(SortByClusterName(tmpClusters))
-		msg += fmt.Sprintf(linebreak+asterisk+"%-20s\t %-20s\t %-20s\t","name", "workers", "status")
+		if !o.Deprecated {
+			msg += fmt.Sprintf(linebreak+asterisk+"%-20s\t %-20s\t %-20s\t", "name", "workers", "status")
+		}
 		for c, cluster := range tmpClusters {
 			if o.Name == "" || cluster.Name == o.Name {
-				if o.Output == "" {
-					msg += fmt.Sprintf(	linebreak+asterisk+"%-20s\t %-20d\t %-20s\t", cluster.Name, cluster.WorkerCount,  cluster.Status)
+				if o.Output == "" && !o.Deprecated {
+					msg += fmt.Sprintf(linebreak+asterisk+"%-20s\t %-20d\t %-20s\t", cluster.Name, cluster.WorkerCount, cluster.Status)
+				} else if o.Output == "" && o.Deprecated {
+					msg += fmt.Sprintf(linebreak+asterisk+"%-14s\t %d\t %-30s\t %-32s\t %-32s\t %s\t  %s", cluster.Name,
+						cluster.WorkerCount, cluster.MasterURL, cluster.MasterWebURL, cluster.MasterWebRoute, cluster.Status, cluster.Ephemeral)
 				} else if o.NoPods {
 					tmpClusters[c].Pods = nil
 				}
 			}
-		}
-		if o.Output != "" {
-			PrintOutput(o.Output, tmpClusters)
 		}
 	}
 	fmt.Println(msg)
@@ -140,8 +142,10 @@ func CmdGet(f *osclientcmd.Factory, reader io.Reader, out io.Writer, extended bo
 	cmds.Flags().StringP("output", "o", "", "Output format. One of: json|yaml")
 	cmds.Flags().BoolVarP(&options.Verbose, "verbose", "v", options.Verbose, "Turn on verbose output\n\n")
 	cmds.Flags().BoolP("nopods", "", false, "Do not include pod list for cluster in yaml or json output")
+	cmds.Flags().BoolP("deprecated", "d", options.Deprecated, "deprecated")
 	if extended {
 		cmds.Flags().String("app", "", "Get the clusters associated with the app. The value may be the name of a pod or deployment (but not a deploymentconfig). Ignored if a name is specified.")
 	}
 	return cmds
 }
+
