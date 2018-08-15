@@ -58,9 +58,9 @@ func (o *CmdOptions) RunClusters() error {
 	tmpClusters := clist
 	if clusterCount <= 0 {
 		msg += "No clusters found."
-	}else if clusterCount > 0 {
+	} else if clusterCount > 0 {
 		sort.Sort(SortByClusterName(tmpClusters))
-		if !o.Deprecated {
+		if !o.Deprecated && o.Output == "" {
 			msg += fmt.Sprintf(linebreak+asterisk+"%-20s\t %-20s\t %-20s\t", "name", "workers", "status")
 		}
 		for c, cluster := range tmpClusters {
@@ -74,6 +74,10 @@ func (o *CmdOptions) RunClusters() error {
 					tmpClusters[c].Pods = nil
 				}
 			}
+		}
+
+		if o.Output != "" {
+			PrintOutput(o.Output, tmpClusters)
 		}
 	}
 	fmt.Println(msg)
@@ -148,4 +152,3 @@ func CmdGet(f *osclientcmd.Factory, reader io.Reader, out io.Writer, extended bo
 	}
 	return cmds
 }
-
