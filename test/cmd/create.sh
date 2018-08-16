@@ -100,9 +100,16 @@ os::cmd::expect_success "_output/oshinko delete klondike3"
 
 os::cmd::expect_failure_and_text "_output/oshinko create klondike4 --metrics=notgonnadoit" "must be 'true', 'false', 'jolokia', or 'prometheus'"
 
+#exposeui
+os::cmd::expect_success "_output/oshinko create charlie --exposeui=false"
+os::cmd::expect_success_and_text "_output/oshinko get -d charlie" "charlie.*<no route>"
+os::cmd::expect_success "_output/oshinko delete charlie"
+os::cmd::expect_success "_output/oshinko create charlie2 --exposeui=true"
+os::cmd::expect_success_and_text "_output/oshinko get -d charlie2" "charlie2-ui-route"
+os::cmd::expect_success "_output/oshinko delete charlie2"
 os::cmd::expect_success "_output/oshinko create charlie3"
+os::cmd::expect_success_and_text "_output/oshinko get -d charlie3" "charlie3-ui-route"
 os::cmd::expect_success "_output/oshinko delete charlie3"
-
 os::cmd::expect_failure_and_text "_output/oshinko create charlie4 --exposeui=notgonnadoit" "must be a boolean"
 
 # storedconfig

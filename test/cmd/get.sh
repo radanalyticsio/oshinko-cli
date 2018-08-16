@@ -24,8 +24,7 @@ os::cmd::expect_success_and_text "_output/oshinko get" "abc"
 os::cmd::expect_success_and_text "_output/oshinko get" "def"
 
 # check for columns
-os::cmd::expect_success '_output/oshinko-cli get abc | grep -e "^abc\s*[012]\s*Running"'
-
+os::cmd::expect_success '_output/oshinko-cli get -d abc | grep -e "^abc\s*[012]\s*spark://abc:7077\s*http://abc-ui:8080\s*abc-ui-route.*\s*Running\s*<shared>$"'
 # incomplete clusters	# incomplete clusters
 os::cmd::expect_success "oc delete service abc-ui"
 os::cmd::expect_success_and_text "_output/oshinko-cli get -d abc" "Incomplete"

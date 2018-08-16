@@ -24,11 +24,12 @@ os::cmd::try_until_text "_output/oshinko get_eph" "abc"
 os::cmd::try_until_text "_output/oshinko get_eph" "def"
 
 # check for columns
-os::cmd::expect_success '_output/oshinko-cli get_eph abc | grep -e "^abc\s*[012]\s*Running\s"'
+os::cmd::expect_success '_output/oshinko-cli get_eph -d abc | grep -e "^abc\s*[012]\s*spark://abc:7077\s*http://abc-ui:8080\s*abc-ui-route.*\s*Running\s*<shared>$"'
 
 # app flag
 os::cmd::expect_failure_and_text "_output/oshinko get_eph --app=bill" "no cluster found for app 'bill'"
 os::cmd::expect_success_and_text "_output/oshinko create_eph -e effy --app=abc-m-1" 'ephemeral cluster "effy" created'
+os::cmd::expect_success_and_text "_output/oshinko get_eph -d --app=abc-m-1" "effy.*abc-m-1"
 
 # incomplete clusters
 os::cmd::expect_success "oc delete service abc-ui"
