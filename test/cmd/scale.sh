@@ -29,7 +29,7 @@ os::test::junit::declare_suite_start "cmd/scale"
 # General note -- at present, the master and worker counts in the included config object on get are "MasterCount" and "WorkerCount"
 # the master and worker counts in the outer cluster status are "masterCount" and "workerCount"
 
-os::cmd::try_until_text "_output/oshinko get" "There are no clusters in any projects. You can create a cluster with the 'create' command."
+os::cmd::try_until_text "_output/oshinko get" "No clusters found."
 
 # make a cluster to scale
 os::cmd::expect_success "_output/oshinko create abc"
