@@ -82,6 +82,7 @@ func (o *CmdOptions) RunClusters() error {
 
 		if o.Output != "" {
 			PrintOutput(o.Output, tmpClusters)
+			return nil
 		}
 	}
 	fmt.Println(msg)
