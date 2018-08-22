@@ -43,8 +43,11 @@ func (o *CmdOptions) RunClusters() error {
 
 	if o.Name != "" {
 		c, err := clusters.FindSingleCluster(o.Name, o.Project, o.Config)
-		if err != nil {
-			return err
+		//return empty json/yaml when no cluster found
+		if err!=nil  && o.Output!=""{
+			msg +="{}"
+			fmt.Println(msg)
+			return nil
 		}
 		clist = []clusters.SparkCluster{c}
 	} else {
@@ -56,6 +59,7 @@ func (o *CmdOptions) RunClusters() error {
 
 	clusterCount := len(clist)
 	tmpClusters := clist
+
 	if clusterCount <= 0 {
 		msg += "There are no clusters in any projects. You can create a cluster with the 'create' command."
 	} else if clusterCount > 0 {
