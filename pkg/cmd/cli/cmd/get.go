@@ -146,7 +146,7 @@ func CmdGet(f *osclientcmd.Factory, reader io.Reader, out io.Writer, extended bo
 	cmds.Flags().StringP("output", "o", "", "Output format. One of: json|yaml")
 	cmds.Flags().BoolVarP(&options.Verbose, "verbose", "v", options.Verbose, "Turn on verbose output\n\n")
 	cmds.Flags().BoolP("nopods", "", false, "Do not include pod list for cluster in yaml or json output")
-	cmds.Flags().BoolP("deprecated", "d", options.Deprecated, "deprecated")
+	cmds.Flags().BoolP("deprecated", "d", options.Deprecated, "This allows the user to see the old output from the get command")
 	if extended {
 		cmds.Flags().String("app", "", "Get the clusters associated with the app. The value may be the name of a pod or deployment (but not a deploymentconfig). Ignored if a name is specified.")
 	}
