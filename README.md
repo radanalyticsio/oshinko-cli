@@ -27,4 +27,4 @@ Options include scaling the number of masters or workers.
 ## Further reading
 For a full set of commands and parameters please use:
 ``oshinko help``
-Please see the CONTRIBUTING.md and HACKING.md docs for more information about working with this codebase and the docs directory for more general information on usage.
+Please see the [CONTRIBUTING.md](CONTRIBUTING.md) and [HACKING.md](HACKING.md) docs for more information about working with this codebase and the docs directory for more general information on usage.
