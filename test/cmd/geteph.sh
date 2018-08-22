@@ -39,4 +39,9 @@ os::cmd::expect_success_and_text "_output/oshinko-cli get_eph -d abc" "<missing>
 # no such cluster
 os::cmd::expect_failure_and_text "_output/oshinko get_eph nothere" "no such cluster 'nothere'"
 
+# check for no cluster but return json/yaml
+os::cmd::expect_success_and_text "_output/oshinko-cli get_eph nemo -o json" "{}"
+os::cmd::expect_success_and_text "_output/oshinko-cli get_eph nemo -o yaml" "{}"
+
+
 os::test::junit::declare_suite_end

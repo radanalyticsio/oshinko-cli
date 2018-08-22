@@ -33,6 +33,11 @@ os::cmd::expect_success_and_text "_output/oshinko-cli get -d abc" "<missing>"
 # no such cluster
 os::cmd::expect_failure_and_text "_output/oshinko get nothere" "no such cluster 'nothere'"
 
+# check for no cluster but return json/yaml
+os::cmd::expect_success_and_text "_output/oshinko-cli get nemo -o json" "{}"
+os::cmd::expect_success_and_text "_output/oshinko-cli get nemo -o yaml" "{}"
+
+
 # flags for ephemeral not valid
 os::cmd::expect_failure_and_text "_output/oshinko get --app=bill" "unknown flag"
 

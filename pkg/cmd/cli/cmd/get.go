@@ -48,6 +48,8 @@ func (o *CmdOptions) RunClusters() error {
 			msg +="{}"
 			fmt.Println(msg)
 			return nil
+		} else if err!=nil && o.Output==""{
+			return err
 		}
 		clist = []clusters.SparkCluster{c}
 	} else {
