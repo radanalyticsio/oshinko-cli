@@ -32,6 +32,7 @@ type CmdOptions struct {
 	NoNameRequired bool
 	Metrics        string
 	NoPods         bool
+	Deprecated     bool
 	auth.AuthOptions
 }
 
@@ -130,6 +131,9 @@ func (o *CmdOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args [
 	if cmd.Flags().Lookup("nopods") != nil {
 		o.NoPods = kcmdutil.GetFlagBool(cmd, "nopods")
 	}
+	if cmd.Flags().Lookup("deprecated")!=nil{
+		o.Deprecated = kcmdutil.GetFlagBool(cmd, "deprecated")
+	}
 	return nil
 }
 
@@ -150,3 +154,4 @@ func (o *CmdOptions) GatherInfo() error {
 	}
 	return nil
 }
+
