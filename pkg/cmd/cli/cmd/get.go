@@ -43,7 +43,12 @@ func (o *CmdOptions) RunClusters() error {
 
 	if o.Name != "" {
 		c, err := clusters.FindSingleCluster(o.Name, o.Project, o.Config)
-		if err != nil {
+		//return empty json/yaml when no cluster found
+		if err!=nil  && o.Output!=""{
+			msg +="{}"
+			fmt.Println(msg)
+			return nil
+		} else if err!=nil && o.Output==""{
 			return err
 		}
 		clist = []clusters.SparkCluster{c}
@@ -56,7 +61,13 @@ func (o *CmdOptions) RunClusters() error {
 
 	clusterCount := len(clist)
 	tmpClusters := clist
+
 	if clusterCount <= 0 {
+		if o.Output!="" {
+			msg+="[]"
+			fmt.Println(msg)
+			return nil
+		}
 		msg += "No clusters found."
 	} else if clusterCount > 0 {
 		sort.Sort(SortByClusterName(tmpClusters))
@@ -78,6 +89,7 @@ func (o *CmdOptions) RunClusters() error {
 
 		if o.Output != "" {
 			PrintOutput(o.Output, tmpClusters)
+			return nil
 		}
 	}
 	fmt.Println(msg)

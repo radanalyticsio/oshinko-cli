@@ -6,6 +6,8 @@ os::test::junit::declare_suite_start "cmd/geteph"
 
 # No clusters notice
 os::cmd::try_until_text "_output/oshinko get_eph" "No clusters found."
+os::cmd::try_until_text "_output/oshinko get_eph -o json" "\[\]"
+os::cmd::try_until_text "_output/oshinko get_eph -o yaml" "\[\]"
 
 # Create clusters so we can look at them
 os::cmd::expect_success "_output/oshinko create abc --workers=2"
@@ -38,5 +40,10 @@ os::cmd::expect_success_and_text "_output/oshinko-cli get_eph -d abc" "<missing>
 
 # no such cluster
 os::cmd::expect_failure_and_text "_output/oshinko get_eph nothere" "no such cluster 'nothere'"
+
+# check for no cluster but return json/yaml
+os::cmd::expect_success_and_text "_output/oshinko-cli get_eph nemo -o json" "{}"
+os::cmd::expect_success_and_text "_output/oshinko-cli get_eph nemo -o yaml" "{}"
+
 
 os::test::junit::declare_suite_end
