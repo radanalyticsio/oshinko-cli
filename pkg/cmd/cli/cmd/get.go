@@ -87,6 +87,10 @@ func (o *CmdOptions) RunClusters() error {
 			}
 		}
 
+		if o.Output =="json" && clusterCount==1{
+			PrintSingleObject(tmpClusters[0])
+			return nil
+		}
 		if o.Output != "" {
 			PrintOutput(o.Output, tmpClusters)
 			return nil
