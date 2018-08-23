@@ -55,3 +55,21 @@ func PrintOutput(format string, object interface{}) error {
 	}
 	return nil
 }
+
+func PrintSingleObject(object interface{}) error{
+	var msg string
+	tmpCluster := object
+	y, err := json.Marshal(tmpCluster)
+
+	if err != nil {
+		return err
+	}
+	pmsg, err := prettyprint(y)
+	if err != nil {
+		return err
+	}
+	msg += string(pmsg)
+	fmt.Printf(msg)
+	return nil
+	}
+
