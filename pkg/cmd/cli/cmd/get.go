@@ -63,6 +63,11 @@ func (o *CmdOptions) RunClusters() error {
 	tmpClusters := clist
 
 	if clusterCount <= 0 {
+		if o.Output!="" {
+			msg+="[]"
+			fmt.Println(msg)
+			return nil
+		}
 		msg += "No clusters found."
 	} else if clusterCount > 0 {
 		sort.Sort(SortByClusterName(tmpClusters))
