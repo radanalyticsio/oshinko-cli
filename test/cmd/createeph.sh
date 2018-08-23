@@ -5,7 +5,7 @@ trap os::test::junit::reconcile_output EXIT
 os::test::junit::declare_suite_start "cmd/createeph"
 
 # No clusters notice
-os::cmd::try_until_text "_output/oshinko get" "There are no clusters in any projects. You can create a cluster with the 'create' command."
+os::cmd::try_until_text "_output/oshinko get" "No clusters found."
 
 # name required
 os::cmd::expect_failure "_output/oshinko create_eph"
@@ -60,8 +60,8 @@ os::cmd::expect_success "oc delete service sally-ui"
 os::cmd::expect_failure_and_text "_output/oshinko create_eph sally" "cluster 'sally' already exists \(incomplete\)"
 
 # exposeui
-os::cmd::expect_success "_output/oshinko create_eph charlie --exposeui=false" 
-os::cmd::expect_success_and_text "_output/oshinko get charlie" "charlie.*<no route>"
+os::cmd::expect_success "_output/oshinko create_eph charlie --exposeui=false"
+os::cmd::expect_success_and_text "_output/oshinko get -d charlie" "charlie.*<no route>"
 
 # storedconfig
 oc create configmap clusterconfig --from-literal=workercount=3 --from-literal=mastercount=0 

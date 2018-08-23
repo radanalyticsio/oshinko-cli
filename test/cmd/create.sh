@@ -5,7 +5,7 @@ trap os::test::junit::reconcile_output EXIT
 os::test::junit::declare_suite_start "cmd/create"
 
 # No clusters notice
-os::cmd::try_until_text "_output/oshinko get" "There are no clusters in any projects. You can create a cluster with the 'create' command."
+os::cmd::try_until_text "_output/oshinko get" "No clusters found."
 
 # name required
 os::cmd::expect_failure "_output/oshinko create"
@@ -100,19 +100,16 @@ os::cmd::expect_success "_output/oshinko delete klondike3"
 
 os::cmd::expect_failure_and_text "_output/oshinko create klondike4 --metrics=notgonnadoit" "must be 'true', 'false', 'jolokia', or 'prometheus'"
 
-# exposeui
+#exposeui
 os::cmd::expect_success "_output/oshinko create charlie --exposeui=false"
-os::cmd::expect_success_and_text "_output/oshinko get charlie" "charlie.*<no route>"
+os::cmd::expect_success_and_text "_output/oshinko get -d charlie" "charlie.*<no route>"
 os::cmd::expect_success "_output/oshinko delete charlie"
-
 os::cmd::expect_success "_output/oshinko create charlie2 --exposeui=true"
-os::cmd::expect_success_and_text "_output/oshinko get charlie2" "charlie2-ui-route"
+os::cmd::expect_success_and_text "_output/oshinko get -d charlie2" "charlie2-ui-route"
 os::cmd::expect_success "_output/oshinko delete charlie2"
-
 os::cmd::expect_success "_output/oshinko create charlie3"
-os::cmd::expect_success_and_text "_output/oshinko get charlie3" "charlie3-ui-route"
+os::cmd::expect_success_and_text "_output/oshinko get -d charlie3" "charlie3-ui-route"
 os::cmd::expect_success "_output/oshinko delete charlie3"
-
 os::cmd::expect_failure_and_text "_output/oshinko create charlie4 --exposeui=notgonnadoit" "must be a boolean"
 
 # storedconfig
