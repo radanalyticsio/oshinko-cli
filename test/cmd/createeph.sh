@@ -80,12 +80,12 @@ os::cmd::expect_success "_output/oshinko create_eph cordial --image=someotherima
 # flags for ephemeral
 os::cmd::expect_failure_and_text "_output/oshinko create_eph -e bob" "An app value must be supplied if ephemeral is used"
 
-os::cmd::expect_success_and_text "_output/oshinko create_eph -e bob --app=kingkong" 'shared cluster "bob'
+os::cmd::expect_success_and_text "_output/oshinko create_eph -e bob --app=kingkong" 'shared cluster bob'
 
-os::cmd::expect_success_and_text "_output/oshinko create_eph -e sonofbob --app=bob-m-1" 'ephemeral cluster "sonofbob" created'
+os::cmd::expect_success_and_text "_output/oshinko create_eph -e sonofbob --app=bob-m-1" 'ephemeral cluster sonofbob'
 os::cmd::expect_success_and_text "oc export rc bob-m-1" "uses-oshinko-cluster: sonofbob"
 
-os::cmd::expect_success_and_text "_output/oshinko create_eph vinny --app=sonofbob-m-1" 'shared cluster "vinny"'
+os::cmd::expect_success_and_text "_output/oshinko create_eph vinny --app=sonofbob-m-1" 'shared cluster vinny'
 os::cmd::expect_success_and_text "oc export rc sonofbob-m-1" "uses-oshinko-cluster: vinny"
 
 os::test::junit::declare_suite_end

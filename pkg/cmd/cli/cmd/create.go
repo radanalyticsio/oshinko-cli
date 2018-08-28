@@ -99,9 +99,11 @@ func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string)
 		return err
 	}
 	if result.Ephemeral == "<shared>" {
-		fmt.Fprintf(out, "shared cluster \"%s\" created \n", o.Name+"\t spark master:\t"+ result.MasterURL)
+		fmt.Fprintf(out, "shared cluster %s created \n", o.Name)
+		fmt.Fprintf(out,"spark master: %v", result.MasterURL)
 	} else {
-		fmt.Fprintf(out, "ephemeral cluster \"%s\" created \n", o.Name+"\t spark master:\t"+ result.MasterURL)
+		fmt.Fprintf(out, "ephemeral cluster %s created \n", o.Name)
+		fmt.Fprintf(out,"spark master: \"%s\"", result.MasterURL)
 	}
 	return nil
 }
