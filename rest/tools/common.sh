@@ -1,5 +1,16 @@
+#!/usr/bin/env bash
 
-TOP_DIR=$(readlink -f `dirname "$0"` | grep -o '.*/oshinko-cli')
+if [[ "$OSTYPE" == "darwin"* ]]; then
+   # Mac OSX
+   result=:$(brew ls coreutils)
+      if [ -z "$result" ]; then
+         'Error: coreutils is not installed.'
+         exit 1
+      fi
+   TOP_DIR=$(greadlink -f `dirname "$0"` | grep -o '.*/oshinko-cli')
+else
+   TOP_DIR=$(readlink -f `dirname "$0"` | grep -o '.*/oshinko-cli')
+fi
 . $TOP_DIR/sparkimage.sh
 
 if [ -n "$OSHINKO_SERVER_TAG" ]
