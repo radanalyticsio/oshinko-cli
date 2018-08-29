@@ -100,10 +100,10 @@ func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string)
 	}
 	if result.Ephemeral == "<shared>" {
 		fmt.Fprintf(out, "shared cluster %s created \n", o.Name)
-		fmt.Fprintf(out,"spark master: %v", result.MasterURL)
+		fmt.Fprintf(out,"spark master: %v", result.MasterURL+"\n")
 	} else {
 		fmt.Fprintf(out, "ephemeral cluster %s created \n", o.Name)
-		fmt.Fprintf(out,"spark master: \"%s\"", result.MasterURL)
+		fmt.Fprintf(out,"spark master: \"%s\"", result.MasterURL+"\n")
 	}
 	return nil
 }
