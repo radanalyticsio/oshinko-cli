@@ -69,6 +69,8 @@ After building the binary a basic test can be performed as follows:
 *The return value may be different depending on the version of the
 server you have built*
 
+To exit the rest server just type the word ``exit``
+
 ### TLS
 
 To start the server with TLS enabled, you will need to supply a certificate
