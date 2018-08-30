@@ -206,13 +206,13 @@ func sparkWorker(namespace, image string, replicas int, clustername, sparkconfdi
 	// We will use a label and pod selector based on the cluster name.
 	// Openshift will add additional labels and selectors to distinguish pods handled by
 	// this deploymentconfig from pods beloning to another.
-	dc := odc.DeploymentConfig(clustername+"-w", namespace).
+	dc := odc.NewODeploymentConfig(clustername+"-w", namespace).
 		TriggerOnConfigChange().RollingStrategy().Label(clusterLabel, clustername).
 		Label(typeLabel, workerType).
 		PodSelector(clusterLabel, clustername).Replicas(replicas)
 
 	// Create a pod template spec with the matching label
-	pt := opt.PodTemplateSpec().Label(clusterLabel, clustername).Label(typeLabel, workerType)
+	pt := opt.NewOPodTemplateSpec().Label(clusterLabel, clustername).Label(typeLabel, workerType)
 
 	// Port list
 	webport := 8081
@@ -220,7 +220,7 @@ func sparkWorker(namespace, image string, replicas int, clustername, sparkconfdi
 	ports := []*ocon.OContainerPort{webp}
 
 	// Create a container with the correct ports and start command
-	cont := ocon.Container(dc.Name, image).
+	cont := ocon.NewOContainer(dc.Name, image).
 		Ports(ports...).
 		SetLivenessProbe(probes.NewHTTPGetProbe(webport)).EnvVars(makeWorkerEnvVars(clustername, sparkconfdir, metrics))
 
@@ -248,7 +248,7 @@ func sparkMaster(namespace, image string, replicas int, clustername, sparkconfdi
 	// We will use a label and pod selector based on the cluster name
 	// Openshift will add additional labels and selectors to distinguish pods handled by
 	// this deploymentconfig from pods beloning to another.
-	dc := odc.DeploymentConfig(mastername(clustername), namespace).
+	dc := odc.NewODeploymentConfig(mastername(clustername), namespace).
 		TriggerOnConfigChange().RollingStrategy().Label(clusterLabel, clustername).
 		Label(typeLabel, masterType).
 		PodSelector(clusterLabel, clustername).Replicas(replicas)
@@ -258,7 +258,7 @@ func sparkMaster(namespace, image string, replicas int, clustername, sparkconfdi
 	}
 
 	// Create a pod template spec with the matching label
-	pt := opt.PodTemplateSpec().Label(clusterLabel, clustername).
+	pt := opt.NewOPodTemplateSpec().Label(clusterLabel, clustername).
 		Label(typeLabel, masterType)
 
 	// Create a container with the correct ports and start command
@@ -275,7 +275,7 @@ func sparkMaster(namespace, image string, replicas int, clustername, sparkconfdi
 		ports = append(ports, mp)
 	}
 
-	cont := ocon.Container(dc.Name, image).
+	cont := ocon.NewOContainer(dc.Name, image).
 		Ports(ports...).
 		SetLivenessProbe(liveness).
 		SetReadinessProbe(readiness).EnvVars(makeEnvVars(clustername, sparkconfdir, metrics))
@@ -296,7 +296,7 @@ func service(name string,
 	podselectors map[string]string) (*osv.OService, *osv.OServicePort) {
 
 	p := osv.ServicePort(port).TargetPort(port)
-	return osv.Service(name).Label(clusterLabel, clustername).
+	return osv.NewOService(name).Label(clusterLabel, clustername).
 		Label(typeLabel, otype).PodSelectors(podselectors).Ports(p), p
 }
 

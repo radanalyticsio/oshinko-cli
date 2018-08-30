@@ -4,20 +4,20 @@ import (
 	"gopkg.in/check.v1"
 	kapi "k8s.io/api/core/v1"
 
-	api  "github.com/openshift/api/apps/v1"
+	api "github.com/openshift/api/apps/v1"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters/deploymentconfigs"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters/podtemplates"
 )
 
 func (s *OshinkoUnitTestSuite) TestDeploymentConfig(c *check.C) {
 	expectedName, expectedNamespace := "testname", "testnamespace"
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig(expectedName, expectedNamespace)
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig(expectedName, expectedNamespace)
 	c.Assert(newDeploymentConfig.Name, check.Equals, expectedName)
 	c.Assert(newDeploymentConfig.Namespace, check.Equals, expectedNamespace)
 }
 
 func (s *OshinkoUnitTestSuite) TestReplicas(c *check.C) {
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig("name", "namespace")
 	expectedReplicas := 12345
 	newDeploymentConfig.Replicas(expectedReplicas)
 	c.Assert(newDeploymentConfig.Spec.Replicas, check.Equals, int32(expectedReplicas))
@@ -25,35 +25,35 @@ func (s *OshinkoUnitTestSuite) TestReplicas(c *check.C) {
 
 func (s *OshinkoUnitTestSuite) TestLabel(c *check.C) {
 	expectedName, expectedLabel := "testname", "testlabel"
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig("name", "namespace")
 	newDeploymentConfig.Label(expectedName, expectedLabel)
 	c.Assert(newDeploymentConfig.Labels[expectedName], check.Equals, expectedLabel)
 }
 
 func (s *OshinkoUnitTestSuite) TestDeploymentPodSelector(c *check.C) {
 	expectedSelector, expectedValue := "testselector", "testvalue"
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig("name", "namespace")
 	newDeploymentConfig.PodSelector(expectedSelector, expectedValue)
 	c.Assert(newDeploymentConfig.Spec.Selector[expectedSelector], check.Equals, expectedValue)
 }
 
 func (s *OshinkoUnitTestSuite) TestDeploymentPodSelectors(c *check.C) {
 	expectedSelectors := map[string]string{"selector1": "value1", "selector2": "value2"}
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig("name", "namespace")
 	newDeploymentConfig.PodSelectors(expectedSelectors)
 	c.Assert(newDeploymentConfig.Spec.Selector, check.DeepEquals, expectedSelectors)
 }
 
 func (s *OshinkoUnitTestSuite) TestGetPodSelectors(c *check.C) {
 	expectedSelectors := map[string]string{"selector1": "value1", "selector2": "value2"}
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig("name", "namespace")
 	newDeploymentConfig.PodSelectors(expectedSelectors)
 	c.Assert(newDeploymentConfig.GetPodSelectors(), check.DeepEquals, expectedSelectors)
 }
 
 func (s *OshinkoUnitTestSuite) TestRollingStrategy(c *check.C) {
 	expectedStrategy := api.DeploymentStrategy{Type: api.DeploymentStrategyTypeRolling}
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig("name", "namespace")
 	newDeploymentConfig.RollingStrategy()
 	c.Assert(newDeploymentConfig.Spec.Strategy, check.DeepEquals, expectedStrategy)
 }
@@ -69,14 +69,14 @@ func (s *OshinkoUnitTestSuite) TestRollingStrategyParams(c *check.C) {
 		Resources:     req,
 		Labels:        lbls,
 		Annotations:   anttns}
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig("name", "namespace")
 	newDeploymentConfig.RollingStrategyParams(&rp, req, lbls, anttns)
 	c.Assert(newDeploymentConfig.Spec.Strategy, check.DeepEquals, expectedStrategy)
 }
 
 func (s *OshinkoUnitTestSuite) TestRecreateStrategy(c *check.C) {
 	expectedStrategy := api.DeploymentStrategy{Type: api.DeploymentStrategyTypeRecreate}
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig("name", "namespace")
 	newDeploymentConfig.RecreateStrategy()
 	c.Assert(newDeploymentConfig.Spec.Strategy, check.DeepEquals, expectedStrategy)
 }
@@ -92,7 +92,7 @@ func (s *OshinkoUnitTestSuite) TestRecreateStrategyParams(c *check.C) {
 		Resources:      req,
 		Labels:         lbls,
 		Annotations:    anttns}
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig("name", "namespace")
 	newDeploymentConfig.RecreateStrategyParams(&rp, req, lbls, anttns)
 	c.Assert(newDeploymentConfig.Spec.Strategy, check.DeepEquals, expectedStrategy)
 }
@@ -108,7 +108,7 @@ func (s *OshinkoUnitTestSuite) TestCustomStrategyParams(c *check.C) {
 		Resources:    req,
 		Labels:       lbls,
 		Annotations:  anttns}
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig("name", "namespace")
 	newDeploymentConfig.CustomStrategyParams(&rp, req, lbls, anttns)
 	c.Assert(newDeploymentConfig.Spec.Strategy, check.DeepEquals, expectedStrategy)
 }
@@ -116,7 +116,7 @@ func (s *OshinkoUnitTestSuite) TestCustomStrategyParams(c *check.C) {
 func (s *OshinkoUnitTestSuite) TestTriggerOnConfigChange(c *check.C) {
 	expectedTriggers := []api.DeploymentTriggerPolicy{
 		api.DeploymentTriggerPolicy{Type: api.DeploymentTriggerOnConfigChange}}
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig("name", "namespace")
 	newDeploymentConfig.TriggerOnConfigChange()
 	c.Assert(newDeploymentConfig.Spec.Triggers, check.DeepEquals, expectedTriggers)
 }
@@ -138,7 +138,7 @@ func (s *OshinkoUnitTestSuite) TestTriggerOnImageChange(c *check.C) {
 		api.DeploymentTriggerPolicy{
 			Type:              api.DeploymentTriggerOnImageChange,
 			ImageChangeParams: &imageChangeParams1}}
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig("name", "namespace")
 	newDeploymentConfig.TriggerOnImageChange(&imageChangeParams1)
 	c.Assert(newDeploymentConfig.Spec.Triggers, check.DeepEquals, expectedTriggers)
 	newDeploymentConfig.TriggerOnImageChange(&imageChangeParams1Copy)
@@ -151,7 +151,7 @@ func (s *OshinkoUnitTestSuite) TestTriggerOnImageChange(c *check.C) {
 }
 
 func (s *OshinkoUnitTestSuite) TestPodTemplateSpec(c *check.C) {
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig("name", "namespace")
 	expectedPodTemplateSpec := podtemplates.OPodTemplateSpec{}
 	newDeploymentConfig.PodTemplateSpec(&expectedPodTemplateSpec)
 	c.Assert(newDeploymentConfig.Spec.Template, check.Equals, &expectedPodTemplateSpec.PodTemplateSpec)
@@ -159,7 +159,7 @@ func (s *OshinkoUnitTestSuite) TestPodTemplateSpec(c *check.C) {
 }
 
 func (s *OshinkoUnitTestSuite) TestGetPodTemplateSpecLabels(c *check.C) {
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig("name", "namespace")
 	expectedLabels := map[string]string{}
 	c.Assert(newDeploymentConfig.GetPodTemplateSpecLabels(), check.DeepEquals, expectedLabels)
 	podTemplateSpec := podtemplates.OPodTemplateSpec{}
@@ -170,7 +170,7 @@ func (s *OshinkoUnitTestSuite) TestGetPodTemplateSpecLabels(c *check.C) {
 }
 
 func (s *OshinkoUnitTestSuite) TestFindPort(c *check.C) {
-	newDeploymentConfig := deploymentconfigs.DeploymentConfig("name", "namespace")
+	newDeploymentConfig := deploymentconfigs.NewODeploymentConfig("name", "namespace")
 	c.Assert(newDeploymentConfig.FindPort("testport"), check.Equals, 0)
 	podTemplateSpec := podtemplates.OPodTemplateSpec{
 		kapi.PodTemplateSpec{

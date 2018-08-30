@@ -11,20 +11,20 @@ import (
 
 func (s *OshinkoUnitTestSuite) TestContainer(c *check.C) {
 	expectedName, expectedImage := "testname", "testimage"
-	newContainer := containers.Container(expectedName, expectedImage)
+	newContainer := containers.NewOContainer(expectedName, expectedImage)
 	c.Assert(newContainer.Name, check.Equals, expectedName)
 	c.Assert(newContainer.Image, check.Equals, expectedImage)
 }
 
 func (s *OshinkoUnitTestSuite) TestCommand(c *check.C) {
-	newContainer := containers.Container("name", "image")
+	newContainer := containers.NewOContainer("name", "image")
 	expectedArgs := []string{"Arg1", "Arg2"}
 	newContainer.Command(expectedArgs[0], expectedArgs[1])
 	c.Assert(newContainer.Container.Command, check.DeepEquals, expectedArgs)
 }
 
 func (s *OshinkoUnitTestSuite) TestEnvVar(c *check.C) {
-	newContainer := containers.Container("name", "image")
+	newContainer := containers.NewOContainer("name", "image")
 	expectedName, expectedValue := "testname", "testvalue"
 	expectedEnv := []kapi.EnvVar{kapi.EnvVar{Name: expectedName, Value: expectedValue}}
 	newContainer.EnvVar(expectedName, expectedValue)
@@ -32,7 +32,7 @@ func (s *OshinkoUnitTestSuite) TestEnvVar(c *check.C) {
 }
 
 func (s *OshinkoUnitTestSuite) TestEnvVars(c *check.C) {
-	newContainer := containers.Container("name", "image")
+	newContainer := containers.NewOContainer("name", "image")
 	expectedEnv := []kapi.EnvVar{
 		kapi.EnvVar{Name: "name1", Value: "value1"},
 		kapi.EnvVar{Name: "name2", Value: "value2"}}
@@ -41,7 +41,7 @@ func (s *OshinkoUnitTestSuite) TestEnvVars(c *check.C) {
 }
 
 func (s *OshinkoUnitTestSuite) TestResourceLimit(c *check.C) {
-	newContainer := containers.Container("name", "image")
+	newContainer := containers.NewOContainer("name", "image")
 	expectedName := kapi.ResourceName("testname")
 	expectedQuantity := resource.Quantity{}
 	newContainer.ResourceLimit(expectedName, expectedQuantity)
@@ -49,7 +49,7 @@ func (s *OshinkoUnitTestSuite) TestResourceLimit(c *check.C) {
 }
 
 func (s *OshinkoUnitTestSuite) TestResourceRequest(c *check.C) {
-	newContainer := containers.Container("name", "image")
+	newContainer := containers.NewOContainer("name", "image")
 	expectedName := kapi.ResourceName("testname")
 	expectedQuantity := resource.Quantity{}
 	newContainer.ResourceRequest(expectedName, expectedQuantity)
@@ -60,7 +60,7 @@ func (s *OshinkoUnitTestSuite) TestContainerPorts(c *check.C) {
 	containerPorts := []*containers.OContainerPort{
 		containers.ContainerPort("port1", 1),
 		containers.ContainerPort("port2", 2)}
-	newContainer := containers.Container("name", "image")
+	newContainer := containers.NewOContainer("name", "image")
 	newContainer.Ports(containerPorts[0], containerPorts[1])
 	expectedPorts := make([]kapi.ContainerPort, len(containerPorts))
 	for idx, p := range containerPorts {
@@ -105,7 +105,7 @@ func (s *OshinkoUnitTestSuite) TestHostIP(c *check.C) {
 }
 
 func (s *OshinkoUnitTestSuite) TestSetLivenessProbe(c *check.C) {
-	newContainer := containers.Container("name", "image")
+	newContainer := containers.NewOContainer("name", "image")
 	expectedPort := 8080
 	expectedProbe := probes.NewHTTPGetProbe(expectedPort)
 	newContainer.SetLivenessProbe(expectedProbe)
@@ -115,7 +115,7 @@ func (s *OshinkoUnitTestSuite) TestSetLivenessProbe(c *check.C) {
 }
 
 func (s *OshinkoUnitTestSuite) TestSetReadinessProbe(c *check.C) {
-	newContainer := containers.Container("name", "image")
+	newContainer := containers.NewOContainer("name", "image")
 	expectedPort := 8080
 	expectedProbe := probes.NewHTTPGetProbe(expectedPort)
 	newContainer.SetReadinessProbe(expectedProbe)
@@ -125,7 +125,7 @@ func (s *OshinkoUnitTestSuite) TestSetReadinessProbe(c *check.C) {
 }
 
 func (s *OshinkoUnitTestSuite) TestSetVolumeMount(c *check.C) {
-	newContainer := containers.Container("name", "image")
+	newContainer := containers.NewOContainer("name", "image")
 	vmounts := []kapi.VolumeMount{
 		{Name: "secrets", MountPath: "/etc/secrets", ReadOnly: true},
 		{Name: "mysteries", MountPath: "/etc/mysteries", ReadOnly: false}}
