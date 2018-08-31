@@ -77,8 +77,8 @@ type SparkCluster struct {
 	MasterWebRoute string `json:"MasterWebRoute"`
 	Status         string `json:"Status"`
 	Config         ClusterConfig
-	Ephemeral      string     `json:"ephemeral,omitempty"`
-	Pods           []SparkPod `json:"pods,omitempty"`
+	Ephemeral      string     `json:"Ephemeral,omitempty"`
+	Pods           []SparkPod `json:"Pods,omitempty"`
 }
 
 func getKubeClient(restconfig *rest.Config) *kubernetes.Clientset {
