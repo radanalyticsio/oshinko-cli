@@ -86,8 +86,8 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 
 func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string) error {
 	config := clusters.ClusterConfig{}
-	config.WorkerCount = o.WorkerCount
-	config.MasterCount = o.MasterCount
+	config.WorkersCount = o.WorkerCount
+	config.MastersCount = o.MasterCount
 	config.SparkWorkerConfig = o.WorkerConfig
 	config.SparkMasterConfig = o.MasterConfig
 	config.SparkImage = o.Image

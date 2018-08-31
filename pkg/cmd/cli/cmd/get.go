@@ -77,10 +77,10 @@ func (o *CmdOptions) RunClusters() error {
 		for c, cluster := range tmpClusters {
 			if o.Name == "" || cluster.Name == o.Name {
 				if o.Output == "" && !o.Deprecated {
-					msg += fmt.Sprintf(linebreak+asterisk+"%-20s\t %-20d\t %-20s\t", cluster.Name, cluster.WorkerCount, cluster.Status)
+					msg += fmt.Sprintf(linebreak+asterisk+"%-20s\t %-20d\t %-20s\t", cluster.Name, cluster.Config.WorkersCount, cluster.Status)
 				} else if o.Output == "" && o.Deprecated {
 					msg += fmt.Sprintf(linebreak+asterisk+"%-14s\t %d\t %-30s\t %-32s\t %-32s\t %s\t  %s", cluster.Name,
-						cluster.WorkerCount, cluster.MasterURL, cluster.MasterWebURL, cluster.MasterWebRoute, cluster.Status, cluster.Ephemeral)
+						cluster.Config.WorkersCount, cluster.MasterURL, cluster.MasterWebURL, cluster.MasterWebRoute, cluster.Status, cluster.Ephemeral)
 				} else if o.NoPods {
 					tmpClusters[c].Pods = nil
 				}

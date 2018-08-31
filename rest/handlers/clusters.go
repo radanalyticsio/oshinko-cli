@@ -85,8 +85,8 @@ func singleClusterResponse(sc coreclusters.SparkCluster) *models.SingleCluster {
 	cluster.Cluster.Config = &models.NewClusterConfig{
 		SparkMasterConfig: sc.Config.SparkMasterConfig,
 		SparkWorkerConfig: sc.Config.SparkWorkerConfig,
-		MasterCount: int64ptr(sc.Config.MasterCount),
-		WorkerCount: int64ptr(sc.Config.WorkerCount),
+		MasterCount: int64ptr(sc.Config.MastersCount),
+		WorkerCount: int64ptr(sc.Config.WorkersCount),
 		Name: sc.Config.Name,
 		ExposeWebUI: sc.Config.ExposeWebUI,
 		Metrics: sc.Config.Metrics,
@@ -114,14 +114,14 @@ func assignConfig(config *models.NewClusterConfig) *coreclusters.ClusterConfig {
 		return nil
 	}
 	result := &coreclusters.ClusterConfig{
-		Name: config.Name,
-		MasterCount: getModelCount(config.MasterCount),
-		WorkerCount: getModelCount(config.WorkerCount),
+		Name:              config.Name,
+		MastersCount:      getModelCount(config.MasterCount),
+		WorkersCount:      getModelCount(config.WorkerCount),
 		SparkMasterConfig: config.SparkMasterConfig,
 		SparkWorkerConfig: config.SparkWorkerConfig,
-		SparkImage: config.SparkImage,
-		ExposeWebUI: config.ExposeWebUI,
-		Metrics: config.Metrics,
+		SparkImage:        config.SparkImage,
+		ExposeWebUI:       config.ExposeWebUI,
+		Metrics:           config.Metrics,
 	}
 	return result
 }

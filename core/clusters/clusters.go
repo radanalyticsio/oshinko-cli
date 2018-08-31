@@ -68,16 +68,14 @@ type SparkPod struct {
 }
 
 type SparkCluster struct {
-	Namespace      string `json:"namespace,omitempty"`
-	Name           string `json:"name,omitempty"`
+	Namespace      string `json:"Namespace,omitempty"`
+	Name           string `json:"Name,omitempty"`
 	Href           string `json:"href"`
-	Image          string `json:"image"`
-	MasterURL      string `json:"masterUrl"`
-	MasterWebURL   string `json:"masterWebUrl"`
-	MasterWebRoute string `json:"masterWebRoute"`
-	Status         string `json:"status"`
-	WorkerCount    int    `json:"workerCount"`
-	MasterCount    int    `json:"masterCount"`
+	Image          string `json:"Image,omitempty"`
+	MasterURL      string `json:"MasterUrl"`
+	MasterWebURL   string `json:"MasterWebUrl"`
+	MasterWebRoute string `json:"MasterWebRoute"`
+	Status         string `json:"Status"`
 	Config         ClusterConfig
 	Ephemeral      string     `json:"ephemeral,omitempty"`
 	Pods           []SparkPod `json:"pods,omitempty"`
@@ -377,8 +375,8 @@ func CreateCluster(
 		finalconfig.SparkImage = sparkimage
 	}
 
-	mastercount := int(finalconfig.MasterCount)
-	workercount := int(finalconfig.WorkerCount)
+	mastercount := int(finalconfig.MastersCount)
+	workercount := int(finalconfig.WorkersCount)
 
 	// Check if finalconfig contains the names of ConfigMaps to use for spark
 	// configuration. If so they must exist. The ConfigMaps will be mounted
@@ -534,8 +532,8 @@ func CreateCluster(
 	result.MasterWebURL = retrieveServiceURL(getKubeClient(restconfig), webuiType, clustername, namespace)
 	result.Status = "Running"
 	result.Config = finalconfig
-	result.MasterCount = 1
-	result.WorkerCount = workercount
+	result.Config.MastersCount = 1
+	result.Config.WorkersCount = workercount
 	result.Pods = []SparkPod{}
 	if ephem_val != "" {
 		result.Ephemeral = ephem_val
@@ -687,9 +685,9 @@ func findClusterBody(clustername, namespace string, restconfig *rest.Config, res
 	// reporting on multiple clusters. Instead cnt will be 0.
 	worker, err := dc.Get(workername(clustername), metav1.GetOptions{})
 	if err == nil {
-		result.WorkerCount = int(worker.Status.Replicas)
+		result.Config.WorkersCount = int(worker.Status.Replicas)
 	} else {
-		result.WorkerCount = -1
+		result.Config.WorkersCount = -1
 		result.Status = "Incomplete"
 	}
 
@@ -707,7 +705,7 @@ func findClusterBody(clustername, namespace string, restconfig *rest.Config, res
 	result.Ephemeral = "<shared>"
 	master, err := dc.Get(mastername(clustername), metav1.GetOptions{})
 	if err == nil {
-		result.MasterCount = int(master.Status.Replicas)
+		result.Config.MastersCount = int(master.Status.Replicas)
 		if ephemeral, ok := master.Labels[ephemeralLabel]; ok {
 			result.Ephemeral = ephemeral
 		}
@@ -718,7 +716,7 @@ func findClusterBody(clustername, namespace string, restconfig *rest.Config, res
 		}
 
 	} else {
-		result.MasterCount = -1
+		result.Config.MastersCount = -1
 		result.Status = "Incomplete"
 	}
 }
@@ -727,7 +725,7 @@ func CheckNoCluster(cluster *SparkCluster) bool {
 	// negative counts here means that there was no dc
 	// we might still have pods but they should be terminating, and even if one is stuck, it bears
 	// a random suffix so not really a problem
-	return cluster.Status == "Incomplete" && cluster.WorkerCount == -1 && cluster.MasterCount == -1 &&
+	return cluster.Status == "Incomplete" && cluster.Config.WorkersCount == -1 && cluster.Config.MastersCount == -1 &&
 		cluster.MasterURL == "<missing>" && cluster.MasterWebURL == "<missing>"
 }
 
@@ -896,10 +894,10 @@ func updateAnnotation(client *dclient.Clientset, clustername, namespace string, 
 				err := json.Unmarshal([]byte(ann["oshinko-config"]), &cc)
 				if err == nil {
 					if wup {
-						cc.WorkerCount = workers
+						cc.WorkersCount = workers
 					}
 					if mup {
-						cc.MasterCount = masters
+						cc.MastersCount = masters
 					}
 					configbytes, err := json.Marshal(cc)
 					if err == nil {
@@ -950,8 +948,8 @@ func UpdateCluster(name, namespace string, config *ClusterConfig, restconfig *re
 	if err != nil {
 		return result, generalErr(err, clusterConfigMsg, ErrorCode(err))
 	}
-	workercount := int(finalconfig.WorkerCount)
-	mastercount := int(finalconfig.MasterCount)
+	workercount := int(finalconfig.WorkersCount)
+	mastercount := int(finalconfig.MastersCount)
 
 	// TODO(tmckay) If someone tries to change the spark config for a cluster,
 	// that should be an error at this point (unless we spin all the pods down and
