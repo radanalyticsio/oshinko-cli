@@ -131,7 +131,7 @@ type ClustersItems0 struct {
 	*/
 	MasterWebURL *string `json:"masterWebUrl"`
 
-	/* Name of the cluster
+	/* ConfigName of the cluster
 
 	Required: true
 	*/

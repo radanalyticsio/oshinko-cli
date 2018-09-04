@@ -28,7 +28,7 @@ func (p SortByClusterName) Swap(i, j int) {
 }
 
 func (p SortByClusterName) Less(i, j int) bool {
-	return p[i].Name < p[j].Name
+	return p[i].Config.ConfigName < p[j].Config.ConfigName
 }
 
 // RunProjects lists all projects a user belongs to
@@ -44,11 +44,11 @@ func (o *CmdOptions) RunClusters() error {
 	if o.Name != "" {
 		c, err := clusters.FindSingleCluster(o.Name, o.Project, o.Config)
 		//return empty json/yaml when no cluster found
-		if err!=nil  && o.Output!=""{
-			msg +="{}"
+		if err != nil && o.Output != "" {
+			msg += "{}"
 			fmt.Println(msg)
 			return nil
-		} else if err!=nil && o.Output==""{
+		} else if err != nil && o.Output == "" {
 			return err
 		}
 		clist = []clusters.SparkCluster{c}
@@ -63,8 +63,8 @@ func (o *CmdOptions) RunClusters() error {
 	tmpClusters := clist
 
 	if clusterCount <= 0 {
-		if o.Output!="" {
-			msg+="[]"
+		if o.Output != "" {
+			msg += "[]"
 			fmt.Println(msg)
 			return nil
 		}
@@ -75,11 +75,11 @@ func (o *CmdOptions) RunClusters() error {
 			msg += fmt.Sprintf(linebreak+asterisk+"%-20s\t %-20s\t %-20s\t", "name", "workers", "status")
 		}
 		for c, cluster := range tmpClusters {
-			if o.Name == "" || cluster.Name == o.Name {
+			if o.Name == "" || cluster.Config.ConfigName == o.Name {
 				if o.Output == "" && !o.Deprecated {
-					msg += fmt.Sprintf(linebreak+asterisk+"%-20s\t %-20d\t %-20s\t", cluster.Name, cluster.Config.WorkersCount, cluster.Status)
+					msg += fmt.Sprintf(linebreak+asterisk+"%-20s\t %-20d\t %-20s\t", cluster.Config.ConfigName, cluster.Config.WorkersCount, cluster.Status)
 				} else if o.Output == "" && o.Deprecated {
-					msg += fmt.Sprintf(linebreak+asterisk+"%-14s\t %d\t %-30s\t %-32s\t %-32s\t %s\t  %s", cluster.Name,
+					msg += fmt.Sprintf(linebreak+asterisk+"%-14s\t %d\t %-30s\t %-32s\t %-32s\t %s\t  %s", cluster.Config.ConfigName,
 						cluster.Config.WorkersCount, cluster.MasterURL, cluster.MasterWebURL, cluster.MasterWebRoute, cluster.Status, cluster.Ephemeral)
 				} else if o.NoPods {
 					tmpClusters[c].Pods = nil
@@ -87,7 +87,7 @@ func (o *CmdOptions) RunClusters() error {
 			}
 		}
 
-		if o.Output =="json" && clusterCount==1{
+		if o.Output == "json" && clusterCount == 1 {
 			PrintSingleObject(tmpClusters[0])
 			return nil
 		}

@@ -109,8 +109,8 @@ type ServicePort struct {
 	// Optional if only one ServicePort is defined on this service: The
 	// name of this port within the service.  This must be a DNS_LABEL.
 	// All ports within a ServiceSpec must have unique names.  This maps to
-	// the 'Name' field in EndpointPort objects.
-	Name string `json:"name"`
+	// the 'ConfigName' field in EndpointPort objects.
+	ConfigName string `json:"name"`
 
 	// The IP protocol for this port.  Supports "TCP" and "UDP".
 	Protocol Protocol `json:"protocol"`

@@ -14,12 +14,12 @@ const nameSpaceMsg = "cannot determine target openshift namespace"
 const clientMsg = "unable to create an openshift client"
 
 var codes map[int]int32 = map[int]int32{
-	coreclusters.NoCodeAvailable: 500,
-	coreclusters.ClusterConfigCode: 409,
-	coreclusters.ClientOperationCode: 500,
+	coreclusters.NoCodeAvailable:       500,
+	coreclusters.ClusterConfigCode:     409,
+	coreclusters.ClientOperationCode:   500,
 	coreclusters.ClusterIncompleteCode: 409,
-	coreclusters.NoSuchClusterCode: 404,
-	coreclusters.ComponentExistsCode: 409,
+	coreclusters.NoSuchClusterCode:     404,
+	coreclusters.ComponentExistsCode:   409,
 }
 
 func generalErr(err error, title, msg string, code int32) *models.ErrorResponse {
@@ -85,12 +85,12 @@ func singleClusterResponse(sc coreclusters.SparkCluster) *models.SingleCluster {
 	cluster.Cluster.Config = &models.NewClusterConfig{
 		SparkMasterConfig: sc.Config.SparkMasterConfig,
 		SparkWorkerConfig: sc.Config.SparkWorkerConfig,
-		MasterCount: int64ptr(sc.Config.MastersCount),
-		WorkerCount: int64ptr(sc.Config.WorkersCount),
-		Name: sc.Config.Name,
-		ExposeWebUI: sc.Config.ExposeWebUI,
-		Metrics: sc.Config.Metrics,
-		SparkImage: sc.Config.SparkImage,
+		MasterCount:       int64ptr(sc.Config.MastersCount),
+		WorkerCount:       int64ptr(sc.Config.WorkersCount),
+		Name:              sc.Config.ConfigName,
+		ExposeWebUI:       sc.Config.ExposeWebUI,
+		Metrics:           sc.Config.Metrics,
+		SparkImage:        sc.Config.SparkImage,
 	}
 	return cluster
 }
@@ -114,7 +114,7 @@ func assignConfig(config *models.NewClusterConfig) *coreclusters.ClusterConfig {
 		return nil
 	}
 	result := &coreclusters.ClusterConfig{
-		Name:              config.Name,
+		ConfigName:        config.Name,
 		MastersCount:      getModelCount(config.MasterCount),
 		WorkersCount:      getModelCount(config.WorkerCount),
 		SparkMasterConfig: config.SparkMasterConfig,
@@ -227,7 +227,7 @@ func FindClustersResponse(params apiclusters.FindClustersParams) middleware.Resp
 	// Create the payload that we're going to write into for the response
 	payload := apiclusters.FindClustersOKBodyBody{}
 	payload.Clusters = []*apiclusters.ClustersItems0{}
-	for idx := range(scs) {
+	for idx := range scs {
 		clt := new(apiclusters.ClustersItems0)
 		clt.Href = &scs[idx].Href
 		clt.MasterURL = &scs[idx].MasterURL
@@ -305,7 +305,6 @@ func UpdateSingleClusterResponse(params apiclusters.UpdateSingleClusterParams) m
 	if err != nil {
 		return reterr(fail(err, clientMsg, 500))
 	}
-
 
 	// Simple things first. At this time we do not support cluster name change and
 	// we do not suppport scaling the master count (likely need HA setup for that to make sense)

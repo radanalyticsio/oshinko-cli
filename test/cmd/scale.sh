@@ -34,24 +34,24 @@ os::cmd::try_until_text "_output/oshinko get" "No clusters found."
 # make a cluster to scale
 os::cmd::expect_success "_output/oshinko create abc"
 os::cmd::try_until_success "_output/oshinko get abc"
-os::cmd::expect_success_and_text "_output/oshinko get abc -o yaml" "WorkerCount: 1"
-os::cmd::expect_success_and_text "_output/oshinko get abc -o yaml" "MasterCount: 1"
+os::cmd::expect_success_and_text "_output/oshinko get abc -o yaml" "WorkersCount: 1"
+os::cmd::expect_success_and_text "_output/oshinko get abc -o yaml" "MastersCount: 1"
 # could still be creating so use 'until'
-os::cmd::try_until_text "_output/oshinko get abc -o yaml" "workerCount: 1"
-os::cmd::try_until_text "_output/oshinko get abc -o yaml" "masterCount: 1"
+os::cmd::try_until_text "_output/oshinko get abc -o yaml" "WorkersCount: 1"
+os::cmd::try_until_text "_output/oshinko get abc -o yaml" "MastersCount: 1"
 
 # scale
 os::cmd::expect_success_and_text "_output/oshinko scale abc" "neither masters nor workers specified, cluster \"abc\" not scaled"
 os::cmd::expect_failure_and_text "_output/oshinko scale abc --masters=2" "cluster configuration must have a master count of 0 or 1"
 os::cmd::expect_success "_output/oshinko scale abc --workers=0 --masters=0"
-os::cmd::expect_success_and_text "_output/oshinko get abc -o yaml" "WorkerCount: 0"
-os::cmd::expect_success_and_text "_output/oshinko get abc -o yaml" "MasterCount: 0"
-os::cmd::try_until_text "_output/oshinko get abc -o yaml" "workerCount: 0"
-os::cmd::try_until_text "_output/oshinko get abc -o yaml" "masterCount: 0"
+os::cmd::expect_success_and_text "_output/oshinko get abc -o yaml" "WorkersCount: 0"
+os::cmd::expect_success_and_text "_output/oshinko get abc -o yaml" "MastersCount: 0"
+os::cmd::try_until_text "_output/oshinko get abc -o yaml" "WorkersCount: 0"
+os::cmd::try_until_text "_output/oshinko get abc -o yaml" "MastersCount: 0"
 
 os::cmd::expect_success "_output/oshinko scale abc --workers=2"
-os::cmd::expect_success_and_text "_output/oshinko get abc -o yaml" "MasterCount: 0"
-os::cmd::expect_success_and_text "_output/oshinko get abc -o json" '"WorkerCount": 2'
+os::cmd::expect_success_and_text "_output/oshinko get abc -o yaml" "MastersCount: 0"
+os::cmd::expect_success_and_text "_output/oshinko get abc -o json" '"WorkersCount": 2'
 os::cmd::try_until_text "_output/oshinko get abc -o yaml" "workerCount: 2"
 os::cmd::expect_success_and_text "_output/oshinko get abc -o yaml" "masterCount: 0"
 

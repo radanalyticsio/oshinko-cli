@@ -38,8 +38,8 @@ for the find single cluster operation typically these are written to a http.Requ
 */
 type FindSingleClusterParams struct {
 
-	/*Name
-	  Name of the cluster
+	/*ConfigName
+	  ConfigName of the cluster
 
 	*/
 	Name string

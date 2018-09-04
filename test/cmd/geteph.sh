@@ -14,8 +14,8 @@ os::cmd::expect_success "_output/oshinko create abc --workers=2"
 os::cmd::expect_success "_output/oshinko create def --workers=1"
 
 # json and yaml output
-os::cmd::try_until_text "_output/oshinko get_eph abc -o json" '"WorkerCount": 2'
-os::cmd::try_until_text "_output/oshinko get_eph abc -o yaml" 'WorkerCount: 2'
+os::cmd::try_until_text "_output/oshinko get_eph abc -o json" '"WorkersCount": 2'
+os::cmd::try_until_text "_output/oshinko get_eph abc -o yaml" 'WorkersCount: 2'
 
 # pods vs nopods
 os::cmd::try_until_text "_output/oshinko get_eph abc -o json" '"pods"'

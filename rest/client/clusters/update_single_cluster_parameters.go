@@ -45,8 +45,8 @@ type UpdateSingleClusterParams struct {
 
 	*/
 	Cluster *models.NewCluster
-	/*Name
-	  Name of the cluster
+	/*ConfigName
+	  ConfigName of the cluster
 
 	*/
 	Name string

@@ -13,7 +13,7 @@ func NewRoute(routeName string, serviceName string, clusterName string, routeTyp
 			Name: routeName,
 			Labels: map[string]string{
 				"oshinko-cluster": clusterName,
-				"oshinko-type": routeType,
+				"oshinko-type":    routeType,
 			},
 		},
 		Spec: routeapi.RouteSpec{
@@ -30,11 +30,11 @@ func NewRoute(routeName string, serviceName string, clusterName string, routeTyp
 	//rSpec := api.RouteSpec{}
 	//api.Route{
 	//		ObjectMeta: kapi.ObjectMeta{
-	//			Name: routeName,
+	//			ConfigName: routeName,
 	//		},
 	//		Spec: api.RouteSpec{
 	//			To: api.RouteTargetReference{
-	//				Name: serviceName,
+	//				ConfigName: serviceName,
 	//			},
 	//			Port: resolveRoutePort(portString),
 	//		},

@@ -28,7 +28,7 @@ type FindSingleClusterParams struct {
 	// HTTP Request Object
 	HTTPRequest *http.Request
 
-	/*Name of the cluster
+	/*ConfigName of the cluster
 	  Required: true
 	  In: path
 	*/
