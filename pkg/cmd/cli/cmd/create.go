@@ -11,8 +11,8 @@ import (
 	"github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
-	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"github.com/radanalyticsio/oshinko-cli/version"
+	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 )
 
 var (
@@ -44,7 +44,6 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 		AuthOptions: *authOptions,
 	}
 
-
 	if extended {
 		cmdString = "create_eph"
 
@@ -55,7 +54,7 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 	cmd := &cobra.Command{
 		Use: cmdString + " <NAME> ",
 		//--masters <MASTER> --workers <WORKERS> --image <IMAGE> --sparkmasterconfig <DIR>
-		Short: "Create new spark cluster",
+		Short:  "Create new spark cluster",
 		Hidden: extended,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Complete(f, cmd, args); err != nil {
@@ -74,7 +73,7 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 	cmd.Flags().String("masterconfig", "", "ConfigMap name for spark master")
 	cmd.Flags().String("workerconfig", "", "ConfigMap name for spark worker")
 	cmd.Flags().String("storedconfig", "", "ConfigMap name for spark cluster")
-	cmd.Flags().String("image", "", "Spark image to be used. Default image is " + version.GetSparkImage() + ".")
+	cmd.Flags().String("image", "", "Spark image to be used. Default image is "+version.GetSparkImage()+".")
 	cmd.Flags().String("exposeui", "", "True or False, expose the Spark WebUI via a route (default True)")
 	cmd.Flags().String("metrics", "", "Enable spark metrics (default false). Set the value to 'prometheus' for prometheus metrics and 'true' or 'jolokia' for jolokia metrics (deprecated).")
 	if extended {
@@ -100,10 +99,10 @@ func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string)
 	}
 	if result.Ephemeral == "<shared>" {
 		fmt.Fprintf(out, "shared cluster %s created \n", o.Name)
-		fmt.Fprintf(out,"spark master: %v", result.MasterURL+"\n")
+		fmt.Fprintf(out, "spark master: %s", result.MasterURL+"\n")
 	} else {
 		fmt.Fprintf(out, "ephemeral cluster %s created \n", o.Name)
-		fmt.Fprintf(out,"spark master: \"%s\"", result.MasterURL+"\n")
+		fmt.Fprintf(out, "spark master: \"%s\"", result.MasterURL+"\n")
 	}
 	return nil
 }
