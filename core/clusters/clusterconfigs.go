@@ -3,15 +3,15 @@ package clusters
 import (
 	"fmt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
 	"strconv"
 	"strings"
-	"k8s.io/client-go/rest"
 )
 
 type ClusterConfig struct {
 	MastersCount      int
 	WorkersCount      int
-	Name              string `json:"Namespace,omitempty"`
+	Name              string `json:"ConfigName,omitempty"`
 	SparkMasterConfig string `json:"SparkMasterConfig,omitempty"`
 	SparkWorkerConfig string `json:"SparkWorkerConfig,omitempty"`
 	SparkImage        string `json:"SparkImage,omitempty"`
@@ -194,7 +194,7 @@ func loadConfig(name string, restconfig *rest.Config, namespace string) (res Clu
 		if name != "" && name != Defaultname {
 			_, err = readConfig(name, &res, failOnMissing, restconfig, namespace)
 		} else if defaultFound {
-		        // If the default oshinko cluster config has been overridden by a user with a configMap
+			// If the default oshinko cluster config has been overridden by a user with a configMap
 			// named Defaultname, then we want to record the name as non-empty to indicate that
 			// a configmap was actually located and read vs using the hardcoded default
 			res.Name = Defaultname
