@@ -130,7 +130,7 @@ type GetServerInfoOKBodyApplication struct {
 	*/
 	Version *string `json:"version"`
 
-	/* Oshinko Web Service ConfigName
+	/* Oshinko Web Service Name
 
 	Required: true
 	*/

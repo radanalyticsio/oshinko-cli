@@ -80,7 +80,7 @@ type ClustersItems0 struct {
 	*/
 	MasterWebURL *string `json:"masterWebUrl"`
 
-	/* ConfigName of the cluster
+	/* Name of the cluster
 
 	Required: true
 	*/

@@ -5,26 +5,26 @@ import (
 	"github.com/spf13/cobra"
 	"io"
 	"os"
-	"strings"
 	"time"
+	"strings"
 
-	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kclientcmd "k8s.io/client-go/tools/clientcmd"
 
-	projectclient "github.com/openshift/client-go/project/clientset/versioned"
-	clientcfg "github.com/openshift/origin/pkg/client/config"
-	"github.com/openshift/origin/pkg/cmd/flagtypes"
-	cliconfig "github.com/openshift/origin/pkg/oc/cli/config"
-	osclientcmd "github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
+	kclientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/apimachinery/pkg/util/sets"
 	rest "k8s.io/client-go/rest"
-	kclientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+	cliconfig "github.com/openshift/origin/pkg/oc/cli/config"
+	clientcfg "github.com/openshift/origin/pkg/client/config"
+	"github.com/openshift/origin/pkg/cmd/flagtypes"
+	osclientcmd "github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
+	projectclient "github.com/openshift/client-go/project/clientset/versioned"
 	//certutil "k8s.io/client-go/util/cert"
-	projectinternalversion "github.com/openshift/origin/pkg/project/generated/internalclientset/typed/project/internalversion"
 	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
+	projectinternalversion "github.com/openshift/origin/pkg/project/generated/internalclientset/typed/project/internalversion"
 )
 
 const defaultClusterURL = "https://localhost:8443"
@@ -46,16 +46,16 @@ type AuthOptions struct {
 	DefaultNamespace   string
 	Config             *rest.Config
 
-	KubeClient    internalclientset.Interface
-	ProjectClient projectinternalversion.ProjectInterface
-	Reader        io.Reader
-	Out           io.Writer
+	KubeClient			internalclientset.Interface
+	ProjectClient 		projectinternalversion.ProjectInterface
+	Reader             io.Reader
+	Out                io.Writer
 
 	// cert data to be used when authenticating
-	CertFile       string
-	KeyFile        string
-	Token          string
-	PathOptions    *kclientcmd.PathOptions
+	CertFile    string
+	KeyFile     string
+	Token       string
+	PathOptions *kclientcmd.PathOptions
 	CommandName    string
 	RequestTimeout time.Duration
 }
@@ -116,7 +116,7 @@ func (o *AuthOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args 
 		if strings.Contains(err.Error(), "could not load client configuration") {
 			//we have no kubeconfig
 			//do we have token ?
-			if !o.tokenProvided() {
+			if !o.tokenProvided(){
 				errstrings = append(errstrings, "oshinko-cli cannot find KUBECONFIG file.Please login or provide --token value.")
 			} else {
 				//get from token
@@ -128,7 +128,7 @@ func (o *AuthOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args 
 		} else {
 			errstrings = append(errstrings, err.Error())
 		}
-		if len(errstrings) != 0 {
+		if len(errstrings)!=0 {
 			return fmt.Errorf(strings.Join(errstrings, "\n"))
 		}
 	}
@@ -141,6 +141,7 @@ func (o *AuthOptions) Complete(f *osclientcmd.Factory, cmd *cobra.Command, args 
 		return err
 	}
 	o.ProjectClient = projectClient.Project()
+
 
 	return nil
 }
@@ -184,9 +185,11 @@ func (o *AuthOptions) getClientConfig() (*rest.Config, error) {
 	return clusterConfig, nil
 }
 
+
 func (o *AuthOptions) GatherAuthInfo() (string, error) {
 	var msg string
 	directClientConfig := o.Config
+
 
 	// make a copy and use it to avoid mutating the original
 	t := *directClientConfig
@@ -195,26 +198,26 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 	// if a token were explicitly provided, try to use it
 	if o.tokenProvided() {
 		clientConfig.BearerToken = o.Token
-		me, err := whoAmI(clientConfig)
-		if err == nil {
-			o.Username = me.Name
-			//fmt.Println(me.ConfigName)
-			clientConfig.CertData = []byte{}
-			clientConfig.KeyData = []byte{}
-			clientConfig.CertFile = o.CertFile
-			clientConfig.KeyFile = o.KeyFile
+			me, err := whoAmI(clientConfig)
+			if err == nil {
+				o.Username = me.Name
+				//fmt.Println(me.Name)
+				clientConfig.CertData = []byte{}
+				clientConfig.KeyData = []byte{}
+				clientConfig.CertFile = o.CertFile
+				clientConfig.KeyFile = o.KeyFile
 
-			o.Config = clientConfig
+				o.Config = clientConfig
 
-			msg += fmt.Sprintf("Logged into %q as %q using the token provided.\n\n", o.Config.Host, o.Username)
-			return msg, nil
-		}
+				msg += fmt.Sprintf("Logged into %q as %q using the token provided.\n\n", o.Config.Host, o.Username)
+				return msg, nil
+			}
 
-		if !kapierrors.IsUnauthorized(err) {
-			return "", err
-		}
+			if !kapierrors.IsUnauthorized(err) {
+				return "", err
+			}
 
-		return "", fmt.Errorf("The token provided is invalid or expired.\n\n")
+			return "", fmt.Errorf("The token provided is invalid or expired.\n\n")
 	} else {
 		//Only use config for contexts
 		config := o.StartingKubeConfig
@@ -225,6 +228,7 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 		}
 
 		var err error
+
 
 		me, err := whoAmI(o.Config)
 		if err != nil {
@@ -258,12 +262,13 @@ func (o *AuthOptions) GatherAuthInfo() (string, error) {
 	return msg, nil
 }
 
+
 /*
 #	Who Am I?
 #	Which Project Am I in ?
 #	Do I have permissions ?
 #	This method needs a valid ClientConfig
-*/
+ */
 func (o *AuthOptions) GatherProjectInfo() (string, error) {
 	var msg string
 	if o.Project != "" {
@@ -287,7 +292,7 @@ func (o *AuthOptions) GatherProjectInfo() (string, error) {
 	projectsList, err := projectClient.ProjectV1().Projects().List(metav1.ListOptions{})
 	// if we're running on kube (or likely kube), just set it to "default"
 	if kerrors.IsNotFound(err) || kerrors.IsForbidden(err) {
-		msg += fmt.Sprintf("Using \"default\".  You can switch projects with:\n\n '%s project <projectname>'\n", o.CommandName)
+		msg += fmt.Sprintf( "Using \"default\".  You can switch projects with:\n\n '%s project <projectname>'\n", o.CommandName)
 		o.Project = "default"
 		return msg, nil
 	}
@@ -298,7 +303,7 @@ func (o *AuthOptions) GatherProjectInfo() (string, error) {
 	projectsItems := projectsList.Items
 	projects := sets.String{}
 	for _, project := range projectsItems {
-		//fmt.Println(project.ConfigName)
+		//fmt.Println(project.Name)
 		projects.Insert(project.Name)
 	}
 

@@ -37,7 +37,7 @@ type UpdateSingleClusterParams struct {
 	  In: body
 	*/
 	Cluster *models.NewCluster
-	/*ConfigName of the cluster
+	/*Name of the cluster
 	  Required: true
 	  In: path
 	*/

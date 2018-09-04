@@ -11,8 +11,8 @@ import (
 	"github.com/openshift/origin/pkg/oc/cli/util/clientcmd"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters"
 	"github.com/radanalyticsio/oshinko-cli/pkg/cmd/cli/auth"
-	"github.com/radanalyticsio/oshinko-cli/version"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+	"github.com/radanalyticsio/oshinko-cli/version"
 )
 
 var (
@@ -44,6 +44,7 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 		AuthOptions: *authOptions,
 	}
 
+
 	if extended {
 		cmdString = "create_eph"
 
@@ -54,7 +55,7 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 	cmd := &cobra.Command{
 		Use: cmdString + " <NAME> ",
 		//--masters <MASTER> --workers <WORKERS> --image <IMAGE> --sparkmasterconfig <DIR>
-		Short:  "Create new spark cluster",
+		Short: "Create new spark cluster",
 		Hidden: extended,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Complete(f, cmd, args); err != nil {
@@ -73,7 +74,7 @@ func CmdCreate(f *clientcmd.Factory, reader io.Reader, out io.Writer, extended b
 	cmd.Flags().String("masterconfig", "", "ConfigMap name for spark master")
 	cmd.Flags().String("workerconfig", "", "ConfigMap name for spark worker")
 	cmd.Flags().String("storedconfig", "", "ConfigMap name for spark cluster")
-	cmd.Flags().String("image", "", "Spark image to be used. Default image is "+version.GetSparkImage()+".")
+	cmd.Flags().String("image", "", "Spark image to be used. Default image is " + version.GetSparkImage() + ".")
 	cmd.Flags().String("exposeui", "", "True or False, expose the Spark WebUI via a route (default True)")
 	cmd.Flags().String("metrics", "", "Enable spark metrics (default false). Set the value to 'prometheus' for prometheus metrics and 'true' or 'jolokia' for jolokia metrics (deprecated).")
 	if extended {
@@ -90,7 +91,7 @@ func (o *CmdOptions) RunCreate(out io.Writer, cmd *cobra.Command, args []string)
 	config.SparkWorkerConfig = o.WorkerConfig
 	config.SparkMasterConfig = o.MasterConfig
 	config.SparkImage = o.Image
-	config.ConfigName = o.StoredConfig
+	config.Name = o.StoredConfig
 	config.ExposeWebUI = o.ExposeWebUI
 	config.Metrics = o.Metrics
 	result, err := clusters.CreateCluster(o.Name, o.Project, version.GetSparkImage(), &config, o.Config, o.App, o.Ephemeral)

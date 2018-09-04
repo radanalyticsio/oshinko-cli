@@ -3,15 +3,15 @@ package clusters
 import (
 	"fmt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/rest"
 	"strconv"
 	"strings"
+	"k8s.io/client-go/rest"
 )
 
 type ClusterConfig struct {
 	MastersCount      int
 	WorkersCount      int
-	ConfigName        string `json:"ConfigName,omitempty"`
+	Name              string `json:"Namespace,omitempty"`
 	SparkMasterConfig string `json:"SparkMasterConfig,omitempty"`
 	SparkWorkerConfig string `json:"SparkWorkerConfig,omitempty"`
 	SparkImage        string `json:"SparkImage,omitempty"`
@@ -19,12 +19,12 @@ type ClusterConfig struct {
 	Metrics           string
 }
 
-const DefaultName = "default-oshinko-cluster-config"
+const Defaultname = "default-oshinko-cluster-config"
 
 var defaultConfig ClusterConfig = ClusterConfig{
 	MastersCount:      1,
 	WorkersCount:      1,
-	ConfigName:        "",
+	Name:              "",
 	SparkMasterConfig: "",
 	SparkWorkerConfig: "",
 	SparkImage:        "",
@@ -48,8 +48,8 @@ func GetDefaultConfig() ClusterConfig {
 }
 
 func assignConfig(res *ClusterConfig, src ClusterConfig) {
-	if src.ConfigName != "" {
-		res.ConfigName = src.ConfigName
+	if src.Name != "" {
+		res.Name = src.Name
 	}
 
 	if src.MastersCount > SentinelCountValue {
@@ -188,16 +188,16 @@ func readConfig(name string, res *ClusterConfig, failOnMissing bool, restconfig 
 func loadConfig(name string, restconfig *rest.Config, namespace string) (res ClusterConfig, err error) {
 	// If the default config has been modified use those mods.
 	res = defaultConfig
-	defaultFound, err := readConfig(DefaultName, &res, allowMissing, restconfig, namespace)
+	defaultFound, err := readConfig(Defaultname, &res, allowMissing, restconfig, namespace)
 	if err == nil {
 		//process config if it is not named default
-		if name != "" && name != DefaultName {
+		if name != "" && name != Defaultname {
 			_, err = readConfig(name, &res, failOnMissing, restconfig, namespace)
 		} else if defaultFound {
-			// If the default oshinko cluster config has been overridden by a user with a configMap
-			// named DefaultName, then we want to record the name as non-empty to indicate that
+		        // If the default oshinko cluster config has been overridden by a user with a configMap
+			// named Defaultname, then we want to record the name as non-empty to indicate that
 			// a configmap was actually located and read vs using the hardcoded default
-			res.ConfigName = DefaultName
+			res.Name = Defaultname
 		}
 	}
 	return res, err
@@ -209,10 +209,10 @@ func GetClusterConfig(config *ClusterConfig, restconfig *rest.Config, namespace 
 	if config != nil {
 		// If the default name is explicitly set, put it back to empty string
 		// We will record default name in the config only if we found an overriding configmap
-		if config.ConfigName == DefaultName {
-			config.ConfigName = ""
+		if config.Name == Defaultname {
+			config.Name = ""
 		}
-		name = config.ConfigName
+		name = config.Name
 	}
 	res, err = loadConfig(name, restconfig, namespace)
 	if err == nil && config != nil {

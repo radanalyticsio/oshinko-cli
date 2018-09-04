@@ -43,8 +43,8 @@ type SparkPod struct {
 }
 
 type ClusterConfig struct {
-	MasterCount       int    `json:"masterCount"`
-	WorkerCount       int    `json:"workerCount"`
+	MasterCount       int `json:"masterCount"`
+	WorkerCount       int `json:"workerCount"`
 	Name              string `json:"name"`
 	SparkMasterConfig string `json:"sparkMasterConfig"`
 	SparkWorkerConfig string `json:"sparkWorkerConfig"`
@@ -55,20 +55,20 @@ type ClusterConfig struct {
 
 // TODO: Following same format as ClusterConfig.go in oshinko-cli
 type SparkClusterSpec struct {
-	Namespace string `json:"namespace,omitempty"`
-	//ConfigName         string `json:"name,omitempty"`
-	Href           string `json:"href"`
-	Image          string `json:"image"`
-	MasterURL      string `json:"masterUrl"`
-	MasterWebURL   string `json:"masterWebUrl"`
+	Namespace    string `json:"namespace,omitempty"`
+	//Name         string `json:"name,omitempty"`
+	Href         string `json:"href"`
+	Image        string `json:"image"`
+	MasterURL    string `json:"masterUrl"`
+	MasterWebURL string `json:"masterWebUrl"`
 	MasterWebRoute string `json:"masterWebRoute"`
-	Status         string `json:"status"`
-	WorkerCount    int    `json:"workerCount"`
-	MasterCount    int    `json:"masterCount"`
-	Config         ClusterConfig
-	Ephemeral      string `json:"ephemeral,omitempty"`
-	Pods           []SparkPod
-	Alertrules     string `json:"alertrules,omitempty"`
+	Status       string `json:"status"`
+	WorkerCount  int    `json:"workerCount"`
+	MasterCount  int    `json:"masterCount"`
+	Config       ClusterConfig
+	Ephemeral    string `json:"ephemeral,omitempty"`
+	Pods         []SparkPod
+	Alertrules      string `json:"alertrules,omitempty"`
 
 	//SparkMasterName string `json"sparkmastername"`
 	//SparkWorkerName string `json"sparkworkername"`
@@ -83,6 +83,7 @@ type SparkClusterStatus struct {
 	State   string `json:"state,omitempty"`
 	Message string `json:"message,omitempty"`
 }
+
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 

@@ -12,30 +12,30 @@ os::cmd::expect_failure "_output/oshinko create_eph"
 
 # default one worker / one master
 os::cmd::expect_success "_output/oshinko create_eph abc"
-os::cmd::expect_success "_output/oshinko get abc -o yaml | grep 'WorkersCount: 1'"
-os::cmd::expect_success "_output/oshinko get abc -o yaml | grep 'MastersCount: 1'"
+os::cmd::expect_success "_output/oshinko get abc -o yaml | grep 'WorkerCount: 1'"
+os::cmd::expect_success "_output/oshinko get abc -o yaml | grep 'MasterCount: 1'"
 os::cmd::expect_success "_output/oshinko delete abc"
 
 # workers flag
 os::cmd::expect_success "_output/oshinko create_eph def --workers=-1"
-os::cmd::expect_success "_output/oshinko get def -o yaml | grep 'WorkersCount: 1'"
+os::cmd::expect_success "_output/oshinko get def -o yaml | grep 'WorkerCount: 1'"
 os::cmd::expect_success "_output/oshinko delete def"
 
 os::cmd::expect_success "_output/oshinko create_eph ghi --workers=2"
-os::cmd::expect_success "_output/oshinko get ghi -o yaml | grep 'WorkersCount: 2'"
+os::cmd::expect_success "_output/oshinko get ghi -o yaml | grep 'WorkerCount: 2'"
 os::cmd::expect_success "_output/oshinko delete ghi"
 
 os::cmd::expect_success "_output/oshinko create_eph sam --workers=0"
-os::cmd::expect_success "_output/oshinko get sam -o yaml | grep 'WorkersCount: 0'"
+os::cmd::expect_success "_output/oshinko get sam -o yaml | grep 'WorkerCount: 0'"
 os::cmd::expect_success "_output/oshinko delete sam"
 
 # masters flag
 os::cmd::expect_success "_output/oshinko create_eph jkl --masters=-1"
-os::cmd::expect_success "_output/oshinko get jkl -o yaml | grep 'MastersCount: 1'"
+os::cmd::expect_success "_output/oshinko get jkl -o yaml | grep 'MasterCount: 1'"
 os::cmd::expect_success "_output/oshinko delete jkl"
 
 os::cmd::expect_success "_output/oshinko create_eph jill --masters=0"
-os::cmd::expect_success "_output/oshinko get jill -o yaml | grep 'MastersCount: 0'"
+os::cmd::expect_success "_output/oshinko get jill -o yaml | grep 'MasterCount: 0'"
 os::cmd::expect_success "_output/oshinko delete jill"
 
 os::cmd::expect_failure_and_text "_output/oshinko create_eph mno --masters=2" "cluster configuration must have a master count of 0 or 1"
@@ -67,12 +67,12 @@ os::cmd::expect_success_and_text "_output/oshinko get -d charlie" "charlie.*<no 
 oc create configmap clusterconfig --from-literal=workercount=3 --from-literal=mastercount=0 
 os::cmd::expect_failure_and_text "_output/oshinko create_eph chicken --storedconfig=jack" "named config 'jack' does not exist"
 os::cmd::expect_success "_output/oshinko create_eph chicken --storedconfig=clusterconfig"
-os::cmd::expect_success_and_text "_output/oshinko get chicken -o yaml" "WorkersCount: 3"
-os::cmd::expect_success_and_text "_output/oshinko get chicken -o yaml" "MastersCount: 0"
+os::cmd::expect_success_and_text "_output/oshinko get chicken -o yaml" "WorkerCount: 3"
+os::cmd::expect_success_and_text "_output/oshinko get chicken -o yaml" "MasterCount: 0"
 
 os::cmd::expect_success "_output/oshinko create_eph hawk --workers=1 --masters=1 --storedconfig=clusterconfig"
-os::cmd::expect_success_and_text "_output/oshinko get hawk -o yaml" "WorkersCount: 1"
-os::cmd::expect_success_and_text "_output/oshinko get hawk -o yaml" "MastersCount: 1"
+os::cmd::expect_success_and_text "_output/oshinko get hawk -o yaml" "WorkerCount: 1"
+os::cmd::expect_success_and_text "_output/oshinko get hawk -o yaml" "MasterCount: 1"
 
 # image
 os::cmd::expect_success "_output/oshinko create_eph cordial --image=someotherimage"

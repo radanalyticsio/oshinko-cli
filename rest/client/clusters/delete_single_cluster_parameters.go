@@ -38,8 +38,8 @@ for the delete single cluster operation typically these are written to a http.Re
 */
 type DeleteSingleClusterParams struct {
 
-	/*ConfigName
-	  ConfigName of the cluster
+	/*Name
+	  Name of the cluster
 
 	*/
 	Name string

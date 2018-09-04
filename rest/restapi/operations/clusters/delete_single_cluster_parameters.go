@@ -28,7 +28,7 @@ type DeleteSingleClusterParams struct {
 	// HTTP Request Object
 	HTTPRequest *http.Request
 
-	/*ConfigName of the cluster
+	/*Name of the cluster
 	  Required: true
 	  In: path
 	*/

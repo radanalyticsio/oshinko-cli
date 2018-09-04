@@ -68,8 +68,8 @@ type SparkPod struct {
 }
 
 type SparkCluster struct {
-	NameSpace      string `json:"NameSpace,omitempty"`
-	ConfigName     string `json:"ConfigName,omitempty"`
+	Namespace      string `json:"Namespace,omitempty"`
+	Name           string `json:"Name,omitempty"`
 	Href           string `json:"href"`
 	Image          string `json:"Image,omitempty"`
 	MasterURL      string `json:"MasterUrl"`
@@ -524,8 +524,8 @@ func CreateCluster(
 		}
 	}
 
-	result.Config.ConfigName = clustername
-	result.NameSpace = namespace
+	result.Name = clustername
+	result.Namespace = namespace
 	result.Href = "/clusters/" + clustername
 	result.Image = sparkimage
 	result.MasterURL = retrieveServiceURL(getKubeClient(restconfig), masterType, clustername, namespace)
@@ -674,8 +674,8 @@ func findClusterBody(clustername, namespace string, restconfig *rest.Config, res
 
 	dc := getDcClient(restconfig).AppsV1().DeploymentConfigs(namespace)
 
-	result.Config.ConfigName = clustername
-	result.NameSpace = namespace
+	result.Name = clustername
+	result.Namespace = namespace
 	result.Href = "/clusters/" + clustername
 
 	// TODO make something real for status

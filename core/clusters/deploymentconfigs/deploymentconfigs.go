@@ -2,8 +2,8 @@ package deploymentconfigs
 
 import (
 	appsapi "github.com/openshift/api/apps/v1"
-	"github.com/radanalyticsio/oshinko-cli/core/clusters/podtemplates"
 	kapi "k8s.io/api/core/v1"
+	"github.com/radanalyticsio/oshinko-cli/core/clusters/podtemplates"
 )
 
 type ODeploymentConfig struct {
@@ -74,8 +74,8 @@ func (dc *ODeploymentConfig) RollingStrategyParams(rp *appsapi.RollingDeployment
 		Type:          appsapi.DeploymentStrategyTypeRolling,
 		RollingParams: rp,
 		//Resources:     req,
-		Labels:      lbls,
-		Annotations: anttns,
+		Labels:        lbls,
+		Annotations:   anttns,
 	}
 	dc.Spec.Strategy.Resources = req
 	return dc
@@ -93,8 +93,8 @@ func (dc *ODeploymentConfig) RecreateStrategyParams(rp *appsapi.RecreateDeployme
 		Type:           appsapi.DeploymentStrategyTypeRecreate,
 		RecreateParams: rp,
 		//Resources:      req,
-		Labels:      lbls,
-		Annotations: anttns,
+		Labels:         lbls,
+		Annotations:    anttns,
 	}
 	dc.Spec.Strategy.Resources = req
 	return dc
@@ -132,8 +132,8 @@ func (dc *ODeploymentConfig) TriggerOnImageChange(ic *appsapi.DeploymentTriggerI
 			if val.ImageChangeParams == ic {
 				return dc
 			}
-			// If the ConfigName matches, update
-			// TODO ConfigName is allowed to be blank, we should probably handle that case at some point
+			// If the Name matches, update
+			// TODO Namespace is allowed to be blank, we should probably handle that case at some point
 			if val.ImageChangeParams.From.Name == ic.From.Name &&
 				val.ImageChangeParams.From.Namespace == ic.From.Namespace {
 				dc.Spec.Triggers[idx].ImageChangeParams = ic
