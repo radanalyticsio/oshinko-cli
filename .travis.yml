@@ -6,8 +6,8 @@ services:
 - docker
 matrix:
   include:
-    - env: TO_TEST=e2e OPENSHIFT_VERSION=v3.9
-    - env: TO_TEST=rest OPENSHIFT_VERSION=v3.9
+    - env: TO_TEST=e2e OPENSHIFT_VERSION=v3.10
+    - env: TO_TEST=rest OPENSHIFT_VERSION=v3.10
   fast_finish: true
 
 before_install:
