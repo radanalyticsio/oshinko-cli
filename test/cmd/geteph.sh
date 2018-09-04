@@ -30,7 +30,7 @@ os::cmd::expect_success '_output/oshinko-cli get_eph -d abc | grep -e "^abc\s*[0
 
 # app flag
 os::cmd::expect_failure_and_text "_output/oshinko get_eph --app=bill" "no cluster found for app 'bill'"
-os::cmd::expect_success_and_text "_output/oshinko create_eph -e effy --app=abc-m-1" 'ephemeral cluster "effy" created'
+os::cmd::expect_success_and_text "_output/oshinko create_eph -e effy --app=abc-m-1" 'ephemeral cluster effy'
 os::cmd::expect_success_and_text "_output/oshinko get_eph -d --app=abc-m-1" "effy.*abc-m-1"
 
 # incomplete clusters

@@ -25,7 +25,7 @@ os::cmd::expect_failure_and_text "_output/oshinko delete_eph bob --app=sam-1 --a
 
 oc new-app hello-world
 os::cmd::try_until_success "oc get rc hello-world-1"
-os::cmd::expect_success_and_text "_output/oshinko create_eph -e cluster --app=hello-world-1" 'ephemeral cluster "cluster" created'
+os::cmd::expect_success_and_text "_output/oshinko create_eph -e cluster --app=hello-world-1" 'ephemeral cluster cluster'
 
 # replica count won't work for hack/test-cmd, so only do this test when we're started from run.sh
 if [ "${USING_OPENSHIFT_INSTANCE:-false}" == true ]; then
