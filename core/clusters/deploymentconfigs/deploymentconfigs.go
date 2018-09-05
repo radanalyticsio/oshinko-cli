@@ -2,17 +2,17 @@ package deploymentconfigs
 
 import (
 	appsapi "github.com/openshift/api/apps/v1"
-	kapi "k8s.io/api/core/v1"
 	"github.com/radanalyticsio/oshinko-cli/core/clusters/podtemplates"
+	kapi "k8s.io/api/core/v1"
 )
 
 type ODeploymentConfig struct {
 	appsapi.DeploymentConfig
 }
 
-func DeploymentConfig(name, namespace string) *ODeploymentConfig {
+func NewODeploymentConfig(name, namespace string) *ODeploymentConfig {
 	m := ODeploymentConfig{}
-	m.Kind = "DeploymentConfig"
+	m.Kind = "NewODeploymentConfig"
 	m.APIVersion = "v1"
 	m.SetName(name)
 	m.SetNamespace(namespace)
@@ -74,8 +74,8 @@ func (dc *ODeploymentConfig) RollingStrategyParams(rp *appsapi.RollingDeployment
 		Type:          appsapi.DeploymentStrategyTypeRolling,
 		RollingParams: rp,
 		//Resources:     req,
-		Labels:        lbls,
-		Annotations:   anttns,
+		Labels:      lbls,
+		Annotations: anttns,
 	}
 	dc.Spec.Strategy.Resources = req
 	return dc
@@ -93,8 +93,8 @@ func (dc *ODeploymentConfig) RecreateStrategyParams(rp *appsapi.RecreateDeployme
 		Type:           appsapi.DeploymentStrategyTypeRecreate,
 		RecreateParams: rp,
 		//Resources:      req,
-		Labels:         lbls,
-		Annotations:    anttns,
+		Labels:      lbls,
+		Annotations: anttns,
 	}
 	dc.Spec.Strategy.Resources = req
 	return dc

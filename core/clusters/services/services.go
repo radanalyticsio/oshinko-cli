@@ -8,7 +8,7 @@ import (
 /*
    {
        "apiVersion": "v1",
-       "kind": "Service",
+       "kind": "NewOService",
        "metadata": {
            "labels": {
                "name": "spark-master-jpda"
@@ -35,9 +35,9 @@ type OService struct {
 	kapi.Service
 }
 
-func Service(name string) *OService {
+func NewOService(name string) *OService {
 	s := OService{}
-	s.Kind = "Service"
+	s.Kind = "NewOService"
 	s.APIVersion = "v1"
 	s.Name = name
 	s.Spec.Type = kapi.ServiceTypeClusterIP
@@ -127,7 +127,7 @@ type ServicePort struct {
 	TargetPort intstr.IntOrString `json:"targetPort"`
 
 	// The port on each node on which this service is exposed.
-	// Default is to auto-allocate a port if the ServiceType of this Service requires one.
+	// Default is to auto-allocate a port if the ServiceType of this NewOService requires one.
 	NodePort int `json:"nodePort"`
 }
 */

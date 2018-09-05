@@ -9,7 +9,7 @@ type OContainer struct {
 	kapi.Container
 }
 
-func Container(name, image string) *OContainer {
+func NewOContainer(name, image string) *OContainer {
 	c := OContainer{}
 	c.Name = name
 	c.Image = image

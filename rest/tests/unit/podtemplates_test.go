@@ -11,20 +11,20 @@ import (
 // This function is named TestCreatePodTemplateSpec because there is another
 // function named TestPodTemplateSpec.
 func (s *OshinkoUnitTestSuite) TestCreatePodTemplateSpec(c *check.C) {
-	newPodTemplateSpec := podtemplates.PodTemplateSpec()
+	newPodTemplateSpec := podtemplates.NewOPodTemplateSpec()
 	c.Assert(*newPodTemplateSpec, check.FitsTypeOf, podtemplates.OPodTemplateSpec{})
 }
 
 func (s *OshinkoUnitTestSuite) TestPodTemplateSetLabels(c *check.C) {
 	expectedLabels := map[string]string{"test": "value"}
-	newPodTemplateSpec := podtemplates.PodTemplateSpec()
+	newPodTemplateSpec := podtemplates.NewOPodTemplateSpec()
 	newPodTemplateSpec.SetLabels(expectedLabels)
 	c.Assert(newPodTemplateSpec.PodTemplateSpec.GetLabels(), check.DeepEquals, expectedLabels)
 }
 
 func (s *OshinkoUnitTestSuite) TestPodTemplateLabel(c *check.C) {
 	expectedLabels := map[string]string{"test": "value"}
-	newPodTemplateSpec := podtemplates.PodTemplateSpec()
+	newPodTemplateSpec := podtemplates.NewOPodTemplateSpec()
 	newPodTemplateSpec.SetLabels(map[string]string{})
 	newPodTemplateSpec.Label("test", "value")
 	c.Assert(newPodTemplateSpec.PodTemplateSpec.GetLabels(), check.DeepEquals, expectedLabels)
@@ -34,7 +34,7 @@ func (s *OshinkoUnitTestSuite) TestContainers(c *check.C) {
 	expectedContainers := []kapi.Container{
 		kapi.Container{Name: "container1"},
 		kapi.Container{Name: "container2"}}
-	newPodTemplateSpec := podtemplates.PodTemplateSpec()
+	newPodTemplateSpec := podtemplates.NewOPodTemplateSpec()
 	newPodTemplateSpec.Containers(
 		&containers.OContainer{Container: expectedContainers[0]},
 		&containers.OContainer{Container: expectedContainers[1]})
@@ -48,11 +48,11 @@ func makeCmapVS(name string) kapi.VolumeSource {
 }
 
 func (s *OshinkoUnitTestSuite) TestSetConfigMapVolume(c *check.C) {
-	ptspec := podtemplates.PodTemplateSpec()
+	ptspec := podtemplates.NewOPodTemplateSpec()
 	var names []string = []string{"configmap1", "configmap2"}
 	var volumes []kapi.Volume = []kapi.Volume{}
 
-	for _, name :=  range names {
+	for _, name := range names {
 		vs := makeCmapVS(name)
 		volumes = append(volumes, kapi.Volume{Name: name, VolumeSource: vs})
 		ptspec.SetConfigMapVolume(name)

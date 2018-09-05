@@ -15,8 +15,8 @@ type OPodTemplateSpec struct {
 // we might care about security context
 // we might care about image pull secrets
 
-func PodTemplateSpec() *OPodTemplateSpec {
-	// Note, name and namespace can be set on a PodTemplateSpec but
+func NewOPodTemplateSpec() *OPodTemplateSpec {
+	// Note, name and namespace can be set on a NewOPodTemplateSpec but
 	// I assume that openshift takes care of that based on the DeploymentConfig
 	p := OPodTemplateSpec{}
 	p.Spec.DNSPolicy = kapi.DNSClusterFirst

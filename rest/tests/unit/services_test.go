@@ -10,20 +10,20 @@ import (
 
 func (s *OshinkoUnitTestSuite) TestService(c *check.C) {
 	expectedName := "testservice"
-	newService := services.Service(expectedName)
+	newService := services.NewOService(expectedName)
 	c.Assert(newService.Name, check.Equals, expectedName)
 }
 
 func (s *OshinkoUnitTestSuite) TestServiceSetLabels(c *check.C) {
 	expectedLabels := map[string]string{"test": "value"}
-	newService := services.Service("testservice")
+	newService := services.NewOService("testservice")
 	newService.SetLabels(expectedLabels)
 	c.Assert(newService.Service.GetLabels(), check.DeepEquals, expectedLabels)
 }
 
 func (s *OshinkoUnitTestSuite) TestServiceLabel(c *check.C) {
 	expectedLabels := map[string]string{"test": "value"}
-	newService := services.Service("testservice")
+	newService := services.NewOService("testservice")
 	newService.SetLabels(map[string]string{})
 	newService.Label("test", "value")
 	c.Assert(newService.Service.GetLabels(), check.DeepEquals, expectedLabels)
@@ -31,14 +31,14 @@ func (s *OshinkoUnitTestSuite) TestServiceLabel(c *check.C) {
 
 func (s *OshinkoUnitTestSuite) TestServicePodSelector(c *check.C) {
 	expectedSelector, expectedValue := "testselector", "testvalue"
-	newService := services.Service("testservice")
+	newService := services.NewOService("testservice")
 	newService.PodSelector(expectedSelector, expectedValue)
 	c.Assert(newService.Spec.Selector[expectedSelector], check.Equals, expectedValue)
 }
 
 func (s *OshinkoUnitTestSuite) TestServicePodSelectors(c *check.C) {
 	expectedSelectors := map[string]string{"selector": "value"}
-	newService := services.Service("testservice")
+	newService := services.NewOService("testservice")
 	newService.PodSelectors(expectedSelectors)
 	c.Assert(newService.Spec.Selector, check.DeepEquals, expectedSelectors)
 }
@@ -47,7 +47,7 @@ func (s *OshinkoUnitTestSuite) TestServicePorts(c *check.C) {
 	servicePorts := []*services.OServicePort{
 		services.ServicePort(1),
 		services.ServicePort(2)}
-	newService := services.Service("testservice")
+	newService := services.NewOService("testservice")
 	newService.Ports(servicePorts[0], servicePorts[1])
 	expectedPorts := make([]kapi.ServicePort, len(servicePorts))
 	for idx, p := range servicePorts {
