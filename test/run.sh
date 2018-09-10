@@ -1,6 +1,16 @@
 #!/bin/bash
 STARTTIME=$(date +%s)
-TEST_DIR=$(readlink -f `dirname "${BASH_SOURCE[0]}"` | grep -o '.*/oshinko-cli/test')
+if [[ "$OSTYPE" == "darwin"* ]]; then
+   # Mac OSX
+   result=:$(brew ls coreutils)
+      if [ -z "$result" ]; then
+         'Error: coreutils is not installed.'
+         exit 1
+      fi
+   TEST_DIR=$(greadlink -f `dirname "${BASH_SOURCE[0]}"` | grep -o '.*/oshinko-cli/test')
+else
+   TEST_DIR=$(readlink -f `dirname "${BASH_SOURCE[0]}"` | grep -o '.*/oshinko-cli/test')
+fi
 source "$(dirname "${BASH_SOURCE}")/../hack/lib/init.sh"
 os::util::environment::setup_time_vars
 
@@ -76,9 +86,15 @@ for dir in "${dirs[@]}"; do
         # Create the project here
         name=$(basename ${dir} .sh)
         set +e # For some reason the result here from head is not 0 even though we get the desired result
-        namespace=${name}-$(date -Ins | md5sum | tr -dc 'a-z0-9' | fold -w 6 | head -n 1)
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+           # Mac OSX
+           namespace=${name}-$(date | md5sum | tr -dc 'a-z0-9' | fold -w 6 | head -n 1)
+
+        else
+           namespace=${name}-$(date -Ins | md5sum | tr -dc 'a-z0-9' | fold -w 6 | head -n 1)
+        fi
         set -e
-        oc new-project $namespace &> /dev/null
+        oc new-project $namespace
         oc create sa oshinko &> /dev/null
         oc policy add-role-to-user admin system:serviceaccount:$namespace:oshinko &> /dev/null
         echo

@@ -218,12 +218,13 @@ func (s *Server) Listen() error {
 	if s.hasScheme(schemeHTTPS) { // exit early on missing params
 		if s.TLSCertificate == "" {
 			if s.TLSCertificateKey == "" {
-				s.Fatalf("the required flags `--tls-certificate` and `--tls-key` were not specified")
+				s.Fatalf("the required flags `--tls-certificate` and `--tls-key` were not specified " +
+					"or use --scheme=http to run without SSL")
 			}
-			s.Fatalf("the required flag `--tls-certificate` was not specified")
+			s.Fatalf("the required flag `--tls-certificate` was not specified or use --scheme=http to run without SSL")
 		}
 		if s.TLSCertificateKey == "" {
-			s.Fatalf("the required flag `--tls-key` was not specified")
+			s.Fatalf("the required flag `--tls-key` was not specified or use --scheme=http to run without SSL")
 		}
 
 		// Use http host if https host wasn't defined
