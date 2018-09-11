@@ -702,7 +702,7 @@ func findClusterBody(clustername, namespace string, restconfig *rest.Config, res
 	if result.MasterWebURL == "<missing>" {
 		result.Status = "Incomplete"
 	}
-	result.MasterWebRoute = retrieveRouteForService(getRouteClient(restconfig), webuiType, clustername, namespace)
+	result.MasterWebRoute = "http://"+retrieveRouteForService(getRouteClient(restconfig), webuiType, clustername, namespace)
 
 	result.Ephemeral = "<shared>"
 	master, err := dc.Get(mastername(clustername), metav1.GetOptions{})
