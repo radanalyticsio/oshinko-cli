@@ -2,17 +2,17 @@ package main
 
 import (
 	"flag"
-	"os"
-	"os/signal"
 	"github.com/golang/glog"
 	rad "github.com/radanalyticsio/oshinko-cli/pkg/client/clientset/versioned"
-	kubeinformers "k8s.io/client-go/informers"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 	informers "github.com/radanalyticsio/oshinko-cli/pkg/client/informers/externalversions"
 	"github.com/radanalyticsio/oshinko-cli/pkg/crd/controller"
 	"github.com/radanalyticsio/oshinko-cli/pkg/signals"
 	"github.com/radanalyticsio/oshinko-cli/version"
+	kubeinformers "k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
+	"os"
+	"os/signal"
 	"time"
 	//"fmt"
 )
@@ -81,7 +81,7 @@ func main() {
 	//}
 	//
 	//for _, s := range list.Items {
-	//	fmt.Printf("database %s with user %q\n", s.Name, s.Spec.Name)
+	//	fmt.Printf("database %s with user %q\n", s.ConfigName, s.Spec.ConfigName)
 	//}
 	/*
 		working code

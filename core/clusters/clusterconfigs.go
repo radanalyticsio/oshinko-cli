@@ -3,18 +3,18 @@ package clusters
 import (
 	"fmt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
 	"strconv"
 	"strings"
-	"k8s.io/client-go/rest"
 )
 
 type ClusterConfig struct {
-	MasterCount       int
-	WorkerCount       int
-	Name              string
-	SparkMasterConfig string
-	SparkWorkerConfig string
-	SparkImage        string
+	MastersCount      int
+	WorkersCount      int
+	Name              string `json:"ConfigName,omitempty"`
+	SparkMasterConfig string `json:"SparkMasterConfig,omitempty"`
+	SparkWorkerConfig string `json:"SparkWorkerConfig,omitempty"`
+	SparkImage        string `json:"SparkImage,omitempty"`
 	ExposeWebUI       string
 	Metrics           string
 }
@@ -22,14 +22,14 @@ type ClusterConfig struct {
 const Defaultname = "default-oshinko-cluster-config"
 
 var defaultConfig ClusterConfig = ClusterConfig{
-	MasterCount:       1,
-	WorkerCount:       1,
+	MastersCount:      1,
+	WorkersCount:      1,
 	Name:              "",
 	SparkMasterConfig: "",
 	SparkWorkerConfig: "",
 	SparkImage:        "",
 	ExposeWebUI:       "true",
-	Metrics: 	   "false",
+	Metrics:           "false",
 }
 
 const failOnMissing = true
@@ -52,12 +52,12 @@ func assignConfig(res *ClusterConfig, src ClusterConfig) {
 		res.Name = src.Name
 	}
 
-	if src.MasterCount > SentinelCountValue {
-		res.MasterCount = src.MasterCount
+	if src.MastersCount > SentinelCountValue {
+		res.MastersCount = src.MastersCount
 	}
 
-	if src.WorkerCount > SentinelCountValue {
-		res.WorkerCount = src.WorkerCount
+	if src.WorkersCount > SentinelCountValue {
+		res.WorkersCount = src.WorkersCount
 	}
 
 	if src.SparkMasterConfig != "" {
@@ -79,9 +79,9 @@ func assignConfig(res *ClusterConfig, src ClusterConfig) {
 
 func checkConfiguration(config ClusterConfig) error {
 	var err error
-	if config.MasterCount < 0 || config.MasterCount > 1 {
+	if config.MastersCount < 0 || config.MastersCount > 1 {
 		err = NewClusterError(MasterCountMustBeZeroOrOne, ClusterConfigCode)
-	} else if config.WorkerCount < 0 {
+	} else if config.WorkersCount < 0 {
 		err = NewClusterError(WorkerCountMustBeAtLeastZero, ClusterConfigCode)
 	}
 	return err
@@ -109,7 +109,7 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 			return err
 		}
 		if val > SentinelCountValue {
-			config.MasterCount = val
+			config.MastersCount = val
 		}
 	case "workercount":
 		val, err := getInt(value, configmapname+".workercount")
@@ -117,7 +117,7 @@ func process(config *ClusterConfig, name, value, configmapname string) error {
 			return err
 		}
 		if val > SentinelCountValue {
-			config.WorkerCount = val
+			config.WorkersCount = val
 		}
 	case "sparkmasterconfig":
 		config.SparkMasterConfig = value
@@ -194,7 +194,7 @@ func loadConfig(name string, restconfig *rest.Config, namespace string) (res Clu
 		if name != "" && name != Defaultname {
 			_, err = readConfig(name, &res, failOnMissing, restconfig, namespace)
 		} else if defaultFound {
-		        // If the default oshinko cluster config has been overridden by a user with a configMap
+			// If the default oshinko cluster config has been overridden by a user with a configMap
 			// named Defaultname, then we want to record the name as non-empty to indicate that
 			// a configmap was actually located and read vs using the hardcoded default
 			res.Name = Defaultname

@@ -14,27 +14,27 @@ import (
 )
 
 var tiny clusters.ClusterConfig = clusters.ClusterConfig{
-					MasterCount: 1,
-					WorkerCount: clusters.SentinelCountValue,
-					Name: "tiny"}
+					MastersCount: 1,
+					WorkersCount: clusters.SentinelCountValue,
+					Name:         "tiny"}
 var small clusters.ClusterConfig = clusters.ClusterConfig{
-					MasterCount: 1,
-					WorkerCount: 3,
+					MastersCount:      1,
+					WorkersCount:      3,
 					SparkMasterConfig: "master-config",
 					SparkWorkerConfig: "worker-config",
-					Name: "small"}
+					Name:              "small"}
 var large clusters.ClusterConfig = clusters.ClusterConfig{
-					MasterCount: clusters.SentinelCountValue,
-					WorkerCount: 10,
-					Name: "large"}
+					MastersCount: clusters.SentinelCountValue,
+					WorkersCount: 10,
+					Name:         "large"}
 var brokenMaster clusters.ClusterConfig = clusters.ClusterConfig{
-					MasterCount: 2,
-					WorkerCount: clusters.SentinelCountValue,
-					Name: "brokenmaster"}
+					MastersCount: 2,
+					WorkersCount: clusters.SentinelCountValue,
+					Name:         "brokenmaster"}
 
 var nonIntMaster clusters.ClusterConfig = clusters.ClusterConfig{Name: "cow"}
 var nonIntWorker clusters.ClusterConfig = clusters.ClusterConfig{Name: "pig"}
-var userDefault = clusters.ClusterConfig{MasterCount: 3, WorkerCount: 3,
+var userDefault = clusters.ClusterConfig{MastersCount: 3, WorkersCount: 3,
 	SparkMasterConfig: "master-default", SparkWorkerConfig: "worker-default", Name: "default-oshinko-cluster-config",
         ExposeWebUI: "false", Metrics: "true" }
 
@@ -46,11 +46,11 @@ func makeConfigMap(cfg clusters.ClusterConfig) *api.ConfigMap {
 	if cfg.SparkWorkerConfig != "" {
 		res.Data["sparkworkerconfig"] = cfg.SparkWorkerConfig
 	}
-	if cfg.MasterCount != 0 {
-		res.Data["mastercount"] = strconv.Itoa(cfg.MasterCount)
+	if cfg.MastersCount != 0 {
+		res.Data["mastercount"] = strconv.Itoa(cfg.MastersCount)
 	}
-	if cfg.WorkerCount != 0 {
-		res.Data["workercount"] = strconv.Itoa(cfg.WorkerCount)
+	if cfg.WorkersCount != 0 {
+		res.Data["workercount"] = strconv.Itoa(cfg.WorkersCount)
 	}
 	if cfg.Metrics != "" {
 		res.Data["metrics"] = cfg.Metrics
@@ -114,14 +114,14 @@ func (s *OshinkoUnitTestSuite) TestNoLocalDefault(c *check.C) {
 
 	defconfig := clusters.GetDefaultConfig()
 	configarg := clusters.ClusterConfig{
-		Name: clusters.Defaultname,
-		WorkerCount: clusters.SentinelCountValue,
-		MasterCount: clusters.SentinelCountValue}
+		Name:         clusters.Defaultname,
+		WorkersCount: clusters.SentinelCountValue,
+		MastersCount: clusters.SentinelCountValue}
 	myconfig, err := clusters.GetClusterConfig(&configarg, cm1, cm)
 
 	c.Assert(err, check.IsNil)
-	c.Assert(myconfig.MasterCount, check.Equals, defconfig.MasterCount)
-	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
+	c.Assert(myconfig.MastersCount, check.Equals, defconfig.MastersCount)
+	c.Assert(myconfig.WorkersCount, check.Equals, defconfig.WorkersCount)
 }
 
 func (s *OshinkoUnitTestSuite) TestDefaultConfig(c *check.C) {
@@ -129,8 +129,8 @@ func (s *OshinkoUnitTestSuite) TestDefaultConfig(c *check.C) {
 	var cm *FakeConfigMapsClient = &FakeConfigMapsClient{}
 	defconfig := clusters.GetDefaultConfig()
 	myconfig, err := clusters.GetClusterConfig(nil, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, defconfig.MasterCount)
-	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
+	c.Assert(myconfig.MastersCount, check.Equals, defconfig.MastersCount)
+	c.Assert(myconfig.WorkersCount, check.Equals, defconfig.WorkersCount)
 	c.Assert(myconfig.SparkMasterConfig, check.Equals, defconfig.SparkMasterConfig)
 	c.Assert(myconfig.SparkWorkerConfig, check.Equals, defconfig.SparkWorkerConfig)
 	c.Assert(myconfig.ExposeWebUI, check.Equals, defconfig.ExposeWebUI)
@@ -139,11 +139,11 @@ func (s *OshinkoUnitTestSuite) TestDefaultConfig(c *check.C) {
 
 	// Test that with a config object containing sentinel values, we get the default config
 	configarg := clusters.ClusterConfig{
-		WorkerCount: clusters.SentinelCountValue,
-		MasterCount: clusters.SentinelCountValue}
+		WorkersCount: clusters.SentinelCountValue,
+		MastersCount: clusters.SentinelCountValue}
 	myconfig, err = clusters.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, defconfig.MasterCount)
-	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
+	c.Assert(myconfig.MastersCount, check.Equals, defconfig.MastersCount)
+	c.Assert(myconfig.WorkersCount, check.Equals, defconfig.WorkersCount)
 	c.Assert(myconfig.SparkMasterConfig, check.Equals, defconfig.SparkMasterConfig)
 	c.Assert(myconfig.SparkWorkerConfig, check.Equals, defconfig.SparkWorkerConfig)
 	c.Assert(myconfig.Name, check.Equals, "")
@@ -158,15 +158,15 @@ func (s *OshinkoUnitTestSuite) TestGetClusterConfigNamed(c *check.C) {
 	// configarg will represent a config object passed in a REST
 	// request which specifies a named config but leaves counts unset
 	configarg := clusters.ClusterConfig{
-		WorkerCount: clusters.SentinelCountValue,
-		MasterCount: clusters.SentinelCountValue}
+		WorkersCount: clusters.SentinelCountValue,
+		MastersCount: clusters.SentinelCountValue}
 
 	// tiny should inherit the default worker count
 	cm.Create(makeConfigMap(tiny))
 	configarg.Name = tiny.Name
 	myconfig, err := clusters.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, tiny.MasterCount)
-	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
+	c.Assert(myconfig.MastersCount, check.Equals, tiny.MastersCount)
+	c.Assert(myconfig.WorkersCount, check.Equals, defconfig.WorkersCount)
 	c.Assert(myconfig.SparkMasterConfig, check.Equals, defconfig.SparkMasterConfig)
 	c.Assert(myconfig.SparkWorkerConfig, check.Equals, defconfig.SparkWorkerConfig)
 	c.Assert(err, check.IsNil)
@@ -175,8 +175,8 @@ func (s *OshinkoUnitTestSuite) TestGetClusterConfigNamed(c *check.C) {
 	cm.Create(makeConfigMap(small))
 	configarg.Name = small.Name
 	myconfig, err = clusters.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, small.MasterCount)
-	c.Assert(myconfig.WorkerCount, check.Equals, small.WorkerCount)
+	c.Assert(myconfig.MastersCount, check.Equals, small.MastersCount)
+	c.Assert(myconfig.WorkersCount, check.Equals, small.WorkersCount)
 	c.Assert(myconfig.SparkMasterConfig, check.Equals, small.SparkMasterConfig)
 	c.Assert(myconfig.SparkWorkerConfig, check.Equals, small.SparkWorkerConfig)
 	c.Assert(err, check.IsNil)
@@ -185,8 +185,8 @@ func (s *OshinkoUnitTestSuite) TestGetClusterConfigNamed(c *check.C) {
 	cm.Create(makeConfigMap(large))
 	configarg.Name = large.Name
 	myconfig, err = clusters.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, defconfig.MasterCount)
-	c.Assert(myconfig.WorkerCount, check.Equals, large.WorkerCount)
+	c.Assert(myconfig.MastersCount, check.Equals, defconfig.MastersCount)
+	c.Assert(myconfig.WorkersCount, check.Equals, large.WorkersCount)
 	c.Assert(myconfig.SparkMasterConfig, check.Equals, large.SparkMasterConfig)
 	c.Assert(myconfig.SparkWorkerConfig, check.Equals, large.SparkWorkerConfig)
 	c.Assert(err, check.IsNil)
@@ -206,13 +206,13 @@ func (s *OshinkoUnitTestSuite) TestGetClusterConfigNamedLinefeed(c *check.C) {
 	addLineFeeds(sm)
 	cm.Create(sm)
 	configarg := clusters.ClusterConfig{
-		WorkerCount: clusters.SentinelCountValue,
-		MasterCount: clusters.SentinelCountValue}
+		WorkersCount: clusters.SentinelCountValue,
+		MastersCount: clusters.SentinelCountValue}
 	configarg.Name = small.Name
 
 	myconfig, err := clusters.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, small.MasterCount)
-	c.Assert(myconfig.WorkerCount, check.Equals, small.WorkerCount)
+	c.Assert(myconfig.MastersCount, check.Equals, small.MastersCount)
+	c.Assert(myconfig.WorkersCount, check.Equals, small.WorkersCount)
 	c.Assert(myconfig.SparkMasterConfig, check.Equals, small.SparkMasterConfig)
 	c.Assert(myconfig.SparkWorkerConfig, check.Equals, small.SparkWorkerConfig)
 	c.Assert(err, check.IsNil)
@@ -227,28 +227,28 @@ func (s *OshinkoUnitTestSuite) TestGetClusterConfigArgs(c *check.C) {
 	defconfig := clusters.GetDefaultConfig()
 
 	configarg := clusters.ClusterConfig{
-		WorkerCount: 7,
-		MasterCount: clusters.SentinelCountValue,
+		WorkersCount:      7,
+		MastersCount:      clusters.SentinelCountValue,
 		SparkMasterConfig: "test-master-config",
 		SparkWorkerConfig: "test-worker-config"}
 
 	myconfig, err := clusters.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, defconfig.MasterCount)
-	c.Assert(myconfig.WorkerCount, check.Equals, 7)
+	c.Assert(myconfig.MastersCount, check.Equals, defconfig.MastersCount)
+	c.Assert(myconfig.WorkersCount, check.Equals, 7)
 	c.Assert(myconfig.SparkMasterConfig, check.Equals, "test-master-config")
 	c.Assert(myconfig.SparkWorkerConfig, check.Equals, "test-worker-config")
 	c.Assert(err, check.IsNil)
 
-	configarg = clusters.ClusterConfig{WorkerCount: clusters.SentinelCountValue, MasterCount: 7}
+	configarg = clusters.ClusterConfig{WorkersCount: clusters.SentinelCountValue, MastersCount: 7}
 	myconfig, err = clusters.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, 7)
-	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
+	c.Assert(myconfig.MastersCount, check.Equals, 7)
+	c.Assert(myconfig.WorkersCount, check.Equals, defconfig.WorkersCount)
 	c.Assert(err, check.NotNil) // master count is illegal ...
 
-	configarg = clusters.ClusterConfig{WorkerCount: 7, MasterCount: 7}
+	configarg = clusters.ClusterConfig{WorkersCount: 7, MastersCount: 7}
 	myconfig, err = clusters.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, 7)
-	c.Assert(myconfig.WorkerCount, check.Equals, 7)
+	c.Assert(myconfig.MastersCount, check.Equals, 7)
+	c.Assert(myconfig.WorkersCount, check.Equals, 7)
 	c.Assert(err, check.NotNil) // master count is illegal ...
 }
 
@@ -260,37 +260,37 @@ func (s *OshinkoUnitTestSuite) TestGetClusterConfigNamedArgs(c *check.C) {
 	defconfig := clusters.GetDefaultConfig()
 
 	cm.Create(makeConfigMap(brokenMaster))
-	configarg := clusters.ClusterConfig{Name: brokenMaster.Name, WorkerCount: 7, MasterCount: 1}
+	configarg := clusters.ClusterConfig{Name: brokenMaster.Name, WorkersCount: 7, MastersCount: 1}
 	myconfig, err := clusters.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, 1)
-	c.Assert(myconfig.WorkerCount, check.Equals, 7)
-	c.Assert(brokenMaster.MasterCount, check.Not(check.Equals), int64(1))
+	c.Assert(myconfig.MastersCount, check.Equals, 1)
+	c.Assert(myconfig.WorkersCount, check.Equals, 7)
+	c.Assert(brokenMaster.MastersCount, check.Not(check.Equals), int64(1))
 	c.Assert(err, check.IsNil)
 
 	configarg = clusters.ClusterConfig{
-		Name: brokenMaster.Name,
-		WorkerCount: clusters.SentinelCountValue,
-		MasterCount: 5}
+		Name:         brokenMaster.Name,
+		WorkersCount: clusters.SentinelCountValue,
+		MastersCount: 5}
 	myconfig, err = clusters.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, 5)
-	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
-	c.Assert(brokenMaster.MasterCount, check.Not(check.Equals), defconfig.MasterCount)
+	c.Assert(myconfig.MastersCount, check.Equals, 5)
+	c.Assert(myconfig.WorkersCount, check.Equals, defconfig.WorkersCount)
+	c.Assert(brokenMaster.MastersCount, check.Not(check.Equals), defconfig.MastersCount)
 	c.Assert(err, check.NotNil) // master count is wrong
 
 	cm.Create(makeConfigMap(small))
 	configarg = clusters.ClusterConfig{
-		Name: small.Name,
+		Name:              small.Name,
 		SparkMasterConfig: "test-master-config",
 		SparkWorkerConfig: "test-worker-config",
-	        WorkerCount: clusters.SentinelCountValue,
-	        MasterCount: clusters.SentinelCountValue}
+	        WorkersCount:  clusters.SentinelCountValue,
+	        MastersCount:  clusters.SentinelCountValue}
 	myconfig, err = clusters.GetClusterConfig(&configarg, cm)
 	c.Assert(myconfig.SparkMasterConfig, check.Equals, "test-master-config")
 	c.Assert(myconfig.SparkWorkerConfig, check.Equals, "test-worker-config")
 	c.Assert(small.SparkMasterConfig, check.Not(check.Equals), "test-master-config")
 	c.Assert(small.SparkWorkerConfig, check.Not(check.Equals), "test-worker-config")
-	c.Assert(myconfig.MasterCount, check.Equals, small.MasterCount)
-	c.Assert(myconfig.WorkerCount, check.Equals, small.WorkerCount)
+	c.Assert(myconfig.MastersCount, check.Equals, small.MastersCount)
+	c.Assert(myconfig.WorkersCount, check.Equals, small.WorkersCount)
 	c.Assert(err, check.IsNil)
 }
 
@@ -303,16 +303,16 @@ func (s *OshinkoUnitTestSuite) TestGetClusterBadConfig(c *check.C) {
 	// configarg will represent a config object passed in a REST
 	// request which specifies a named config but leaves counts unset
 	configarg := clusters.ClusterConfig{
-		WorkerCount: clusters.SentinelCountValue,
-		MasterCount: clusters.SentinelCountValue}
+		WorkersCount: clusters.SentinelCountValue,
+		MastersCount: clusters.SentinelCountValue}
 
 	// brokenmaster should result in an error because the mastercount is != 1
 	cm.Create(makeConfigMap(brokenMaster))
 	configarg.Name = brokenMaster.Name
 	myconfig, err := clusters.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, brokenMaster.MasterCount)
-	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
-	c.Assert(brokenMaster.MasterCount, check.Not(check.Equals), 1)
+	c.Assert(myconfig.MastersCount, check.Equals, brokenMaster.MastersCount)
+	c.Assert(myconfig.WorkersCount, check.Equals, defconfig.WorkersCount)
+	c.Assert(brokenMaster.MastersCount, check.Not(check.Equals), 1)
 	c.Assert(err, check.NotNil)
 	c.Assert(err.Error(), check.Equals, clusters.MasterCountMustBeZeroOrOne)
 }
@@ -322,11 +322,11 @@ func (s *OshinkoUnitTestSuite) TestGetClusterNoConfig(c *check.C) {
 	var cm *FakeConfigMapsClient = &FakeConfigMapsClient{}
 
 	defconfig := clusters.GetDefaultConfig()
-	configarg := clusters.ClusterConfig{WorkerCount: 0, MasterCount: 0, Name: "notthere"}
+	configarg := clusters.ClusterConfig{WorkersCount: 0, MastersCount: 0, Name: "notthere"}
 
 	myconfig, err := clusters.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, defconfig.MasterCount)
-	c.Assert(myconfig.WorkerCount, check.Equals, defconfig.WorkerCount)
+	c.Assert(myconfig.MastersCount, check.Equals, defconfig.MastersCount)
+	c.Assert(myconfig.WorkersCount, check.Equals, defconfig.WorkersCount)
 	c.Assert(err, check.NotNil)
 	c.Assert(err.Error(), check.Equals, fmt.Sprintf(clusters.NamedConfigDoesNotExist, "notthere"))
 }
@@ -337,7 +337,7 @@ func (s *OshinkoUnitTestSuite) TestGetClusterNonInts(c *check.C) {
 
 	// configarg will represent a config object passed in a REST
 	// request which specifies a named config but leaves counts unset
-	configarg := clusters.ClusterConfig{WorkerCount: 0, MasterCount: 0}
+	configarg := clusters.ClusterConfig{WorkersCount: 0, MastersCount: 0}
 
 	m := makeConfigMap(nonIntMaster)
 	m.Data["mastercount"] = "fish"
@@ -380,17 +380,17 @@ func (s *OshinkoUnitTestSuite) TestGetClusterBadElements(c *check.C) {
 	var cm *FakeConfigMapsClient = &FakeConfigMapsClient{}
 
 	configarg := clusters.ClusterConfig{
-		Name: small.Name,
-		WorkerCount: clusters.SentinelCountValue,
-		MasterCount: clusters.SentinelCountValue}
+		Name:         small.Name,
+		WorkersCount: clusters.SentinelCountValue,
+		MastersCount: clusters.SentinelCountValue}
 
 	sm := makeConfigMap(small)
 	sm.Data["somethingelse"] = "chicken"
 	cm.Create(sm)
 
 	myconfig, err := clusters.GetClusterConfig(&configarg, cm)
-	c.Assert(myconfig.MasterCount, check.Equals, small.MasterCount)
-	c.Assert(myconfig.WorkerCount, check.Equals, small.WorkerCount)
+	c.Assert(myconfig.MastersCount, check.Equals, small.MastersCount)
+	c.Assert(myconfig.WorkersCount, check.Equals, small.WorkersCount)
 	c.Assert(myconfig.SparkMasterConfig, check.Equals, small.SparkMasterConfig)
 	c.Assert(myconfig.SparkWorkerConfig, check.Equals, small.SparkWorkerConfig)
 	c.Assert(err, check.IsNil)
