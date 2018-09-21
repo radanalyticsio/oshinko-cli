@@ -43,12 +43,7 @@ func (o *CmdOptions) RunClusters() error {
 
 	if o.Name != "" {
 		c, err := clusters.FindSingleCluster(o.Name, o.Project, o.Config)
-		//return empty json/yaml when no cluster found
-		if err!=nil  && o.Output!=""{
-			msg +="{}"
-			fmt.Println(msg)
-			return nil
-		} else if err!=nil && o.Output==""{
+		if err!=nil {
 			return err
 		}
 		clist = []clusters.SparkCluster{c}
