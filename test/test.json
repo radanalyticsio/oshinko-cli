@@ -1,0 +1,101 @@
+{
+   "kind": "Template",
+   "apiVersion": "v1",
+   "metadata": {
+      "name": "test-loop"
+   },
+   "labels": {
+      "application": "test-loop"
+   },
+   "objects": [
+      {
+         "kind": "ImageStream",
+         "apiVersion": "v1",
+         "metadata": {
+            "name": "test-loop-is"
+         },
+         "spec": {
+            "dockerImageRepository": "test-loop",
+            "lookupPolicy": {
+                "local": true
+            },
+            "tags": [
+               {
+                  "name": "latest"
+               }
+            ]
+         }
+      },
+      {
+         "kind": "BuildConfig",
+         "apiVersion": "v1",
+         "metadata": {
+            "name": "test-loop-build"
+         },
+         "spec": {
+            "source": {
+              "type":"Dockerfile",
+              "dockerfile": "FROM centos:latest\nCMD while true ; do continue ; done"
+            },
+            "strategy": {
+               "type": "Docker",
+               "dockerStrategy": {
+                  "from": {
+                     "kind": "DockerImage",
+                     "name": "centos:latest",
+                     "forcePull": false
+                  }
+               }
+            },
+            "output": {
+               "to": {
+                  "kind": "ImageStreamTag",
+                  "name": "test-loop-is:latest"
+               }
+            },
+            "triggers": [
+              {
+                "type": "ConfigChange"
+              }
+            ]
+         }
+      },
+      {
+        "kind": "DeploymentConfig",
+        "apiVersion": "v1",
+        "metadata": {
+          "name":"test-loop-dc"
+        },
+        "spec":{
+          "replicas": 1,
+          "selector": {
+            "deploymentConfig": "test-loop-dc"
+          },
+          "strategy":{
+            "type": "Recreate"
+          },
+          "template":{
+            "metadata": {
+              "labels": {
+                "deploymentConfig": "test-loop-dc"
+              },
+              "name": "test-loop"
+            },
+            "spec":{
+              "containers":[
+                {
+                  "name": "test-loop",
+                  "image": "test-loop-is:latest",
+                  "imagePullPolicy": "Always"
+                }
+              ]
+            }
+          }
+        },
+
+        "strategy": {
+          "type": "rolling"
+        }
+      }
+   ]
+}
